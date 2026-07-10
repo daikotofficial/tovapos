@@ -1,0 +1,14 @@
+<svg width="720" height="180" viewBox="0 0 720 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="180" height="180" rx="40" fill="#071412"/>
+  <path d="M44 48C44 41.373 49.373 36 56 36H124C130.627 36 136 41.373 136 48V132C136 138.627 130.627 144 124 144H56C49.373 144 44 138.627 44 132V48Z" fill="#0C211E"/>
+  <path d="M59 36H121C129.284 36 136 42.716 136 51V67H44V51C44 42.716 50.716 36 59 36Z" fill="#19B8A6"/>
+  <path d="M65 56H80" stroke="white" stroke-width="8" stroke-linecap="round"/>
+  <path d="M100 56H115" stroke="white" stroke-width="8" stroke-linecap="round"/>
+  <path d="M62 86H118" stroke="#F4B33D" stroke-width="10" stroke-linecap="round"/>
+  <path d="M62 107H102" stroke="#19B8A6" stroke-width="10" stroke-linecap="round"/>
+  <path d="M62 128H88" stroke="white" stroke-opacity="0.78" stroke-width="10" stroke-linecap="round"/>
+  <path d="M104 125L117 138L145 103" stroke="white" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M104 125L117 138L145 103" stroke="#19B8A6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="214" y="88" fill="#071412" font-family="Inter, Arial, sans-serif" font-size="54" font-weight="800" letter-spacing="0">TOVAPOS</text>
+  <text x="217" y="124" fill="#596662" font-family="Inter, Arial, sans-serif" font-size="21" font-weight="600" letter-spacing="0">Your trusted sales agent...</text>
+</svg>
