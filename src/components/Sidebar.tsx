@@ -21,6 +21,7 @@ import {
   WalletCards,
   Bell,
   Tags,
+  History,
 } from 'lucide-react';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission } from '@/lib/pos/types';
@@ -35,12 +36,14 @@ interface NavItem {
   group: string;
   permission: Permission;
   order: number;
+  adminOnly?: boolean;
 }
 
 interface ReportNavItem {
   id: string;
   label: string;
   href: string;
+  permission?: Permission;
 }
 
 const navItems: NavItem[] = [
@@ -137,13 +140,23 @@ const navItems: NavItem[] = [
     order: 1,
   },
   {
+    id: 'nav-sync-logs',
+    label: 'Sync Logs',
+    href: '/sync-logs',
+    icon: History,
+    group: 'Admin',
+    permission: 'sync-logs',
+    order: 2,
+    adminOnly: true,
+  },
+  {
     id: 'nav-notifications',
     label: 'Notifications',
     href: '/notifications',
     icon: Bell,
     group: 'Admin',
     permission: 'notifications',
-    order: 2,
+    order: 3,
   },
   {
     id: 'nav-settings',
@@ -151,31 +164,46 @@ const navItems: NavItem[] = [
     href: '/settings',
     icon: Settings,
     group: 'Admin',
-    permission: 'settings',
-    order: 3,
+    permission: 'dashboard',
+    order: 4,
   },
 ];
 
 const reportItems: ReportNavItem[] = [
   { id: 'report-overview', label: 'Overview', href: '/reports?view=overview' },
   { id: 'report-sales', label: 'Sales', href: '/reports?view=sales' },
-  { id: 'report-credit-sales', label: 'Credit Sales', href: '/reports?view=credit-sales' },
+  {
+    id: 'report-credit-sales',
+    label: 'Credit Sales',
+    href: '/reports?view=credit-sales',
+    permission: 'credit-sales',
+  },
   { id: 'report-cashier', label: 'By Cashier', href: '/reports?view=sales-by-cashier' },
   { id: 'report-product', label: 'By Product', href: '/reports?view=sales-by-product' },
   { id: 'report-category', label: 'By Category', href: '/reports?view=sales-by-category' },
   { id: 'report-payment', label: 'Payments', href: '/reports?view=payment-methods' },
-  { id: 'report-profit', label: 'Profit', href: '/reports?view=profit' },
+  { id: 'report-profit', label: 'Profit', href: '/reports?view=profit', permission: 'view-profit' },
   { id: 'report-inventory', label: 'Inventory', href: '/reports?view=inventory' },
   { id: 'report-low-stock', label: 'Low Stock', href: '/reports?view=low-stock' },
   { id: 'report-expiring', label: 'Expiring', href: '/reports?view=expiring' },
   { id: 'report-expired', label: 'Expired', href: '/reports?view=expired' },
   { id: 'report-stock-ledger', label: 'Stock Movement', href: '/reports?view=stock-ledger' },
-  { id: 'report-expenses', label: 'Expenses', href: '/reports?view=expenses' },
+  {
+    id: 'report-expenses',
+    label: 'Expenses',
+    href: '/reports?view=expenses',
+    permission: 'expenses',
+  },
   { id: 'report-customers', label: 'Customers', href: '/reports?view=customers' },
-  { id: 'report-suppliers', label: 'Suppliers', href: '/reports?view=suppliers' },
+  {
+    id: 'report-suppliers',
+    label: 'Suppliers',
+    href: '/reports?view=suppliers',
+    permission: 'vendors',
+  },
   { id: 'report-tax', label: 'VAT / Tax', href: '/reports?view=vat' },
   { id: 'report-discounts', label: 'Discounts', href: '/reports?view=discounts' },
-  { id: 'report-refunds', label: 'Refunds', href: '/reports?view=refunds' },
+  { id: 'report-refunds', label: 'Refunds', href: '/reports?view=refunds', permission: 'refunds' },
   { id: 'report-voided', label: 'Voided Sales', href: '/reports?view=voided' },
   { id: 'report-closing', label: 'Cashier Closing', href: '/reports?view=cashier-closing' },
   { id: 'report-eod', label: 'End of Day', href: '/reports?view=end-of-day' },
@@ -238,7 +266,14 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin py-2 pb-4">
         {groups.map((group) => {
           const items = navItems
-            .filter((n) => n.group === group && hasPermission(n.permission))
+            .filter(
+              (n) =>
+                n.group === group &&
+                hasPermission(n.permission) &&
+                (!n.adminOnly ||
+                  currentUser?.role === 'owner' ||
+                  currentUser?.role === 'super-admin')
+            )
             .sort((a, b) => a.order - b.order);
           const showReports = group === 'Insights' && hasPermission('reports');
           if (items.length === 0 && !showReports) return null;
@@ -278,24 +313,26 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
                   )}
                   {!collapsed && reportsOpen && (
                     <div className="ml-6 mt-1 space-y-1 border-l border-border pl-2">
-                      {reportItems.map((report) => {
-                        const isReportActive =
-                          pathname === '/reports' && report.href.includes(`view=${activeReport}`);
-                        return (
-                          <Link
-                            key={report.id}
-                            href={report.href}
-                            onClick={onNavigate}
-                            className={`block rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
-                              isReportActive
-                                ? 'bg-primary/10 text-primary'
-                                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                            }`}
-                          >
-                            {report.label}
-                          </Link>
-                        );
-                      })}
+                      {reportItems
+                        .filter((report) => !report.permission || hasPermission(report.permission))
+                        .map((report) => {
+                          const isReportActive =
+                            pathname === '/reports' && report.href.includes(`view=${activeReport}`);
+                          return (
+                            <Link
+                              key={report.id}
+                              href={report.href}
+                              onClick={onNavigate}
+                              className={`block rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
+                                isReportActive
+                                  ? 'bg-primary/10 text-primary'
+                                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                              }`}
+                            >
+                              {report.label}
+                            </Link>
+                          );
+                        })}
                     </div>
                   )}
                 </div>
@@ -373,9 +410,14 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
               </p>
             </div>
             <button
-              onClick={() => {
-                signOut();
-                router.push('/sign-up-login');
+              onClick={async () => {
+                try {
+                  await signOut();
+                  router.replace('/sign-up-login');
+                  router.refresh();
+                } catch (error) {
+                  window.alert(error instanceof Error ? error.message : 'Unable to sign out');
+                }
               }}
               className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-danger transition-colors duration-150"
               title="Sign out"

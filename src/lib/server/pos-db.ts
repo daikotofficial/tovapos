@@ -11,6 +11,20 @@ export function getPosPool(): Pool {
   if (!pool) {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
+      max: Math.max(2, Number(process.env.DATABASE_POOL_MAX) || 10),
+      connectionTimeoutMillis: Math.max(
+        1_000,
+        Number(process.env.DATABASE_CONNECT_TIMEOUT_MS) || 5_000
+      ),
+      idleTimeoutMillis: Math.max(5_000, Number(process.env.DATABASE_IDLE_TIMEOUT_MS) || 30_000),
+      statement_timeout: Math.max(
+        1_000,
+        Number(process.env.DATABASE_STATEMENT_TIMEOUT_MS) || 15_000
+      ),
+      query_timeout: Math.max(1_000, Number(process.env.DATABASE_QUERY_TIMEOUT_MS) || 20_000),
+    });
+    pool.on('error', (error) => {
+      console.error('Unexpected idle PostgreSQL connection error', error);
     });
   }
 

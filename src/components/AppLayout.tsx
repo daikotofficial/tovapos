@@ -38,15 +38,13 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
 
   React.useEffect(() => {
     if (isHydrated && !isAuthenticated) {
-      router.replace('/sign-up-login');
+      router.replace('/sign-up-login?authError=session');
     }
   }, [isAuthenticated, isHydrated, router]);
 
   if (!isHydrated || !isAuthenticated) {
     return (
-      <BrandLoader
-        message={isHydrated ? 'Taking you to sign in...' : 'Loading secure workspace...'}
-      />
+      <BrandLoader message={isHydrated ? 'Taking you to sign in...' : 'Preparing TOVAPOS...'} />
     );
   }
 

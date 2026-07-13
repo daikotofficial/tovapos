@@ -1,5 +1,7 @@
 # Next.js
 
+> Security and offline behavior are documented in [docs/SECURITY_OFFLINE_ARCHITECTURE.md](docs/SECURITY_OFFLINE_ARCHITECTURE.md). Sign-in uses a globally unique email address and password; tenant selection is resolved securely on the server.
+
 A modern Next.js 15 application built with TypeScript and Tailwind CSS.
 
 ## 🚀 Features
@@ -11,18 +13,21 @@ A modern Next.js 15 application built with TypeScript and Tailwind CSS.
 ## 🛠️ Installation
 
 1. Install dependencies:
-  ```bash
-  npm install
-  # or
-  yarn install
-  ```
+
+```bash
+npm install
+# or
+yarn install
+```
 
 2. Start the development server:
-  ```bash
-  npm run dev
-  # or
-  yarn dev
-  ```
+
+```bash
+npm run dev
+# or
+yarn dev
+```
+
 3. Open [http://localhost:4028](http://localhost:4028) with your browser to see the result.
 
 ## 📁 Project Structure
@@ -50,6 +55,7 @@ You can start editing the page by modifying `src/app/page.tsx`. The page auto-up
 ## 🎨 Styling
 
 This project uses Tailwind CSS for styling with the following features:
+
 - Utility-first approach for rapid development
 - Custom theme configuration
 - Responsive design utilities
@@ -67,11 +73,15 @@ This project uses Tailwind CSS for styling with the following features:
 
 ## 📱 Deployment
 
-Build the application for production:
+Render deployment configuration is included in `render.yaml`. Configure the secrets from `.env.example` in Render, then follow [the go-live checklist](docs/RENDER_GO_LIVE.md).
 
-  ```bash
-  npm run build
-  ```
+Build and run the application locally in production mode:
+
+```bash
+npm ci
+npm run build
+npm start
+```
 
 ## 📚 Learn More
 

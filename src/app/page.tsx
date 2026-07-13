@@ -55,7 +55,7 @@ const featureRows = [
   ['Access control', 'Create roles for admins, managers, stock officers, and cashiers.'],
   [
     'Online and offline sync',
-    'Keep selling locally, then sync transactions when the network returns.',
+    'Keep selling during short outages; updates are sent automatically when the network returns.',
   ],
   ['Customer tracking', 'Record loyalty points, credit limits, buying history, and repeat value.'],
 ];
@@ -201,7 +201,7 @@ export default function LandingPage() {
             <div>
               <p className="text-xs font-bold uppercase text-[#128174]">Product</p>
               <h2 className="mt-3 text-3xl font-bold leading-tight text-[#071412] sm:text-4xl">
-                A cleaner workspace for daily sales decisions.
+                A clearer view of daily sales decisions.
               </h2>
               <p className="mt-4 text-sm leading-7 text-[#596662] sm:text-base">
                 Cashiers move faster, stock officers stay ahead, managers control access, and owners

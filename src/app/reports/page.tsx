@@ -29,7 +29,7 @@ import {
   type SalesMetrics,
 } from '@/lib/pos/local-store';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
-import type { SaleTransaction } from '@/lib/pos/types';
+import type { Permission, SaleTransaction } from '@/lib/pos/types';
 
 type ReportView = string;
 
@@ -449,16 +449,35 @@ export default function ReportsPage() {
 function ReportsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const {
+    sales,
+    expenses,
+    inventory,
+    stockMovements,
+    customers,
+    vendors,
+    syncQueue,
+    settings,
+    hasPermission,
+  } = usePosStore();
   const requestedView = searchParams.get('view') as ReportView | null;
-  const activeView: ReportView = reports.some((report) => report.id === requestedView)
-    ? requestedView!
-    : 'overview';
+  const requiredPermission: Partial<Record<ReportView, Permission>> = {
+    'credit-sales': 'credit-sales',
+    profit: 'view-profit',
+    expenses: 'expenses',
+    suppliers: 'vendors',
+    refunds: 'refunds',
+  };
+  const requestedPermission = requestedView ? requiredPermission[requestedView] : undefined;
+  const activeView: ReportView =
+    reports.some((report) => report.id === requestedView) &&
+    (!requestedPermission || hasPermission(requestedPermission))
+      ? requestedView!
+      : 'overview';
   const [range, setRange] = useState<ReportRange>(() => createRange('1m'));
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
   const [serverReportRows, setServerReportRows] = useState<Record<string, unknown[]>>({});
-  const { sales, expenses, inventory, stockMovements, customers, vendors, syncQueue, settings } =
-    usePosStore();
 
   useEffect(() => {
     let cancelled = false;
@@ -803,7 +822,7 @@ function ReportsContent() {
           'Credit Due',
           'Sync',
         ],
-        rows: data.completedSales.map((sale) => [
+        rows: displaySalesRows.map((sale) => [
           sale.transactionId,
           new Date(sale.timestamp).toLocaleString(),
           sale.customerName ?? 'Walk-in Customer',
@@ -837,7 +856,7 @@ function ReportsContent() {
           'Cashier',
           'Sync',
         ],
-        rows: data.creditSales.map((sale) => [
+        rows: displayCreditSalesRows.map((sale) => [
           sale.transactionId,
           new Date(sale.timestamp).toLocaleString(),
           sale.customerName ?? 'Walk-in Customer',
@@ -856,7 +875,7 @@ function ReportsContent() {
       return {
         filename: 'profit-report',
         headers: ['Product', 'Units', 'Revenue', 'Profit', 'Margin'],
-        rows: data.productRows.map((product) => [
+        rows: displayProductRows.map((product) => [
           product.name,
           product.qty.toString(),
           product.revenue.toFixed(2),
@@ -870,7 +889,7 @@ function ReportsContent() {
       return {
         filename: 'expense-report',
         headers: ['Expense', 'Category', 'Date', 'Method', 'Recorded By', 'Amount'],
-        rows: data.recordedExpenses.map((expense) => [
+        rows: displayExpenseRows.map((expense) => [
           expense.title,
           expense.category,
           expense.incurredAt,
@@ -885,12 +904,14 @@ function ReportsContent() {
       return {
         filename: 'payment-methods-report',
         headers: ['Method', 'Transactions', 'Collected', 'Credit Due', 'Total'],
-        rows: data.paymentTotals.map((item) => [
+        rows: displayPaymentRows.map((item) => [
           paymentMethodLabel(item.method),
           item.count.toString(),
-          (item.collected + item.creditCollected).toFixed(2),
+          (item.collected + ('creditCollected' in item ? Number(item.creditCollected) : 0)).toFixed(
+            2
+          ),
           item.receivable.toFixed(2),
-          (item.total + item.creditCollected).toFixed(2),
+          (item.total + ('creditCollected' in item ? Number(item.creditCollected) : 0)).toFixed(2),
         ]),
       };
     }
@@ -1009,7 +1030,16 @@ function ReportsContent() {
         ['Pending Sync', data.pendingSync.toString()],
       ],
     };
-  }, [activeView, data, inventory]);
+  }, [
+    activeView,
+    data,
+    displayCreditSalesRows,
+    displayExpenseRows,
+    displayPaymentRows,
+    displayProductRows,
+    displaySalesRows,
+    inventory,
+  ]);
 
   const exportReport = (format: 'csv' | 'json' | 'excel' | 'pdf') => {
     const activeReport = reports.find((report) => report.id === activeView);
@@ -1114,10 +1144,15 @@ function ReportsContent() {
                   value={activeView}
                   onChange={(value) => router.push(`/reports?view=${value}`)}
                   className="mt-1"
-                  options={reports.map((report) => ({
-                    value: report.id,
-                    label: report.label,
-                  }))}
+                  options={reports
+                    .filter((report) => {
+                      const permission = requiredPermission[report.id];
+                      return !permission || hasPermission(permission);
+                    })
+                    .map((report) => ({
+                      value: report.id,
+                      label: report.label,
+                    }))}
                 />
               </div>
             </div>
@@ -1180,40 +1215,42 @@ function ReportsContent() {
                   </label>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => exportReport('csv')}
-                    className="flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary/90"
-                  >
-                    <Download size={14} />
-                    CSV
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => exportReport('excel')}
-                    className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <Download size={14} />
-                    Excel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => exportReport('pdf')}
-                    className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <Download size={14} />
-                    PDF
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => exportReport('json')}
-                    className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <Download size={14} />
-                    JSON
-                  </button>
-                </div>
+                {hasPermission('export-reports') && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => exportReport('csv')}
+                      className="flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary/90"
+                    >
+                      <Download size={14} />
+                      CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => exportReport('excel')}
+                      className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <Download size={14} />
+                      Excel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => exportReport('pdf')}
+                      className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <Download size={14} />
+                      PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => exportReport('json')}
+                      className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <Download size={14} />
+                      JSON
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
@@ -1248,7 +1285,7 @@ function ReportsContent() {
             <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
               <ReportTable
                 title="Recent sales movement"
-                subtitle={`${data.pendingSync} local change${data.pendingSync === 1 ? '' : 's'} waiting to sync`}
+                subtitle={`${data.pendingSync} update${data.pendingSync === 1 ? '' : 's'} waiting to be sent`}
                 headers={['Receipt', 'Customer', 'Payment', 'Status', 'Collected', 'Credit Due']}
                 empty="No sales recorded yet."
                 rows={displaySalesRows

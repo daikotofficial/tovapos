@@ -43,6 +43,7 @@ const proPermissions: Permission[] = [
   'view-profit',
   'view-cost-price',
   'branches',
+  'sync-logs',
   'expense-heads',
 ];
 
@@ -54,7 +55,7 @@ export const subscriptionPlans: Record<SubscriptionPlanId, SubscriptionPlan> = {
     productLimit: 100000,
     description: 'For stores that need reliable POS, inventory, customers, and daily visibility.',
     features: [
-      'Up to 100,000 products',
+      'Up to 100,000 distinct product/batch records (stock quantity is unlimited)',
       'POS sales and receipt history',
       'Barcode, SKU, and product-name checkout',
       'Inventory, batches, expiry, and reorder alerts',
@@ -74,13 +75,14 @@ export const subscriptionPlans: Record<SubscriptionPlanId, SubscriptionPlan> = {
     highlight: true,
     features: [
       'Everything in Starter',
-      'Up to 500,000 products',
+      'Up to 500,000 distinct product/batch records (stock quantity is unlimited)',
       'Credit sales reconciliation with full or part payments',
       'Advanced reports and CSV/Excel/PDF/JSON exports',
       'Users, roles, and permission control',
       'Expenses, expense heads, and supplier tracking',
       'Profit, cost-price, and manager control reports',
       'Refund workflow and profit/cost visibility',
+      'Admin-only Sync Logs with retry and discrepancy resolution',
       'Multi-branch-ready controls and sync audit trail',
     ],
     permissions: proPermissions,

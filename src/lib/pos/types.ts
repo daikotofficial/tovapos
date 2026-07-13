@@ -229,6 +229,7 @@ export type Permission =
   | 'manage-tax'
   | 'branches'
   | 'notifications'
+  | 'sync-logs'
   | 'categories'
   | 'expense-heads';
 
@@ -256,6 +257,7 @@ export interface TovaUser {
   passwordHash?: string;
   passwordSalt?: string;
   passwordUpdatedAt?: string;
+  newPassword?: string;
   lastLogin?: string;
   createdAt: string;
   updatedAt?: string;

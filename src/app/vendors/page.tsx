@@ -45,10 +45,7 @@ export default function VendorsPage() {
   };
 
   return (
-    <AppLayout
-      title="Vendors"
-      subtitle="Manage suppliers/vendors and purchase relationships locally"
-    >
+    <AppLayout title="Vendors" subtitle="Manage suppliers, contacts, and purchasing relationships">
       <PermissionGate permission="vendors">
         <div className="p-6 max-w-screen-2xl mx-auto space-y-5">
           <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">

@@ -14,6 +14,7 @@ import { defaultSettings } from './seeds';
 
 const DB_NAME = 'tovapos-local-first';
 const DB_VERSION = 4;
+let activeTenantId = 'anonymous';
 
 type StoreName =
   | 'inventory'
@@ -101,11 +102,18 @@ function canUseIndexedDb(): boolean {
 }
 
 function storageKey(storeName: StoreName): string {
-  return `tovapos.${storeName}`;
+  return `tovapos.${activeTenantId}.${storeName}`;
 }
 
-function cleanForBrowserStorage<T extends { id: string }>(item: T): T {
-  const { _expectedUpdatedAt, ...cleanItem } = item as T & { _expectedUpdatedAt?: string };
+function cleanForBrowserStorage<T extends { id: string }>(item: T, storeName?: StoreName): T {
+  const cleanItem = { ...item } as Record<string, unknown>;
+  delete cleanItem._expectedUpdatedAt;
+  if (storeName === 'users') {
+    delete cleanItem.passwordHash;
+    delete cleanItem.passwordSalt;
+    delete cleanItem.newPassword;
+    cleanItem.pin = '';
+  }
   return cleanItem as T;
 }
 
@@ -114,6 +122,14 @@ function shouldUsePostgresStore(): boolean {
     typeof window !== 'undefined' &&
     typeof fetch !== 'undefined' &&
     process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres'
+  );
+}
+
+function isNetworkFailure(error: unknown): boolean {
+  return (
+    (typeof navigator !== 'undefined' && !navigator.onLine) ||
+    error instanceof TypeError ||
+    (error instanceof Error && /fetch|network|load failed/i.test(error.message))
   );
 }
 
@@ -128,6 +144,7 @@ async function apiRequest<T>(
   });
   const response = await fetch(`/api/pos-store?${query.toString()}`, {
     ...init,
+    signal: init?.signal ?? AbortSignal.timeout(10_000),
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
@@ -156,22 +173,101 @@ async function getAllFromBrowser<T>(storeName: StoreName): Promise<T[]> {
   return records;
 }
 
+async function putOneInBrowser<T extends { id: string }>(
+  storeName: StoreName,
+  item: T
+): Promise<void> {
+  if (!canUseIndexedDb()) {
+    const raw = window.localStorage.getItem(storageKey(storeName));
+    const existing = raw ? (JSON.parse(raw) as T[]) : [];
+    const cleanItem = cleanForBrowserStorage(item, storeName);
+    window.localStorage.setItem(
+      storageKey(storeName),
+      JSON.stringify([...existing.filter((record) => record.id !== item.id), cleanItem])
+    );
+    return;
+  }
+  const db = await openDb();
+  const transaction = db.transaction(storeName, 'readwrite');
+  const done = transactionDone(transaction);
+  transaction.objectStore(storeName).put(cleanForBrowserStorage(item, storeName));
+  await done;
+}
+
+async function putManyInBrowser<T extends { id: string }>(
+  storeName: StoreName,
+  items: T[]
+): Promise<void> {
+  if (!canUseIndexedDb()) {
+    const raw = window.localStorage.getItem(storageKey(storeName));
+    const existing = raw ? (JSON.parse(raw) as T[]) : [];
+    const cleanItems = items.map((item) => cleanForBrowserStorage(item, storeName));
+    const incoming = new Set(cleanItems.map((item) => item.id));
+    window.localStorage.setItem(
+      storageKey(storeName),
+      JSON.stringify([...existing.filter((record) => !incoming.has(record.id)), ...cleanItems])
+    );
+    return;
+  }
+  const db = await openDb();
+  const transaction = db.transaction(storeName, 'readwrite');
+  const done = transactionDone(transaction);
+  const store = transaction.objectStore(storeName);
+  items.forEach((item) => store.put(cleanForBrowserStorage(item, storeName)));
+  await done;
+}
+
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    const timeout = window.setTimeout(
+      () => reject(new Error('Browser storage request timed out')),
+      5_000
+    );
+    request.onsuccess = () => {
+      window.clearTimeout(timeout);
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      window.clearTimeout(timeout);
+      reject(request.error);
+    };
   });
 }
 
 function transactionDone(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error);
+    const timeout = window.setTimeout(() => {
+      try {
+        transaction.abort();
+      } catch {
+        // The transaction may already be complete.
+      }
+      reject(new Error('Browser storage transaction timed out'));
+    }, 5_000);
+    transaction.oncomplete = () => {
+      window.clearTimeout(timeout);
+      resolve();
+    };
+    transaction.onerror = () => {
+      window.clearTimeout(timeout);
+      reject(transaction.error);
+    };
+    transaction.onabort = () => {
+      window.clearTimeout(timeout);
+      reject(transaction.error ?? new Error('Browser storage transaction was cancelled'));
+    };
   });
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+
+export function setLocalTenant(tenantId: string): void {
+  const normalized = tenantId.trim() || 'anonymous';
+  if (normalized === activeTenantId) return;
+  if (dbPromise) void dbPromise.then((database) => database.close()).catch(() => undefined);
+  dbPromise = null;
+  activeTenantId = normalized;
+}
 
 export async function ensureCleanLocalDatabase(): Promise<void> {
   return Promise.resolve();
@@ -183,8 +279,13 @@ function openDb(): Promise<IDBDatabase> {
   }
 
   if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
-      const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+    const pending = new Promise<IDBDatabase>((resolve, reject) => {
+      const request = window.indexedDB.open(`${DB_NAME}-${activeTenantId}`, DB_VERSION);
+      let settled = false;
+      const timeout = window.setTimeout(() => {
+        settled = true;
+        reject(new Error('Browser storage is blocked. Close older TOVAPOS tabs and try again.'));
+      }, 4_000);
 
       request.onupgradeneeded = () => {
         const db = request.result;
@@ -195,8 +296,24 @@ function openDb(): Promise<IDBDatabase> {
         });
       };
 
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        window.clearTimeout(timeout);
+        if (settled) request.result.close();
+        else resolve(request.result);
+      };
+      request.onerror = () => {
+        window.clearTimeout(timeout);
+        reject(request.error);
+      };
+      request.onblocked = () => {
+        window.clearTimeout(timeout);
+        settled = true;
+        reject(new Error('Browser storage is blocked. Close older TOVAPOS tabs and try again.'));
+      };
+    });
+    dbPromise = pending;
+    void pending.catch(() => {
+      if (dbPromise === pending) dbPromise = null;
     });
   }
 
@@ -206,7 +323,17 @@ function openDb(): Promise<IDBDatabase> {
 async function getAll<T>(storeName: StoreName): Promise<T[]> {
   if (shouldUsePostgresStore()) {
     try {
-      return await apiRequest<T[]>(storeName);
+      const records = await apiRequest<T[]>(storeName);
+      void putManyInBrowser(
+        storeName,
+        records.filter(
+          (record): record is T & { id: string } =>
+            Boolean(record) &&
+            typeof record === 'object' &&
+            typeof (record as { id?: unknown }).id === 'string'
+        )
+      ).catch((error) => console.warn(`Unable to cache ${storeName} in this browser`, error));
+      return records;
     } catch (error) {
       console.error(`Failed to load ${storeName} from Postgres store`, error);
     }
@@ -217,52 +344,53 @@ async function getAll<T>(storeName: StoreName): Promise<T[]> {
 
 async function putOne<T extends { id: string }>(storeName: StoreName, item: T): Promise<void> {
   if (shouldUsePostgresStore()) {
-    await apiRequest<{ ok: true }>(storeName, {
-      method: 'PUT',
-      body: JSON.stringify(item),
-    });
+    try {
+      await apiRequest<{ ok: true }>(storeName, {
+        method: 'PUT',
+        body: JSON.stringify(item),
+      });
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
+    await putOneInBrowser(storeName, item);
     return;
   }
 
   if (!canUseIndexedDb()) {
     const existing = await getAll<T>(storeName);
-    const cleanItem = cleanForBrowserStorage(item);
+    const cleanItem = cleanForBrowserStorage(item, storeName);
     const next = [...existing.filter((record) => record.id !== item.id), cleanItem];
     window.localStorage.setItem(storageKey(storeName), JSON.stringify(next));
     return;
   }
 
-  const db = await openDb();
-  const transaction = db.transaction(storeName, 'readwrite');
-  const done = transactionDone(transaction);
-  transaction.objectStore(storeName).put(cleanForBrowserStorage(item));
-  await done;
+  await putOneInBrowser(storeName, item);
 }
 
 async function putMany<T extends { id: string }>(storeName: StoreName, items: T[]): Promise<void> {
   if (shouldUsePostgresStore()) {
-    await apiRequest<{ ok: true }>(storeName, {
-      method: 'PUT',
-      body: JSON.stringify(items),
-    });
+    try {
+      await apiRequest<{ ok: true }>(storeName, {
+        method: 'PUT',
+        body: JSON.stringify(items),
+      });
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
+    await putManyInBrowser(storeName, items);
     return;
   }
 
   if (!canUseIndexedDb()) {
     const existing = await getAll<T>(storeName);
-    const cleanItems = items.map(cleanForBrowserStorage);
+    const cleanItems = items.map((item) => cleanForBrowserStorage(item, storeName));
     const incoming = new Map(cleanItems.map((item) => [item.id, item]));
     const next = [...existing.filter((record) => !incoming.has(record.id)), ...cleanItems];
     window.localStorage.setItem(storageKey(storeName), JSON.stringify(next));
     return;
   }
 
-  const db = await openDb();
-  const transaction = db.transaction(storeName, 'readwrite');
-  const done = transactionDone(transaction);
-  const store = transaction.objectStore(storeName);
-  items.forEach((item) => store.put(cleanForBrowserStorage(item)));
-  await done;
+  await putManyInBrowser(storeName, items);
 }
 
 async function deleteOne(storeName: StoreName, id: string): Promise<void> {
@@ -292,11 +420,18 @@ async function deleteOne(storeName: StoreName, id: string): Promise<void> {
 
 export async function loadInventory(seed: InventoryItem[]): Promise<InventoryItem[]> {
   if (shouldUsePostgresStore()) {
-    const result = await apiRequest<InventoryPageResult>('inventory', undefined, {
-      limit: 100,
-    });
-    if (result.items.length > 0 || seed.length === 0) {
-      return result.items.map(normalizeInventoryItem);
+    try {
+      const result = await apiRequest<InventoryPageResult>('inventory', undefined, {
+        limit: 100,
+      });
+      void putManyInBrowser('inventory', result.items).catch((error) =>
+        console.warn('Unable to cache inventory in this browser', error)
+      );
+      if (result.items.length > 0 || seed.length === 0) {
+        return result.items.map(normalizeInventoryItem);
+      }
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
     }
   }
 
@@ -314,14 +449,21 @@ export async function loadInventoryPage(
   input: InventoryPageInput = {}
 ): Promise<InventoryPageResult> {
   if (shouldUsePostgresStore()) {
-    const result = await apiRequest<InventoryPageResult>('inventory', undefined, {
-      ...input,
-      limit: input.limit ?? 100,
-    });
-    return {
-      ...result,
-      items: result.items.map(normalizeInventoryItem),
-    };
+    try {
+      const result = await apiRequest<InventoryPageResult>('inventory', undefined, {
+        ...input,
+        limit: input.limit ?? 100,
+      });
+      void putManyInBrowser('inventory', result.items).catch((error) =>
+        console.warn('Unable to cache inventory in this browser', error)
+      );
+      return {
+        ...result,
+        items: result.items.map(normalizeInventoryItem),
+      };
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
   }
 
   const allItems = (await getAllFromBrowser<InventoryItem>('inventory')).map(
@@ -487,10 +629,17 @@ export async function loadInventoryByIds(ids: string[]): Promise<InventoryItem[]
   if (uniqueIds.length === 0) return [];
 
   if (shouldUsePostgresStore()) {
-    const records = await apiRequest<InventoryItem[]>('inventory', undefined, {
-      ids: uniqueIds.join(','),
-    });
-    return records.map(normalizeInventoryItem);
+    try {
+      const records = await apiRequest<InventoryItem[]>('inventory', undefined, {
+        ids: uniqueIds.join(','),
+      });
+      void putManyInBrowser('inventory', records).catch((error) =>
+        console.warn('Unable to cache inventory in this browser', error)
+      );
+      return records.map(normalizeInventoryItem);
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
   }
 
   const allItems = await getAllFromBrowser<InventoryItem>('inventory');
@@ -503,10 +652,19 @@ export async function lookupInventoryItem(rawCode: string): Promise<InventoryIte
   if (!scan) return null;
 
   if (shouldUsePostgresStore()) {
-    const result = await apiRequest<{ item: InventoryItem | null }>('inventory', undefined, {
-      scan,
-    });
-    return result.item ? normalizeInventoryItem(result.item) : null;
+    try {
+      const result = await apiRequest<{ item: InventoryItem | null }>('inventory', undefined, {
+        scan,
+      });
+      if (result.item) {
+        void putOneInBrowser('inventory', result.item).catch((error) =>
+          console.warn('Unable to cache the product in this browser', error)
+        );
+      }
+      return result.item ? normalizeInventoryItem(result.item) : null;
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
   }
 
   const { findInventoryItemByScan } = await import('./stock');
@@ -607,8 +765,15 @@ export async function saveStockMovements(movements: StockMovement[]): Promise<vo
 
 export async function loadSales(): Promise<SaleTransaction[]> {
   if (shouldUsePostgresStore()) {
-    const sales = await apiRequest<SaleTransaction[]>('sales', undefined, { limit: 500 });
-    return sales.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    try {
+      const sales = await apiRequest<SaleTransaction[]>('sales', undefined, { limit: 500 });
+      void putManyInBrowser('sales', sales).catch((error) =>
+        console.warn('Unable to cache sales in this browser', error)
+      );
+      return sales.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
   }
 
   const sales = await getAll<SaleTransaction>('sales');
@@ -621,8 +786,15 @@ export async function saveSale(sale: SaleTransaction): Promise<void> {
 
 export async function loadExpenses(): Promise<ExpenseRecord[]> {
   if (shouldUsePostgresStore()) {
-    const expenses = await apiRequest<ExpenseRecord[]>('expenses', undefined, { limit: 500 });
-    return expenses.sort((a, b) => b.incurredAt.localeCompare(a.incurredAt));
+    try {
+      const expenses = await apiRequest<ExpenseRecord[]>('expenses', undefined, { limit: 500 });
+      void putManyInBrowser('expenses', expenses).catch((error) =>
+        console.warn('Unable to cache expenses in this browser', error)
+      );
+      return expenses.sort((a, b) => b.incurredAt.localeCompare(a.incurredAt));
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
   }
 
   const expenses = await getAll<ExpenseRecord>('expenses');
@@ -634,7 +806,7 @@ export async function saveExpense(expense: ExpenseRecord): Promise<void> {
 }
 
 export async function loadSyncQueue(): Promise<SyncQueueItem[]> {
-  const queue = await getAll<SyncQueueItem>('syncQueue');
+  const queue = await getAllFromBrowser<SyncQueueItem>('syncQueue');
   return queue.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
@@ -644,6 +816,127 @@ export async function saveSyncQueueItem(item: SyncQueueItem): Promise<void> {
 
 export async function saveSyncQueueItems(items: SyncQueueItem[]): Promise<void> {
   await putMany('syncQueue', items);
+}
+
+/**
+ * Persists every part of an offline checkout as one IndexedDB transaction.
+ * A browser/process interruption therefore leaves either the complete sale or
+ * none of it, never inventory without its matching sale and replay command.
+ */
+export async function saveOfflineSaleBundle(input: {
+  inventory: InventoryItem[];
+  stockMovements: StockMovement[];
+  sale: SaleTransaction;
+  customer?: Customer | null;
+  queueItems: SyncQueueItem[];
+}): Promise<void> {
+  if (!canUseIndexedDb()) {
+    // localStorage has no cross-key transactions. Keep snapshots so ordinary
+    // quota/write failures can still be rolled back on legacy browsers.
+    const stores: StoreName[] = ['inventory', 'stockMovements', 'sales', 'customers', 'syncQueue'];
+    const snapshots = new Map(
+      stores.map((store) => [store, window.localStorage.getItem(storageKey(store))])
+    );
+    try {
+      await putManyInBrowser('inventory', input.inventory.map(normalizeInventoryItem));
+      await putManyInBrowser('stockMovements', input.stockMovements);
+      await putOneInBrowser('sales', input.sale);
+      if (input.customer) await putOneInBrowser('customers', input.customer);
+      await putManyInBrowser('syncQueue', input.queueItems);
+    } catch (error) {
+      snapshots.forEach((value, store) => {
+        if (value === null) window.localStorage.removeItem(storageKey(store));
+        else window.localStorage.setItem(storageKey(store), value);
+      });
+      throw error;
+    }
+    return;
+  }
+
+  const db = await openDb();
+  const transaction = db.transaction(
+    ['inventory', 'stockMovements', 'sales', 'customers', 'syncQueue'],
+    'readwrite'
+  );
+  const done = transactionDone(transaction);
+  input.inventory.forEach((item) =>
+    transaction
+      .objectStore('inventory')
+      .put(cleanForBrowserStorage(normalizeInventoryItem(item), 'inventory'))
+  );
+  input.stockMovements.forEach((item) =>
+    transaction.objectStore('stockMovements').put(cleanForBrowserStorage(item, 'stockMovements'))
+  );
+  transaction.objectStore('sales').put(cleanForBrowserStorage(input.sale, 'sales'));
+  if (input.customer) {
+    transaction.objectStore('customers').put(cleanForBrowserStorage(input.customer, 'customers'));
+  }
+  input.queueItems.forEach((item) =>
+    transaction.objectStore('syncQueue').put(cleanForBrowserStorage(item, 'syncQueue'))
+  );
+  await done;
+}
+
+/** Persist an offline inventory adjustment and its replay record atomically. */
+export async function saveOfflineStockBundle(input: {
+  inventory: InventoryItem;
+  stockMovement?: StockMovement | null;
+  queueItems: SyncQueueItem[];
+}): Promise<void> {
+  if (!canUseIndexedDb()) {
+    const stores: StoreName[] = ['inventory', 'stockMovements', 'syncQueue'];
+    const snapshots = new Map(
+      stores.map((store) => [store, window.localStorage.getItem(storageKey(store))])
+    );
+    try {
+      await putOneInBrowser('inventory', normalizeInventoryItem(input.inventory));
+      if (input.stockMovement) await putOneInBrowser('stockMovements', input.stockMovement);
+      await putManyInBrowser('syncQueue', input.queueItems);
+    } catch (error) {
+      snapshots.forEach((value, store) => {
+        if (value === null) window.localStorage.removeItem(storageKey(store));
+        else window.localStorage.setItem(storageKey(store), value);
+      });
+      throw error;
+    }
+    return;
+  }
+
+  const db = await openDb();
+  const transaction = db.transaction(['inventory', 'stockMovements', 'syncQueue'], 'readwrite');
+  const done = transactionDone(transaction);
+  transaction
+    .objectStore('inventory')
+    .put(cleanForBrowserStorage(normalizeInventoryItem(input.inventory), 'inventory'));
+  if (input.stockMovement) {
+    transaction
+      .objectStore('stockMovements')
+      .put(cleanForBrowserStorage(input.stockMovement, 'stockMovements'));
+  }
+  input.queueItems.forEach((item) =>
+    transaction.objectStore('syncQueue').put(cleanForBrowserStorage(item, 'syncQueue'))
+  );
+  await done;
+}
+
+export async function cacheInventoryLocally(items: InventoryItem[]): Promise<void> {
+  await putManyInBrowser('inventory', items.map(normalizeInventoryItem));
+}
+
+export async function cacheSalesLocally(items: SaleTransaction[]): Promise<void> {
+  await putManyInBrowser('sales', items);
+}
+
+export async function cacheCustomersLocally(items: Customer[]): Promise<void> {
+  await putManyInBrowser('customers', items);
+}
+
+export async function cacheStockMovementsLocally(items: StockMovement[]): Promise<void> {
+  await putManyInBrowser('stockMovements', items);
+}
+
+export async function cacheSyncQueueLocally(items: SyncQueueItem[]): Promise<void> {
+  await putManyInBrowser('syncQueue', items);
 }
 
 export function createSyncQueueItem(

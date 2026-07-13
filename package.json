@@ -41,12 +41,13 @@
   "scripts": {
     "dev": "next dev -p 4028",
     "build": "next build",
-    "start": "next dev -p 4028",
+    "start": "next start",
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
     "serve": "next start",
     "type-check": "tsc --noEmit",
+    "test:security": "node scripts/verify-security.mjs",
     "db:local:start": "/usr/lib/postgresql/16/bin/pg_ctl -D .pgdata -o \"-p 55432 -k /home/motherrepo/projects/TOVAPOS/tovapos/.pgdata\" -l .pgdata/postgres.log start",
     "db:local:stop": "/usr/lib/postgresql/16/bin/pg_ctl -D .pgdata stop"
   },
@@ -57,7 +58,7 @@
     "@tailwindcss/typography": "^0.5.16",
     "@types/pg": "^8.20.0",
     "lucide-react": "^1.7.0",
-    "next": "15.1.11",
+    "next": "^15.5.20",
     "pg": "^8.22.0",
     "react": "19.0.3",
     "react-dom": "19.0.3",
@@ -78,10 +79,16 @@
     "eslint-config-next": "^15.2.4",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.6",
-    "postcss": "8.4.8",
+    "postcss": "^8.5.10",
     "prettier": "^3.5.3",
     "tailwindcss": "3.4.6",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "$postcss"
+  },
+  "engines": {
+    "node": ">=22.0.0 <23.0.0"
   }
 }

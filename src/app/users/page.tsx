@@ -8,7 +8,6 @@ import Modal from '@/components/ui/Modal';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission, TovaUser, UserRole } from '@/lib/pos/types';
-import { hashPassword } from '@/lib/pos/auth';
 
 const permissions: Permission[] = [
   'dashboard',
@@ -160,6 +159,7 @@ const permissionLabels: Record<Permission, string> = {
   'manage-tax': 'Manage VAT/tax',
   branches: 'Manage branches',
   notifications: 'Manage notifications',
+  'sync-logs': 'Review sync logs',
   categories: 'Manage categories',
   'expense-heads': 'Manage expense heads',
 };
@@ -203,16 +203,14 @@ export default function UsersPage() {
   };
 
   const save = async () => {
-    if (!form.name.trim() || !form.email.trim() || !form.pin.trim()) return;
+    if (!form.name.trim() || !form.email.trim()) return;
     const isExisting = users.some((user) => user.id === form.id);
-    if (!isExisting && loginPassword.length < 8) return;
+    if (!isExisting && (loginPassword.length < 10 || !form.pin.trim())) return;
 
-    const credentials = loginPassword ? await hashPassword(loginPassword) : {};
     await upsertUser({
       ...form,
       email: form.email.trim().toLowerCase(),
-      ...credentials,
-      passwordUpdatedAt: loginPassword ? new Date().toISOString() : form.passwordUpdatedAt,
+      newPassword: loginPassword || undefined,
     });
     setEditing(null);
     setLoginPassword('');
@@ -233,7 +231,7 @@ export default function UsersPage() {
   return (
     <AppLayout
       title="Users & Permissions"
-      subtitle="Create users, assign roles, and control POS access locally"
+      subtitle="Create users, assign roles, and control access"
     >
       <PermissionGate permission="users">
         <div className="p-6 max-w-screen-2xl mx-auto space-y-5">
@@ -247,7 +245,9 @@ export default function UsersPage() {
               <p className="text-3xl font-bold mt-1 text-success">{activeUsers}</p>
             </div>
             <div className="bg-card border border-border rounded-xl p-4 shadow-card">
-              <p className="text-xs text-muted-foreground uppercase font-semibold">Pending Sync</p>
+              <p className="text-xs text-muted-foreground uppercase font-semibold">
+                Updates Waiting
+              </p>
               <p className="text-3xl font-bold mt-1 text-warning">{pendingSyncCount}</p>
             </div>
           </div>
@@ -336,7 +336,7 @@ export default function UsersPage() {
           open={!!editing}
           onClose={() => setEditing(null)}
           title={form.id && users.some((user) => user.id === form.id) ? 'Edit User' : 'Add User'}
-          subtitle="Local changes are saved offline and queued for backend sync."
+          subtitle="Manage staff accounts, roles, and access permissions."
           footer={
             <>
               <button
@@ -421,7 +421,7 @@ export default function UsersPage() {
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                placeholder="Minimum 8 characters"
+                placeholder="Minimum 10 characters"
               />
             </label>
             <label className="space-y-1">

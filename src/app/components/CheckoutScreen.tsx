@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster, toast } from 'sonner';
 import CartPanel from './CartPanel';
 import PaymentPanel from './PaymentPanel';
@@ -52,6 +52,14 @@ export default function CheckoutScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const scanRef = useRef<HTMLInputElement>(null);
+  const globalScanBufferRef = useRef('');
+  const lastGlobalScanKeyAtRef = useRef(0);
+  const cartRef = useRef<CartItem[]>([]);
+  const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
 
   const subtotal = cart.reduce(
     (sum, item) => sum + item.unitPrice * item.quantity * (1 - item.discount / 100),
@@ -72,6 +80,7 @@ export default function CheckoutScreen() {
 
   const handleScan = useCallback(
     async (rawCode: string) => {
+      globalScanBufferRef.current = '';
       if (!isHydrated) {
         toast.error('Inventory is still loading. Try again in a moment.');
         return;
@@ -93,7 +102,7 @@ export default function CheckoutScreen() {
         }
 
         const currentCartQty =
-          cart.find((item) => item.inventoryItemId === product.id)?.quantity ?? 0;
+          cartRef.current.find((item) => item.inventoryItemId === product.id)?.quantity ?? 0;
 
         assertSellable(product, currentCartQty + 1);
 
@@ -111,11 +120,13 @@ export default function CheckoutScreen() {
         setCart((prev) => {
           const existing = prev.find((item) => item.inventoryItemId === product.id);
           if (existing) {
-            return prev.map((item) =>
+            const next = prev.map((item) =>
               item.inventoryItemId === product.id
                 ? { ...item, quantity: item.quantity + 1, availableQty: product.currentQty }
                 : item
             );
+            cartRef.current = next;
+            return next;
           }
 
           const newItem: CartItem = {
@@ -137,7 +148,9 @@ export default function CheckoutScreen() {
             category: product.category,
             availableQty: product.currentQty,
           };
-          return [...prev, newItem];
+          const next = [...prev, newItem];
+          cartRef.current = next;
+          return next;
         });
 
         setScanInput('');
@@ -149,12 +162,64 @@ export default function CheckoutScreen() {
         setIsScanning(false);
       }
     },
-    [cart, isHydrated]
+    [isHydrated]
   );
+
+  const queueScan = useCallback(
+    (rawCode: string) => {
+      const queued = scanQueueRef.current.catch(() => undefined).then(() => handleScan(rawCode));
+      scanQueueRef.current = queued;
+      return queued;
+    },
+    [handleScan]
+  );
+
+  useEffect(() => {
+    const captureScannerInput = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || showReceipt || showRefund) return;
+      const target = event.target as HTMLElement | null;
+      const isEditable =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT' ||
+        target?.isContentEditable;
+      if (isEditable) return;
+
+      if (event.key === 'Enter') {
+        const code = globalScanBufferRef.current.trim();
+        if (!code) return;
+        event.preventDefault();
+        globalScanBufferRef.current = '';
+        setScanInput('');
+        void queueScan(code);
+        return;
+      }
+
+      if (event.key.length !== 1) return;
+      const now = performance.now();
+      if (now - lastGlobalScanKeyAtRef.current > 150) {
+        globalScanBufferRef.current = '';
+      }
+      lastGlobalScanKeyAtRef.current = now;
+      globalScanBufferRef.current += event.key;
+      setScanInput(globalScanBufferRef.current);
+      event.preventDefault();
+    };
+
+    window.addEventListener('keydown', captureScannerInput, true);
+    return () => window.removeEventListener('keydown', captureScannerInput, true);
+  }, [queueScan, showReceipt, showRefund]);
+
+  useEffect(() => {
+    if (isScanning || isProcessing || showReceipt || showRefund) return;
+    const frame = window.requestAnimationFrame(() => scanRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [isProcessing, isScanning, showReceipt, showRefund]);
 
   const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && scanInput.trim()) {
-      void handleScan(scanInput.trim());
+      e.preventDefault();
+      void queueScan(scanInput.trim());
     }
   };
 
@@ -275,7 +340,7 @@ export default function CheckoutScreen() {
       clearCart();
       setShowReceipt(true);
       toast.success(
-        `Payment of ${formatMoney(grandTotal, settings.currency)} recorded. Stock has been reduced locally.`
+        `Payment of ${formatMoney(grandTotal, settings.currency)} recorded. Stock updated.`
       );
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -291,8 +356,8 @@ export default function CheckoutScreen() {
       <div className="flex-1 flex flex-col min-w-0 border-r border-border overflow-hidden">
         {pendingSyncCount > 0 && (
           <div className="px-4 py-2 bg-warning/10 border-b border-warning/20 text-xs font-medium text-warning">
-            {pendingSyncCount} offline/local transaction{pendingSyncCount === 1 ? '' : 's'} waiting
-            for backend sync.
+            {pendingSyncCount} sale{pendingSyncCount === 1 ? '' : 's'} waiting to be sent. This will
+            happen automatically when the connection returns.
           </div>
         )}
         <CartPanel
@@ -300,7 +365,7 @@ export default function CheckoutScreen() {
           scanInput={scanInput}
           setScanInput={setScanInput}
           onScanKeyDown={handleScanKeyDown}
-          onScan={handleScan}
+          onScan={queueScan}
           isScanning={isScanning}
           scanRef={scanRef}
           onUpdateQuantity={updateQuantity}
@@ -309,6 +374,7 @@ export default function CheckoutScreen() {
           removingIds={removingIds}
           onClearCart={clearCart}
           onShowRefund={() => setShowRefund(true)}
+          canRefund={hasPermission('refunds')}
           currency={settings.currency}
           quickProducts={quickProducts}
         />
@@ -348,7 +414,9 @@ export default function CheckoutScreen() {
         />
       )}
 
-      <RefundModal open={showRefund} onClose={() => setShowRefund(false)} />
+      {hasPermission('refunds') && (
+        <RefundModal open={showRefund} onClose={() => setShowRefund(false)} />
+      )}
     </div>
   );
 }

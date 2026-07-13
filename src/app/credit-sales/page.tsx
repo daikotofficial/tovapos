@@ -118,7 +118,7 @@ export default function CreditSalesPage() {
         <div className="mx-auto max-w-screen-2xl space-y-5 p-4 sm:p-6">
           {pendingSyncCount > 0 && (
             <section className="rounded-lg border border-warning/25 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
-              {pendingSyncCount} local change{pendingSyncCount === 1 ? '' : 's'} waiting for sync.
+              {pendingSyncCount} update{pendingSyncCount === 1 ? '' : 's'} waiting to be sent.
             </section>
           )}
 

@@ -65,7 +65,7 @@ export default function PaymentPanel({
   currency,
   taxRate,
 }: PaymentPanelProps) {
-  const { customers } = usePosStore();
+  const { customers, hasPermission } = usePosStore();
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const quickAmounts = QUICK_AMOUNTS_BY_CURRENCY[currency] ?? QUICK_AMOUNTS_BY_CURRENCY.NGN;
   const currencyPrefix = getCurrencyInputPrefix(currency);
@@ -240,20 +240,22 @@ export default function PaymentPanel({
                 { id: 'split', label: 'Split', icon: Split },
                 { id: 'credit', label: 'Credit', icon: User },
               ] as { id: PaymentMethod; label: string; icon: React.ElementType }[]
-            ).map(({ id, label, icon: Icon }) => (
-              <button
-                key={`pm-${id}`}
-                onClick={() => setPaymentMethod(id)}
-                className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 transition-all duration-150 active:scale-95 ${
-                  paymentMethod === id
-                    ? 'border-primary bg-primary/5 text-primary'
-                    : 'border-border bg-background text-muted-foreground hover:border-primary/30 hover:bg-primary/3'
-                }`}
-              >
-                <Icon size={18} />
-                <span className="text-xs font-semibold">{label}</span>
-              </button>
-            ))}
+            )
+              .filter(({ id }) => id !== 'credit' || hasPermission('credit-sales'))
+              .map(({ id, label, icon: Icon }) => (
+                <button
+                  key={`pm-${id}`}
+                  onClick={() => setPaymentMethod(id)}
+                  className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 transition-all duration-150 active:scale-95 ${
+                    paymentMethod === id
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-border bg-background text-muted-foreground hover:border-primary/30 hover:bg-primary/3'
+                  }`}
+                >
+                  <Icon size={18} />
+                  <span className="text-xs font-semibold">{label}</span>
+                </button>
+              ))}
           </div>
         </div>
 

@@ -1,0 +1,69 @@
+services:
+  - type: web
+    runtime: node
+    name: tovapos
+    plan: starter
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_STORAGE_DRIVER
+        value: postgres
+      - key: DATABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: PASSWORD_RESET_FROM_EMAIL
+        sync: false
+      - key: MAILGUN_API_KEY
+        sync: false
+      - key: MAILGUN_DOMAIN
+        sync: false
+      - key: MAILGUN_BASE_URL
+        value: https://api.mailgun.net
+      - key: PASSWORD_RESET_DEV_LINKS
+        value: false
+      - key: AUTH_DEV_LINKS
+        value: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: EXPIRY_DIGEST_TIMEZONE
+        value: Africa/Lagos
+      - key: DATABASE_POOL_MAX
+        value: 10
+      - key: DATABASE_CONNECT_TIMEOUT_MS
+        value: 5000
+      - key: DATABASE_IDLE_TIMEOUT_MS
+        value: 30000
+      - key: DATABASE_STATEMENT_TIMEOUT_MS
+        value: 15000
+      - key: DATABASE_QUERY_TIMEOUT_MS
+        value: 20000
+
+  - type: cron
+    runtime: node
+    name: tovapos-weekly-expiry-digest
+    plan: starter
+    schedule: '0 6 * * 1'
+    buildCommand: npm ci
+    startCommand: node scripts/run-expiry-digest.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: TOVAPOS_WEB_HOSTPORT
+        fromService:
+          type: web
+          name: tovapos
+          property: hostport
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: tovapos
+          envVarKey: CRON_SECRET

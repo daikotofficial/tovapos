@@ -1,15 +1,12 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { ArrowLeft, BarChart3, CheckCircle2, ShieldCheck, Wifi, LockKeyhole } from 'lucide-react';
 import { Toaster } from 'sonner';
 import LoginForm from './LoginForm';
 import SignupForm from './SignupForm';
-import { usePosStore } from '@/lib/pos/PosStoreProvider';
-import BrandLoader from '@/components/ui/BrandLoader';
 
 const authFeatures = [
   {
@@ -28,43 +25,27 @@ const authFeatures = [
     icon: ShieldCheck,
   },
   {
-    title: 'Online and offline sync',
-    text: 'Keep operating locally and sync when the network returns.',
+    title: 'Resilient during outages',
+    text: 'Keep selling during short internet interruptions and update automatically afterward.',
     icon: Wifi,
   },
 ];
 
 const authStats = [
   { value: 'Fast', label: 'Checkout' },
-  { value: 'Local', label: 'Offline DB' },
-  { value: 'Role', label: 'Security' },
+  { value: 'Ready', label: 'During outages' },
+  { value: 'Strict', label: 'Access control' },
 ];
 
 interface AuthScreenProps {
   initialTab?: 'login' | 'signup';
+  initialError?: string;
 }
 
-export default function AuthScreen({ initialTab = 'login' }: AuthScreenProps) {
-  const router = useRouter();
-  const { isHydrated, isAuthenticated } = usePosStore();
-  const [tab, setTab] = useState<'login' | 'signup'>(initialTab);
-
-  useEffect(() => {
-    setTab(initialTab);
-  }, [initialTab]);
-
-  useEffect(() => {
-    if (isHydrated && isAuthenticated) {
-      router.replace('/dashboard');
-    }
-  }, [isAuthenticated, isHydrated, router]);
+export default function AuthScreen({ initialTab = 'login', initialError = '' }: AuthScreenProps) {
+  const tab = initialTab;
 
   const formWidth = tab === 'signup' ? 'max-w-[620px]' : 'max-w-[480px] lg:self-center';
-
-  if (!isHydrated) {
-    return <BrandLoader message="Preparing your clean workspace..." />;
-  }
-
   return (
     <main className="min-h-screen bg-[#f4f7f6] text-[#071412]">
       <Toaster position="bottom-right" richColors />
@@ -102,10 +83,10 @@ export default function AuthScreen({ initialTab = 'login' }: AuthScreenProps) {
               <div className="border-b border-white/10 px-8 py-7">
                 <div className="inline-flex items-center gap-2 rounded-md bg-white/10 px-3 py-1.5 text-xs font-bold uppercase text-[#8ee8df]">
                   <LockKeyhole size={14} />
-                  Secure retail workspace
+                  Secure business access
                 </div>
                 <h1 className="mt-5 text-4xl font-bold leading-tight text-white">
-                  Sales, stock, access, and insight in one calm workspace.
+                  Sales, stock, access, and insight in one reliable system.
                 </h1>
                 <p className="mt-4 max-w-xl text-sm leading-7 text-white/70">
                   Built for daily retail operations where cashiers need speed, owners need control,
@@ -156,34 +137,32 @@ export default function AuthScreen({ initialTab = 'login' }: AuthScreenProps) {
               </div>
 
               <div className="mb-6 grid grid-cols-2 gap-1 rounded-md bg-[#edf3f1] p-1">
-                <button
-                  type="button"
-                  onClick={() => setTab('login')}
+                <Link
+                  href="/sign-up-login?tab=login"
                   className={`h-11 rounded-md text-sm font-bold transition-colors ${
                     tab === 'login'
                       ? 'bg-[#071412] text-white shadow-card'
                       : 'text-[#66736f] hover:bg-white hover:text-[#071412]'
-                  }`}
+                  } flex items-center justify-center`}
                 >
                   Sign In
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTab('signup')}
+                </Link>
+                <Link
+                  href="/sign-up-login?tab=signup"
                   className={`h-11 rounded-md text-sm font-bold transition-colors ${
                     tab === 'signup'
                       ? 'bg-[#071412] text-white shadow-card'
                       : 'text-[#66736f] hover:bg-white hover:text-[#071412]'
-                  }`}
+                  } flex items-center justify-center`}
                 >
                   Register
-                </button>
+                </Link>
               </div>
 
               {tab === 'login' ? (
-                <LoginForm onSwitchToSignup={() => setTab('signup')} />
+                <LoginForm initialError={initialTab === 'login' ? initialError : ''} />
               ) : (
-                <SignupForm onSwitchToLogin={() => setTab('login')} />
+                <SignupForm initialError={initialTab === 'signup' ? initialError : ''} />
               )}
             </div>
           </section>

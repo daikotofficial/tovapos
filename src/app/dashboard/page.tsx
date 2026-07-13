@@ -456,7 +456,7 @@ export default function DashboardPage() {
                 lines: [
                   `${data.completedSales.length} completed sale${data.completedSales.length === 1 ? '' : 's'}`,
                   `${data.recordedExpenses.length} recorded expense${data.recordedExpenses.length === 1 ? '' : 's'}`,
-                  `${pendingSyncCount} local change${pendingSyncCount === 1 ? '' : 's'} waiting to sync`,
+                  `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting to be sent`,
                 ],
               },
               {

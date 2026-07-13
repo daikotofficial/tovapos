@@ -200,7 +200,7 @@ export default function InventoryScreen() {
 
       {!isHydrated && (
         <div className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-          Loading local inventory records...
+          Loading inventory...
         </div>
       )}
 
@@ -212,8 +212,8 @@ export default function InventoryScreen() {
 
       {pendingSyncCount > 0 && (
         <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
-          {pendingSyncCount} local change{pendingSyncCount === 1 ? '' : 's'} waiting to sync when
-          the backend is connected.
+          {pendingSyncCount} update{pendingSyncCount === 1 ? '' : 's'} waiting to be sent. This will
+          happen automatically when the service is available.
         </div>
       )}
 

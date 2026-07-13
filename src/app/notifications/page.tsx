@@ -142,17 +142,17 @@ export default function NotificationsPage() {
           <section className="rounded-xl border border-border bg-card shadow-card">
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <WifiOff size={16} className="text-primary" />
-              <h2 className="text-sm font-semibold">Offline Sync Queue</h2>
+              <h2 className="text-sm font-semibold">Updates Waiting</h2>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px]">
                 <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-3">Entity</th>
-                    <th className="px-4 py-3">Action</th>
+                    <th className="px-4 py-3">Record</th>
+                    <th className="px-4 py-3">Change</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Created</th>
-                    <th className="px-4 py-3">Idempotency Key</th>
+                    <th className="px-4 py-3">Reference</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -162,7 +162,7 @@ export default function NotificationsPage() {
                         colSpan={5}
                         className="px-4 py-8 text-center text-sm text-muted-foreground"
                       >
-                        No pending sync work.
+                        All updates have been sent.
                       </td>
                     </tr>
                   ) : (

@@ -1,7 +1,18 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Bell, Building2, Palette, Receipt, Save, Settings, ShieldCheck, Wifi } from 'lucide-react';
+import {
+  Bell,
+  Building2,
+  KeyRound,
+  Loader2,
+  Palette,
+  Receipt,
+  Save,
+  Settings,
+  ShieldCheck,
+  Wifi,
+} from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import NiceSelect from '@/components/ui/NiceSelect';
@@ -28,8 +39,9 @@ export default function SettingsPage() {
   return (
     <AppLayout
       title="Settings"
-      subtitle="Configure business identity, taxes, receipt, and offline behavior"
+      subtitle="Manage your account, business details, receipts, and sales preferences"
     >
+      <AccountSecurityCard />
       <PermissionGate permission="settings">
         <div className="p-6 max-w-6xl mx-auto space-y-5">
           <div className="bg-card border border-border rounded-xl shadow-card">
@@ -47,6 +59,9 @@ export default function SettingsPage() {
                 <p className="mt-1 text-lg font-bold font-tabular">
                   {productUsage.currentProducts.toLocaleString()}
                   {productUsage.limit ? ` / ${productUsage.limit.toLocaleString()}` : ' / Custom'}
+                </p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Counts distinct product/batch records, not units in stock.
                 </p>
               </div>
               <div className="rounded-lg bg-muted/40 px-4 py-3">
@@ -187,6 +202,8 @@ export default function SettingsPage() {
                   <span className="text-xs text-muted-foreground">Low Stock Threshold Default</span>
                   <input
                     type="number"
+                    min={1}
+                    max={365}
                     value={form.lowStockAlertDays}
                     onChange={(e) =>
                       setForm({ ...form, lowStockAlertDays: Number(e.target.value) })
@@ -221,7 +238,9 @@ export default function SettingsPage() {
                     placeholder="stock@store.com, owner@store.com"
                   />
                   <span className="block text-[11px] text-muted-foreground">
-                    Receives products expiring within the configured alert window.
+                    A complete expiry report is emailed every Monday at 7:00 AM West Africa Time.
+                    Products already expired and products expiring within the configured window are
+                    included. Separate multiple addresses with commas.
                   </span>
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -350,8 +369,7 @@ export default function SettingsPage() {
                   onChange={(branches) => setForm({ ...form, branches })}
                 />
                 <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                  Product categories and expense heads now have dedicated sidebar pages so daily
-                  setup data is managed where teams naturally use it.
+                  Enter one branch or location per line.
                 </p>
               </div>
             </div>
@@ -359,7 +377,7 @@ export default function SettingsPage() {
             <div className="bg-card border border-border rounded-xl shadow-card">
               <div className="px-4 py-3 border-b border-border flex items-center gap-2">
                 <Palette size={16} className="text-primary" />
-                <span className="text-sm font-semibold">Theme & Offline Sync</span>
+                <span className="text-sm font-semibold">Appearance & Connection Recovery</span>
               </div>
               <div className="p-5 grid grid-cols-1 gap-4">
                 <div className="grid grid-cols-[80px_1fr] gap-3">
@@ -417,11 +435,11 @@ export default function SettingsPage() {
                 <div className="rounded-xl border border-border bg-muted/30 px-4 py-3">
                   <div className="flex items-center gap-2">
                     <Wifi size={15} className="text-primary" />
-                    <span className="text-sm font-semibold">Offline Sync Queue</span>
+                    <span className="text-sm font-semibold">Updates Waiting</span>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {pendingSyncCount} local change{pendingSyncCount === 1 ? '' : 's'} waiting to
-                    sync. Online changes are marked synced automatically in this local-first build.
+                    {pendingSyncCount} update{pendingSyncCount === 1 ? '' : 's'} waiting to be sent.
+                    Updates are sent automatically when the service is available.
                   </p>
                 </div>
               </div>
@@ -430,7 +448,7 @@ export default function SettingsPage() {
 
           <div className="px-5 py-4 border-t border-border flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
-              {pendingSyncCount} local change{pendingSyncCount === 1 ? '' : 's'} waiting to sync.
+              {pendingSyncCount} update{pendingSyncCount === 1 ? '' : 's'} waiting to be sent.
             </p>
             <button
               onClick={save}
@@ -443,6 +461,118 @@ export default function SettingsPage() {
         </div>
       </PermissionGate>
     </AppLayout>
+  );
+}
+
+function AccountSecurityCard() {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const changePassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+    if (newPassword !== confirmPassword) {
+      setError('New passwords do not match');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const response = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        message?: string;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(payload?.error ?? 'Unable to change password');
+      setMessage(payload?.message ?? 'Password changed successfully');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to change password');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-6xl px-6 pt-6">
+      <div className="rounded-xl border border-border bg-card shadow-card">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+          <KeyRound size={16} className="text-primary" />
+          <span className="text-sm font-semibold">Account & Security</span>
+        </div>
+        <div className="p-5">
+          <form onSubmit={changePassword} className="space-y-3">
+            <div>
+              <p className="text-sm font-semibold">Change Password</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Changing your password signs your account out on other devices.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">Current Password</span>
+                <input
+                  required
+                  type="password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  autoComplete="current-password"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">New Password</span>
+                <input
+                  required
+                  minLength={10}
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  autoComplete="new-password"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">Confirm New Password</span>
+                <input
+                  required
+                  minLength={10}
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  autoComplete="new-password"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                />
+              </label>
+            </div>
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              Use at least 10 characters with uppercase and lowercase letters, a number, and a
+              symbol.
+            </p>
+            {error && <p className="text-sm text-danger">{error}</p>}
+            {message && <p className="text-sm text-success">{message}</p>}
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {submitting && <Loader2 size={15} className="animate-spin" />}
+              Change Password
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 }
 

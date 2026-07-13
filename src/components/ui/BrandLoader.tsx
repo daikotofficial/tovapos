@@ -7,7 +7,7 @@ interface BrandLoaderProps {
   message?: string;
 }
 
-export default function BrandLoader({ message = 'Preparing your workspace...' }: BrandLoaderProps) {
+export default function BrandLoader({ message = 'Preparing TOVAPOS...' }: BrandLoaderProps) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f6f8f8] p-6">
       <div className="flex flex-col items-center gap-5 text-center">

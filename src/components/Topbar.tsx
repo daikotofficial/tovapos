@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Bell, AlertTriangle, Clock, Cloud, Wifi, WifiOff, Menu } from 'lucide-react';
+import { Bell, AlertTriangle, Clock, Cloud, Wifi, WifiOff, Menu, LoaderCircle } from 'lucide-react';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { getDaysUntilExpiry } from '@/lib/pos/stock';
 
@@ -12,7 +12,8 @@ interface TopbarProps {
 }
 
 export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
-  const { isOnline, pendingSyncCount, currentUser, inventory } = usePosStore();
+  const { isOnline, connectivity, syncProgress, pendingSyncCount, currentUser, inventory } =
+    usePosStore();
   const [showNotifs, setShowNotifs] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
@@ -41,8 +42,8 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
       stockAlerts.push({
         id: 'sync-pending',
         type: 'info',
-        message: `${pendingSyncCount} local change${pendingSyncCount === 1 ? '' : 's'} pending cloud sync`,
-        time: isOnline ? 'Ready to sync' : 'Offline mode',
+        message: `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting to be sent`,
+        time: isOnline ? 'Updating' : 'Internet unavailable',
       });
     }
 
@@ -115,16 +116,47 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
 
         <div
           className={`hidden h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium sm:flex ${
-            isOnline ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+            connectivity.status === 'online'
+              ? 'bg-success/10 text-success'
+              : connectivity.status === 'checking'
+                ? 'bg-muted text-muted-foreground'
+                : 'bg-warning/10 text-warning'
           }`}
+          title={
+            connectivity.status === 'online'
+              ? `TOVAPOS is online${connectivity.latencyMs === null ? '' : ` (${connectivity.latencyMs} ms response)`}`
+              : connectivity.status === 'degraded'
+                ? 'The connection is unstable; sales can continue safely'
+                : connectivity.status === 'checking'
+                  ? 'Checking service availability'
+                  : 'TOVAPOS cannot reach the service; sales can continue on this device'
+          }
         >
-          {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
-          <span>{isOnline ? 'Online' : 'Offline mode'}</span>
+          {connectivity.status === 'checking' ? (
+            <LoaderCircle size={12} className="animate-spin" />
+          ) : connectivity.status === 'online' ? (
+            <Wifi size={12} />
+          ) : (
+            <WifiOff size={12} />
+          )}
+          <span>
+            {connectivity.status === 'online'
+              ? 'Online'
+              : connectivity.status === 'checking'
+                ? 'Checking connection'
+                : connectivity.status === 'degraded'
+                  ? 'Connection unstable'
+                  : 'Offline — sales can continue'}
+          </span>
         </div>
 
         <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground lg:flex">
           <Cloud size={12} />
-          <span className="font-tabular">{pendingSyncCount} pending sync</span>
+          <span className="font-tabular">
+            {syncProgress.isSyncing
+              ? `Sending ${syncProgress.completed}/${syncProgress.total}`
+              : `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting`}
+          </span>
         </div>
 
         {currentUser && (

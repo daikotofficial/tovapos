@@ -26,10 +26,14 @@ import {
   UserRole,
   Vendor,
 } from './types';
-import { hashPassword, verifyPassword } from './auth';
 import { assertSellable, normalizeInventoryItem } from './stock';
 import {
   createSyncQueueItem,
+  cacheCustomersLocally,
+  cacheInventoryLocally,
+  cacheSalesLocally,
+  cacheStockMovementsLocally,
+  cacheSyncQueueLocally,
   deleteUser as deleteStoredUser,
   ensureCleanLocalDatabase,
   loadCustomers,
@@ -44,20 +48,22 @@ import {
   loadVendors,
   saveCustomer,
   saveExpense,
-  saveInventoryItem,
   saveInventoryItems,
+  saveOfflineSaleBundle,
+  saveOfflineStockBundle,
   saveSale,
   saveSettings,
   saveStockMovements,
   saveSyncQueueItem,
-  saveSyncQueueItems,
   saveUser,
   saveVendor,
+  setLocalTenant,
 } from './local-store';
 import { defaultCustomers, defaultSettings, defaultUsers, defaultVendors } from './seeds';
 import { getProductUsage, planAllowsPermission } from './subscription';
 
 interface PosStoreValue {
+  tenant: { id: string; slug: string; name: string } | null;
   inventory: InventoryItem[];
   stockMovements: StockMovement[];
   sales: SaleTransaction[];
@@ -69,14 +75,26 @@ interface PosStoreValue {
   syncQueue: SyncQueueItem[];
   isHydrated: boolean;
   isOnline: boolean;
+  connectivity: {
+    status: 'checking' | 'online' | 'degraded' | 'offline';
+    latencyMs: number | null;
+    lastCheckedAt: string | null;
+  };
+  syncProgress: { isSyncing: boolean; total: number; completed: number; failed: number };
   pendingSyncCount: number;
+  retrySyncOperation: (operationId: string) => Promise<void>;
+  cancelFailedOfflineSale: (operationId: string) => Promise<void>;
   activeUserId: string;
   currentUser: TovaUser | null;
   isAuthenticated: boolean;
   setActiveUserId: (userId: string) => void;
   signIn: (email: string, password: string, remember: boolean) => Promise<TovaUser>;
-  signOut: () => void;
-  registerBusiness: (input: RegisterBusinessInput) => Promise<TovaUser>;
+  signOut: () => Promise<void>;
+  registerBusiness: (input: RegisterBusinessInput) => Promise<{
+    message: string;
+    developmentVerificationUrl?: string;
+    emailDeliveryFailed?: boolean;
+  }>;
   hasPermission: (permission: Permission) => boolean;
   upsertInventoryItem: (item: InventoryItem) => Promise<InventoryItem>;
   upsertUser: (user: TovaUser) => Promise<TovaUser>;
@@ -94,42 +112,6 @@ interface PosStoreValue {
 }
 
 const PosStoreContext = createContext<PosStoreValue | null>(null);
-const ACTIVE_USER_KEY = 'tovapos.activeUserId';
-const SESSION_KEY = 'tovapos.session';
-
-const OWNER_PERMISSIONS: Permission[] = [
-  'dashboard',
-  'checkout',
-  'add-product',
-  'edit-product',
-  'delete-product',
-  'inventory',
-  'adjust-stock',
-  'give-discount',
-  'void-sale',
-  'reports',
-  'credit-sales',
-  'export-reports',
-  'users',
-  'settings',
-  'customers',
-  'vendors',
-  'expenses',
-  'refunds',
-  'view-profit',
-  'view-cost-price',
-  'expiry-alerts',
-  'manage-tax',
-  'branches',
-  'notifications',
-  'categories',
-  'expense-heads',
-];
-
-interface StoredSession {
-  userId: string;
-  expiresAt: string;
-}
 
 type VersionedInventoryItem = InventoryItem & {
   _expectedUpdatedAt?: string;
@@ -159,28 +141,6 @@ function sortInventory(items: InventoryItem[]): InventoryItem[] {
   return [...items].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function createSession(userId: string, remember: boolean): StoredSession {
-  const expiresAt = new Date(Date.now() + (remember ? 14 : 1) * 24 * 60 * 60 * 1000);
-  return { userId, expiresAt: expiresAt.toISOString() };
-}
-
-function readStoredSession(): StoredSession | null {
-  const raw = window.localStorage.getItem(SESSION_KEY);
-  if (!raw) return null;
-
-  try {
-    const session = JSON.parse(raw) as StoredSession;
-    if (!session.userId || new Date(session.expiresAt).getTime() <= Date.now()) {
-      window.localStorage.removeItem(SESSION_KEY);
-      return null;
-    }
-    return session;
-  } catch {
-    window.localStorage.removeItem(SESSION_KEY);
-    return null;
-  }
-}
-
 export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [stockMovements, setStockMovements] = useState<StockMovement[]>([]);
@@ -193,21 +153,115 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [connectivity, setConnectivity] = useState<PosStoreValue['connectivity']>({
+    status: 'checking',
+    latencyMs: null,
+    lastCheckedAt: null,
+  });
+  const [syncProgress, setSyncProgress] = useState<PosStoreValue['syncProgress']>({
+    isSyncing: false,
+    total: 0,
+    completed: 0,
+    failed: 0,
+  });
   const [activeUserId, setActiveUserIdState] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [tenant, setTenant] = useState<{ id: string; slug: string; name: string } | null>(null);
   const saleInFlightRef = useRef(false);
+  const syncInFlightRef = useRef(false);
+  const healthFailuresRef = useRef(0);
 
   useEffect(() => {
-    setIsOnline(typeof navigator === 'undefined' ? true : navigator.onLine);
+    if ('serviceWorker' in navigator) {
+      if (process.env.NODE_ENV === 'production') {
+        void navigator.serviceWorker.register('/sw.js').catch((error) => {
+          console.error('Unable to register offline application shell', error);
+        });
+      } else {
+        void navigator.serviceWorker
+          .getRegistrations()
+          .then((registrations) =>
+            Promise.all(registrations.map((registration) => registration.unregister()))
+          );
+      }
+    }
 
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    let cancelled = false;
+    let activeController: AbortController | null = null;
+
+    const checkHealth = async () => {
+      if (!navigator.onLine) {
+        healthFailuresRef.current = 2;
+        setIsOnline(false);
+        setConnectivity((current) => ({
+          ...current,
+          status: 'offline',
+          lastCheckedAt: new Date().toISOString(),
+        }));
+        return;
+      }
+      activeController?.abort();
+      const controller = new AbortController();
+      activeController = controller;
+      const timeout = window.setTimeout(() => controller.abort(), 4_000);
+      const startedAt = performance.now();
+      try {
+        const response = await fetch('/api/health', {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`Health check returned ${response.status}`);
+        if (cancelled) return;
+        healthFailuresRef.current = 0;
+        setIsOnline(true);
+        setConnectivity({
+          status: 'online',
+          latencyMs: Math.round(performance.now() - startedAt),
+          lastCheckedAt: new Date().toISOString(),
+        });
+      } catch {
+        if (cancelled) return;
+        healthFailuresRef.current += 1;
+        const status = healthFailuresRef.current >= 2 ? 'offline' : 'degraded';
+        setIsOnline(false);
+        setConnectivity((current) => ({
+          ...current,
+          status,
+          latencyMs: null,
+          lastCheckedAt: new Date().toISOString(),
+        }));
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    };
+
+    const handleOnline = () => {
+      setConnectivity((current) => ({ ...current, status: 'checking' }));
+      void checkHealth();
+    };
+    const handleOffline = () => void checkHealth();
+    const handleFocus = () => void checkHealth();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void checkHealth();
+    };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+    void checkHealth();
+    const interval = window.setInterval(
+      () => void checkHealth(),
+      30_000 + Math.floor(Math.random() * 15_000)
+    );
 
     return () => {
+      cancelled = true;
+      activeController?.abort();
+      window.clearInterval(interval);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 
@@ -216,6 +270,47 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
     async function hydrate() {
       await ensureCleanLocalDatabase();
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 8_000);
+      let sessionResponse: Response;
+      try {
+        sessionResponse = await fetch('/api/auth/session', {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeout);
+      }
+      if (!sessionResponse.ok) {
+        if (cancelled) return;
+        setActiveUserIdState('');
+        setIsAuthenticated(false);
+        setIsHydrated(true);
+        return;
+      }
+      const session = (await sessionResponse.json()) as {
+        user: TovaUser;
+        tenant: { id: string; slug: string; name: string };
+      };
+      if (cancelled) return;
+      setLocalTenant(session.tenant.id);
+      setTenant(session.tenant);
+      setUsers([session.user]);
+      setActiveUserIdState(session.user.id);
+      setIsAuthenticated(true);
+      setIsHydrated(true);
+      const can = (permission: Permission) =>
+        session.user.role === 'owner' ||
+        session.user.role === 'super-admin' ||
+        session.user.permissions.includes(permission);
+      const safely = async <T,>(label: string, task: Promise<T>, fallback: T): Promise<T> => {
+        try {
+          return await task;
+        } catch (error) {
+          console.warn(`${label} could not be loaded`, error);
+          return fallback;
+        }
+      };
       const [
         storedInventory,
         storedSales,
@@ -227,15 +322,27 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         storedSettings,
         storedQueue,
       ] = await Promise.all([
-        loadInventory([]),
-        loadSales(),
-        loadStockMovements(),
-        loadUsers(defaultUsers),
-        loadExpenses(),
-        loadCustomers(defaultCustomers),
-        loadVendors(defaultVendors),
-        loadSettings(defaultSettings),
-        loadSyncQueue(),
+        can('inventory') || can('checkout') || can('reports')
+          ? safely('Inventory', loadInventory([]), [])
+          : Promise.resolve([]),
+        can('reports') || can('credit-sales') || can('refunds')
+          ? safely('Sales', loadSales(), [])
+          : Promise.resolve([]),
+        can('inventory') || can('reports')
+          ? safely('Stock history', loadStockMovements(), [])
+          : Promise.resolve([]),
+        safely('User account', loadUsers(defaultUsers), [session.user]),
+        can('expenses') || can('reports')
+          ? safely('Expenses', loadExpenses(), [])
+          : Promise.resolve([]),
+        can('customers') || can('checkout')
+          ? safely('Customers', loadCustomers(defaultCustomers), [])
+          : Promise.resolve([]),
+        can('vendors') || can('inventory')
+          ? safely('Suppliers', loadVendors(defaultVendors), [])
+          : Promise.resolve([]),
+        safely('Business settings', loadSettings(defaultSettings), defaultSettings),
+        safely('Offline updates', loadSyncQueue(), []),
       ]);
 
       if (cancelled) return;
@@ -261,39 +368,34 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           ? { ...movement, syncStatus: 'synced' as const }
           : movement
       );
-      await Promise.all([
-        ...reconciledSales
-          .filter((sale, index) => sale.syncStatus !== storedSales[index]?.syncStatus)
-          .map(saveSale),
+      void Promise.all([
+        cacheSalesLocally(
+          reconciledSales.filter(
+            (sale, index) => sale.syncStatus !== storedSales[index]?.syncStatus
+          )
+        ),
         reconciledStockMovements.some(
           (movement, index) => movement.syncStatus !== storedStockMovements[index]?.syncStatus
         )
-          ? saveStockMovements(reconciledStockMovements)
+          ? cacheStockMovementsLocally(reconciledStockMovements)
           : Promise.resolve(),
-      ]);
+      ]).catch((error) => console.warn('Some records could not be cached in this browser', error));
       setInventory(sortInventory(storedInventory));
       setSales(reconciledSales);
       setStockMovements(reconciledStockMovements);
       setExpenses(storedExpenses);
-      setUsers(storedUsers);
-      const session = readStoredSession();
-      const sessionUser = session
-        ? storedUsers.find((user) => user.id === session.userId && user.status === 'active')
-        : null;
-      if (sessionUser) {
-        setActiveUserIdState(sessionUser.id);
-        setIsAuthenticated(true);
-        window.localStorage.setItem(ACTIVE_USER_KEY, sessionUser.id);
-      } else {
-        setActiveUserIdState('');
-        setIsAuthenticated(false);
-        window.localStorage.removeItem(ACTIVE_USER_KEY);
-      }
+      const sessionUser = session.user;
+      setUsers(
+        storedUsers.some((user) => user.id === sessionUser.id)
+          ? storedUsers
+          : [sessionUser, ...storedUsers]
+      );
+      setActiveUserIdState(sessionUser.id);
+      setIsAuthenticated(true);
       setCustomers(storedCustomers);
       setVendors(storedVendors);
       setSettings(storedSettings);
       setSyncQueue(storedQueue);
-      setIsHydrated(true);
     }
 
     hydrate().catch((error) => {
@@ -308,87 +410,214 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!isHydrated || !isOnline) return;
-    const pending = syncQueue.filter(
-      (item) => item.status === 'pending' || item.status === 'failed'
-    );
+    if (!isHydrated || !isOnline || syncInFlightRef.current) return;
+    const pending = syncQueue
+      .filter(
+        (item) => (item.status === 'pending' || item.status === 'failed') && item.attempts < 5
+      )
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (pending.length === 0) return;
 
-    const timer = window.setTimeout(async () => {
-      const now = new Date().toISOString();
-      const synced = pending.map((item) => ({
-        ...item,
-        status: 'synced' as const,
-        attempts: item.attempts + 1,
-        lastError: undefined,
-        syncedAt: now,
-      }));
-      await saveSyncQueueItems(synced);
-      const syncedById = new Map(synced.map((item) => [item.id, item]));
-      setSyncQueue((prev) => prev.map((item) => syncedById.get(item.id) ?? item));
+    const timer = window.setTimeout(
+      async () => {
+        syncInFlightRef.current = true;
+        try {
+          const operationIds = [...new Set(pending.map((item) => item.operationId))];
+          setSyncProgress({
+            isSyncing: true,
+            total: operationIds.length,
+            completed: 0,
+            failed: 0,
+          });
+          for (const operationId of operationIds) {
+            const group = pending.filter((item) => item.operationId === operationId);
+            try {
+              const saleQueueItem = group.find((item) => item.entity === 'sale');
+              const inventoryQueueItem = group.find((item) => item.entity === 'inventory');
+              if (saleQueueItem) {
+                const payload = saleQueueItem.payload as { sale?: SaleTransaction };
+                if (!payload.sale) throw new Error('Offline sale payload is incomplete');
+                const response = await fetch('/api/commands/sale', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    operationId,
+                    idempotencyKey: saleQueueItem.idempotencyKey,
+                    items: payload.sale.items.map((item) => ({
+                      inventoryItemId: item.inventoryItemId,
+                      quantity: item.quantity,
+                      discount: item.discount,
+                      unitPrice: item.unitPrice,
+                    })),
+                    paymentMethod: payload.sale.paymentMethod,
+                    cashTendered: payload.sale.cashTendered,
+                    customerName: payload.sale.customerName,
+                  }),
+                });
+                const result = (await response.json()) as {
+                  sale?: SaleTransaction;
+                  inventory?: InventoryItem[];
+                  stockMovements?: StockMovement[];
+                  customer?: Customer | null;
+                  error?: string;
+                };
+                if (!response.ok || !result.sale) {
+                  throw new Error(result.error ?? 'Offline sale could not be synchronized');
+                }
+                await Promise.all([
+                  cacheSalesLocally([result.sale]),
+                  cacheInventoryLocally(result.inventory ?? []),
+                  cacheStockMovementsLocally(result.stockMovements ?? []),
+                  result.customer ? cacheCustomersLocally([result.customer]) : Promise.resolve(),
+                ]);
+                setSales((prev) => [
+                  result.sale!,
+                  ...prev.filter((sale) => sale.id !== result.sale!.id),
+                ]);
+                const inventoryById = new Map(
+                  (result.inventory ?? []).map((item) => [item.id, item])
+                );
+                setInventory((prev) =>
+                  sortInventory(prev.map((item) => inventoryById.get(item.id) ?? item))
+                );
+                setStockMovements((prev) => [
+                  ...(result.stockMovements ?? []),
+                  ...prev.filter(
+                    (movement) =>
+                      !(result.stockMovements ?? []).some((item) => item.id === movement.id)
+                  ),
+                ]);
+                if (result.customer) {
+                  setCustomers((prev) =>
+                    prev.map((customer) =>
+                      customer.id === result.customer!.id ? result.customer! : customer
+                    )
+                  );
+                }
+              } else if (inventoryQueueItem) {
+                const movementQueueItem = group.find((item) => item.entity === 'stockMovement');
+                const movementPayload = movementQueueItem?.payload as
+                  | StockMovement
+                  | StockMovement[]
+                  | undefined;
+                const movement = Array.isArray(movementPayload)
+                  ? movementPayload[0]
+                  : movementPayload;
+                const response = await fetch('/api/commands/stock-adjustment', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    operationId,
+                    idempotencyKey: inventoryQueueItem.idempotencyKey,
+                    product: inventoryQueueItem.payload,
+                    quantityDelta: movement?.quantityDelta ?? 0,
+                    reason: movement?.reason,
+                  }),
+                });
+                const result = (await response.json()) as {
+                  inventory?: InventoryItem;
+                  stockMovement?: StockMovement | null;
+                  error?: string;
+                };
+                if (!response.ok || !result.inventory) {
+                  throw new Error(result.error ?? 'Stock operation could not be synchronized');
+                }
+                await cacheInventoryLocally([result.inventory]);
+                setInventory((prev) =>
+                  sortInventory([
+                    ...prev.filter((item) => item.id !== result.inventory!.id),
+                    result.inventory!,
+                  ])
+                );
+                if (result.stockMovement) {
+                  await cacheStockMovementsLocally([result.stockMovement]);
+                  setStockMovements((prev) => [
+                    result.stockMovement!,
+                    ...prev.filter((item) => item.id !== result.stockMovement!.id),
+                  ]);
+                }
+              } else {
+                for (const item of group) {
+                  if (item.entity === 'customer') await saveCustomer(item.payload as Customer);
+                  if (item.entity === 'vendor') await saveVendor(item.payload as Vendor);
+                  if (item.entity === 'expense') await saveExpense(item.payload as ExpenseRecord);
+                  if (item.entity === 'settings')
+                    await saveSettings(item.payload as BusinessSettings);
+                }
+              }
 
-      const syncedSales = synced
-        .filter((item) => item.entity === 'sale')
-        .map((item) => {
-          const payload = item.payload as { sale?: SaleTransaction };
-          return payload.sale ? { ...payload.sale, syncStatus: 'synced' as const } : null;
-        })
-        .filter(Boolean) as SaleTransaction[];
-      const syncedInventory = synced
-        .filter((item) => item.entity === 'inventory')
-        .map((item) => item.payload as InventoryItem);
-      const syncedMovements = synced
-        .filter((item) => item.entity === 'stockMovement')
-        .flatMap((item) => {
-          const payload = item.payload as StockMovement | StockMovement[];
-          return Array.isArray(payload) ? payload : [payload];
-        })
-        .filter(Boolean)
-        .map((movement) => ({ ...movement, syncStatus: 'synced' as const }));
-      const syncedCustomers = synced
-        .filter((item) => item.entity === 'customer')
-        .map((item) => item.payload as Customer);
-      const syncedVendors = synced
-        .filter((item) => item.entity === 'vendor')
-        .map((item) => item.payload as Vendor);
-      const syncedExpenses = synced
-        .filter((item) => item.entity === 'expense')
-        .map((item) => ({ ...(item.payload as ExpenseRecord), syncStatus: 'synced' as const }));
-
-      await Promise.all([
-        ...syncedSales.map(saveSale),
-        syncedInventory.length > 0 ? saveInventoryItems(syncedInventory) : Promise.resolve(),
-        syncedMovements.length > 0 ? saveStockMovements(syncedMovements) : Promise.resolve(),
-        ...syncedCustomers.map(saveCustomer),
-        ...syncedVendors.map(saveVendor),
-        ...syncedExpenses.map(saveExpense),
-      ]);
-
-      if (syncedSales.length > 0) {
-        const byId = new Map(syncedSales.map((sale) => [sale.id, sale]));
-        setSales((prev) => prev.map((sale) => byId.get(sale.id) ?? sale));
-      }
-      if (syncedInventory.length > 0) {
-        const byId = new Map(syncedInventory.map((item) => [item.id, item]));
-        setInventory((prev) => sortInventory(prev.map((item) => byId.get(item.id) ?? item)));
-      }
-      if (syncedMovements.length > 0) {
-        const byId = new Map(syncedMovements.map((movement) => [movement.id, movement]));
-        setStockMovements((prev) => prev.map((movement) => byId.get(movement.id) ?? movement));
-      }
-      if (syncedCustomers.length > 0) {
-        const byId = new Map(syncedCustomers.map((customer) => [customer.id, customer]));
-        setCustomers((prev) => prev.map((customer) => byId.get(customer.id) ?? customer));
-      }
-      if (syncedVendors.length > 0) {
-        const byId = new Map(syncedVendors.map((vendor) => [vendor.id, vendor]));
-        setVendors((prev) => prev.map((vendor) => byId.get(vendor.id) ?? vendor));
-      }
-      if (syncedExpenses.length > 0) {
-        const byId = new Map(syncedExpenses.map((expense) => [expense.id, expense]));
-        setExpenses((prev) => prev.map((expense) => byId.get(expense.id) ?? expense));
-      }
-    }, 900);
+              const completed = group.map((item) => ({
+                ...item,
+                status: 'synced' as const,
+                attempts: item.attempts + 1,
+                lastError: undefined,
+              }));
+              await cacheSyncQueueLocally(completed);
+              const completedById = new Map(completed.map((item) => [item.id, item]));
+              setSyncQueue((prev) => prev.map((item) => completedById.get(item.id) ?? item));
+              setSyncProgress((current) => ({
+                ...current,
+                completed: current.completed + 1,
+              }));
+            } catch (error) {
+              const failed = group.map((item) => ({
+                ...item,
+                status: 'failed' as const,
+                attempts: item.attempts + 1,
+                lastError: error instanceof Error ? error.message : 'Synchronization failed',
+              }));
+              await cacheSyncQueueLocally(failed);
+              const failedById = new Map(failed.map((item) => [item.id, item]));
+              setSyncQueue((prev) => prev.map((item) => failedById.get(item.id) ?? item));
+              const saleItem = group.find((item) => item.entity === 'sale');
+              if (saleItem) {
+                setSales((prev) => {
+                  const next = prev.map((sale) =>
+                    sale.id === saleItem.entityId
+                      ? { ...sale, syncStatus: 'failed' as const }
+                      : sale
+                  );
+                  void cacheSalesLocally(next.filter((sale) => sale.id === saleItem.entityId));
+                  return next;
+                });
+              }
+              const movementItem = group.find((item) => item.entity === 'stockMovement');
+              if (movementItem) {
+                const payload = movementItem.payload as StockMovement | StockMovement[];
+                const ids = new Set(
+                  (Array.isArray(payload) ? payload : [payload]).map((movement) => movement.id)
+                );
+                setStockMovements((prev) => {
+                  const next = prev.map((movement) =>
+                    ids.has(movement.id) ? { ...movement, syncStatus: 'failed' as const } : movement
+                  );
+                  void cacheStockMovementsLocally(next.filter((movement) => ids.has(movement.id)));
+                  return next;
+                });
+              }
+              setSyncProgress((current) => ({ ...current, failed: current.failed + 1 }));
+              if (
+                error instanceof TypeError ||
+                (error instanceof Error && error.name === 'AbortError')
+              ) {
+                setIsOnline(false);
+                setConnectivity((current) => ({
+                  ...current,
+                  status: 'offline',
+                  latencyMs: null,
+                  lastCheckedAt: new Date().toISOString(),
+                }));
+                break;
+              }
+            }
+          }
+        } finally {
+          syncInFlightRef.current = false;
+          setSyncProgress((current) => ({ ...current, isSyncing: false }));
+        }
+      },
+      Math.min(30_000, 900 * 2 ** Math.max(...pending.map((item) => item.attempts)))
+    );
 
     return () => window.clearTimeout(timer);
   }, [isHydrated, isOnline, syncQueue]);
@@ -396,6 +625,74 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   const pendingSyncCount = useMemo(
     () => syncQueue.filter((item) => item.status === 'pending' || item.status === 'failed').length,
     [syncQueue]
+  );
+
+  const retrySyncOperation = useCallback(
+    async (operationId: string) => {
+      const operationItems = syncQueue
+        .filter((item) => item.operationId === operationId && item.status !== 'synced')
+        .map((item) => ({
+          ...item,
+          status: 'pending' as const,
+          attempts: 0,
+          lastError: undefined,
+        }));
+      if (operationItems.length === 0) return;
+      await cacheSyncQueueLocally(operationItems);
+      const byId = new Map(operationItems.map((item) => [item.id, item]));
+      setSyncQueue((prev) => prev.map((item) => byId.get(item.id) ?? item));
+      const saleItem = operationItems.find((item) => item.entity === 'sale');
+      if (saleItem) {
+        setSales((prev) => {
+          const next = prev.map((sale) =>
+            sale.id === saleItem.entityId ? { ...sale, syncStatus: 'pending' as const } : sale
+          );
+          void cacheSalesLocally(next.filter((sale) => sale.id === saleItem.entityId));
+          return next;
+        });
+      }
+    },
+    [syncQueue]
+  );
+
+  const cancelFailedOfflineSale = useCallback(
+    async (operationId: string) => {
+      if (!isOnline) {
+        throw new Error('Reconnect before cancelling so authoritative stock can be restored.');
+      }
+      const operationItems = syncQueue.filter((item) => item.operationId === operationId);
+      const saleItem = operationItems.find((item) => item.entity === 'sale');
+      if (!saleItem || !operationItems.some((item) => item.status === 'failed')) {
+        throw new Error('Only a failed offline sale can be cancelled from Sync Logs.');
+      }
+      const completedItems = operationItems.map((item) => ({
+        ...item,
+        status: 'synced' as const,
+        lastError: `Cancelled locally by ${users.find((user) => user.id === activeUserId)?.name ?? 'administrator'}`,
+      }));
+      const sale = sales.find((item) => item.id === saleItem.entityId);
+      if (!sale) throw new Error('The local sale record could not be found.');
+      const cancelledSale: SaleTransaction = {
+        ...sale,
+        status: 'voided',
+        syncStatus: 'synced',
+      };
+      const [authoritativeInventory, authoritativeCustomers] = await Promise.all([
+        loadInventoryByIds(sale.items.map((item) => item.inventoryItemId)),
+        loadCustomers(defaultCustomers),
+      ]);
+      await Promise.all([
+        cacheSyncQueueLocally(completedItems),
+        cacheSalesLocally([cancelledSale]),
+      ]);
+      const completedById = new Map(completedItems.map((item) => [item.id, item]));
+      setSyncQueue((prev) => prev.map((item) => completedById.get(item.id) ?? item));
+      setSales((prev) => prev.map((item) => (item.id === cancelledSale.id ? cancelledSale : item)));
+      const inventoryById = new Map(authoritativeInventory.map((item) => [item.id, item]));
+      setInventory((prev) => sortInventory(prev.map((item) => inventoryById.get(item.id) ?? item)));
+      setCustomers(authoritativeCustomers);
+    },
+    [activeUserId, isOnline, sales, syncQueue, users]
   );
 
   const currentUser = useMemo(
@@ -419,111 +716,69 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       if (!nextUser) return;
       setActiveUserIdState(userId);
       setIsAuthenticated(true);
-      window.localStorage.setItem(ACTIVE_USER_KEY, userId);
-      window.localStorage.setItem(SESSION_KEY, JSON.stringify(createSession(userId, true)));
     },
     [users]
   );
 
-  const signIn = useCallback(
-    async (email: string, password: string, remember: boolean) => {
-      const normalizedEmail = email.trim().toLowerCase();
-      const user = users.find((item) => item.email.toLowerCase() === normalizedEmail);
-
-      if (!user || user.status !== 'active') {
-        throw new Error('No active account was found for that email address');
-      }
-
-      const isValid = await verifyPassword(password, user.passwordHash, user.passwordSalt);
-      if (!isValid) {
-        throw new Error('Invalid email or password');
-      }
-
-      const saved = {
-        ...user,
-        lastLogin: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await saveUser(saved);
-      setUsers((prev) => prev.map((item) => (item.id === saved.id ? saved : item)));
-      setActiveUserIdState(saved.id);
-      setIsAuthenticated(true);
-      window.localStorage.setItem(ACTIVE_USER_KEY, saved.id);
-      window.localStorage.setItem(SESSION_KEY, JSON.stringify(createSession(saved.id, remember)));
-      return saved;
-    },
-    [users]
-  );
-
-  const signOut = useCallback(() => {
-    setActiveUserIdState('');
-    setIsAuthenticated(false);
-    window.localStorage.removeItem(ACTIVE_USER_KEY);
-    window.localStorage.removeItem(SESSION_KEY);
+  const signIn = useCallback(async (email: string, password: string, remember: boolean) => {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, remember }),
+    });
+    const payload = (await response.json().catch(() => null)) as {
+      user?: TovaUser;
+      tenant?: { id: string; slug: string; name: string };
+      error?: string;
+    } | null;
+    if (!response.ok || !payload?.user) {
+      throw new Error(payload?.error ?? 'Unable to sign in');
+    }
+    setUsers([payload.user]);
+    setActiveUserIdState(payload.user.id);
+    setIsAuthenticated(true);
+    if (payload.tenant) setTenant(payload.tenant);
+    return payload.user;
   }, []);
 
-  const registerBusiness = useCallback(
-    async (input: RegisterBusinessInput) => {
-      const normalizedEmail = input.email.trim().toLowerCase();
-      if (users.some((user) => user.email.toLowerCase() === normalizedEmail && user.passwordHash)) {
-        throw new Error('An account with this email already exists');
-      }
+  const signOut = useCallback(async () => {
+    if (pendingSyncCount > 0) {
+      throw new Error(
+        `Wait for ${pendingSyncCount} offline update${pendingSyncCount === 1 ? '' : 's'} to sync before signing out.`
+      );
+    }
+    const response = await fetch('/api/auth/logout', { method: 'POST', keepalive: true });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(payload?.error ?? 'Sign out could not be completed. Please try again.');
+    }
+    setLocalTenant('anonymous');
+    setActiveUserIdState('');
+    setIsAuthenticated(false);
+    setTenant(null);
+  }, [pendingSyncCount]);
 
-      const now = new Date().toISOString();
-      const credentials = await hashPassword(input.password);
-      const owner: TovaUser = {
-        id: `user-owner-${Date.now()}`,
-        name: input.ownerName.trim(),
-        email: normalizedEmail,
-        role: 'owner',
-        phone: input.phone.trim(),
-        branch: 'Main Store',
-        permissions: OWNER_PERMISSIONS,
-        status: 'active',
-        pin: '0000',
-        ...credentials,
-        passwordUpdatedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const nextSettings: BusinessSettings = {
-        ...settings,
-        businessName: input.businessName.trim(),
-        updatedAt: now,
-      };
-      const userQueueItem = createSyncQueueItem({
-        entity: 'user',
-        entityId: owner.id,
-        action: 'create',
-        payload: owner,
-      });
-      const settingsQueueItem = createSyncQueueItem({
-        entity: 'settings',
-        entityId: nextSettings.id,
-        action: 'update',
-        payload: nextSettings,
-      });
-
-      await saveUser(owner);
-      await saveSettings(nextSettings);
-      await saveSyncQueueItem(userQueueItem);
-      await saveSyncQueueItem(settingsQueueItem);
-
-      setUsers((prev) => [
-        ...prev.filter((user) => user.email.toLowerCase() !== normalizedEmail),
-        owner,
-      ]);
-      setSettings(nextSettings);
-      setSyncQueue((prev) => [settingsQueueItem, userQueueItem, ...prev]);
-      setActiveUserIdState(owner.id);
-      setIsAuthenticated(true);
-      window.localStorage.setItem(ACTIVE_USER_KEY, owner.id);
-      window.localStorage.setItem(SESSION_KEY, JSON.stringify(createSession(owner.id, true)));
-      return owner;
-    },
-    [settings, users]
-  );
+  const registerBusiness = useCallback(async (input: RegisterBusinessInput) => {
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const payload = (await response.json().catch(() => null)) as {
+      message?: string;
+      developmentVerificationUrl?: string;
+      emailDeliveryFailed?: boolean;
+      error?: string;
+    } | null;
+    if (!response.ok || !payload?.message) {
+      throw new Error(payload?.error ?? 'Unable to register business');
+    }
+    return {
+      message: payload.message,
+      developmentVerificationUrl: payload.developmentVerificationUrl,
+      emailDeliveryFailed: payload.emailDeliveryFailed,
+    };
+  }, []);
 
   const hasPermission = useCallback(
     (permission: Permission) => {
@@ -568,13 +823,16 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       const operationId = createOperationId(
         action === 'create' ? 'inventory-create' : 'inventory-update'
       );
-      const queueItem = createSyncQueueItem({
-        operationId,
-        entity: 'inventory',
-        entityId: normalized.id,
-        action,
-        payload: normalized,
-      });
+      const queueItem = {
+        ...createSyncQueueItem({
+          operationId,
+          entity: 'inventory',
+          entityId: normalized.id,
+          action,
+          payload: normalized,
+        }),
+        idempotencyKey: `stock:${operationId}`,
+      };
       const quantityBefore = existingItem?.currentQty ?? 0;
       const quantityDelta = normalized.currentQty - quantityBefore;
       const movement =
@@ -616,12 +874,55 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           })
         : null;
 
-      await saveInventoryItem(normalized);
-      await saveSyncQueueItem(queueItem);
-      if (movement) {
-        await saveStockMovements([movement]);
-        if (movementQueueItem) await saveSyncQueueItem(movementQueueItem);
+      if (
+        process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' &&
+        typeof navigator !== 'undefined' &&
+        isOnline
+      ) {
+        let response: Response | undefined;
+        try {
+          response = await fetch('/api/commands/stock-adjustment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              operationId,
+              idempotencyKey: `stock:${operationId}`,
+              product: normalized,
+              quantityDelta,
+              reason: movement?.reason,
+            }),
+          });
+        } catch (error) {
+          if (!(error instanceof TypeError)) throw error;
+          setIsOnline(false);
+        }
+        if (response) {
+          const payload = (await response.json().catch(() => null)) as {
+            inventory?: InventoryItem;
+            stockMovement?: StockMovement | null;
+            error?: string;
+          } | null;
+          if (!response.ok || !payload?.inventory) {
+            throw new Error(payload?.error ?? 'Unable to save inventory');
+          }
+          setInventory((prev) =>
+            sortInventory([
+              ...prev.filter((existing) => existing.id !== payload.inventory!.id),
+              payload.inventory!,
+            ])
+          );
+          if (payload.stockMovement) {
+            setStockMovements((prev) => [payload.stockMovement!, ...prev]);
+          }
+          return payload.inventory;
+        }
       }
+
+      await saveOfflineStockBundle({
+        inventory: normalized,
+        stockMovement: movement,
+        queueItems: [queueItem, movementQueueItem].filter(Boolean) as SyncQueueItem[],
+      });
 
       setInventory((prev) => {
         const next = [...prev.filter((existing) => existing.id !== normalized.id), normalized];
@@ -634,23 +935,20 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
       return normalized;
     },
-    [currentUser?.name, inventory, settings.subscriptionPlanId]
+    [currentUser?.name, inventory, isOnline, settings.subscriptionPlanId]
   );
 
   const upsertUser = useCallback(async (user: TovaUser) => {
-    const saved = { ...user, updatedAt: new Date().toISOString() };
-    const queueItem = createSyncQueueItem({
-      entity: 'user',
-      entityId: saved.id,
-      action: 'update',
-      payload: saved,
-    });
-
-    await saveUser(saved);
-    await saveSyncQueueItem(queueItem);
-    setUsers((prev) => [...prev.filter((existing) => existing.id !== saved.id), saved]);
-    setSyncQueue((prev) => [queueItem, ...prev]);
-    return saved;
+    const transport = { ...user, updatedAt: new Date().toISOString() };
+    await saveUser(transport);
+    const {
+      newPassword: _newPassword,
+      passwordHash: _passwordHash,
+      passwordSalt: _passwordSalt,
+      ...safe
+    } = transport;
+    setUsers((prev) => [...prev.filter((existing) => existing.id !== safe.id), safe]);
+    return safe;
   }, []);
 
   const deleteUser = useCallback(
@@ -742,6 +1040,12 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
   const completeSale = useCallback(
     async (input: CompleteSaleInput) => {
+      if (!hasPermission('checkout')) {
+        throw new Error('Your role is not allowed to complete sales.');
+      }
+      if (input.paymentMethod === 'credit' && !hasPermission('credit-sales')) {
+        throw new Error('Credit sales require the Pro plan and credit-sales permission.');
+      }
       if (saleInFlightRef.current) {
         throw new Error('A sale is already being completed. Please wait for it to finish.');
       }
@@ -751,6 +1055,63 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       const operationId = createOperationId('sale');
 
       try {
+        if (
+          process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' &&
+          typeof navigator !== 'undefined' &&
+          isOnline
+        ) {
+          let response: Response | undefined;
+          try {
+            response = await fetch('/api/commands/sale', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                operationId,
+                idempotencyKey: `sale:${operationId}`,
+                items: input.items,
+                paymentMethod: input.paymentMethod,
+                cashTendered: input.cashTendered,
+                customerName: input.customerName,
+              }),
+            });
+          } catch (error) {
+            if (!(error instanceof TypeError)) throw error;
+            setIsOnline(false);
+          }
+          if (response) {
+            const payload = (await response.json().catch(() => null)) as {
+              sale?: SaleTransaction;
+              inventory?: InventoryItem[];
+              stockMovements?: StockMovement[];
+              customer?: Customer | null;
+              error?: string;
+            } | null;
+            if (!response.ok || !payload?.sale) {
+              throw new Error(payload?.error ?? 'Unable to complete sale');
+            }
+            const inventoryUpdates = new Map(
+              (payload.inventory ?? []).map((item) => [item.id, item])
+            );
+            setInventory((prev) =>
+              sortInventory(prev.map((item) => inventoryUpdates.get(item.id) ?? item))
+            );
+            setStockMovements((prev) => [...(payload.stockMovements ?? []), ...prev]);
+            if (payload.customer) {
+              await cacheCustomersLocally([payload.customer]);
+              setCustomers((prev) =>
+                prev.map((customer) =>
+                  customer.id === payload.customer!.id ? payload.customer! : customer
+                )
+              );
+            }
+            setSales((prev) => [
+              payload.sale!,
+              ...prev.filter((sale) => sale.id !== payload.sale!.id),
+            ]);
+            return payload.sale;
+          }
+        }
+
         const latestInventory = await loadInventoryByIds(
           input.items.map((item) => item.inventoryItemId)
         );
@@ -878,33 +1239,36 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             }
           : null;
 
-        const queueItem = createSyncQueueItem({
-          operationId,
-          entity: 'sale',
-          entityId: sale.id,
-          action: 'create',
-          conflictStrategy: 'merge-delta',
-          payload: {
-            sale,
-            stockMovements: movements,
-            inventoryAdjustments: movements.map((movement) => ({
-              inventoryItemId: movement.inventoryItemId,
-              quantityDelta: movement.quantityDelta,
-              quantityBefore: movement.quantityBefore,
-              quantityAfter: movement.quantityAfter,
-              baseUpdatedAt: inventoryById.get(movement.inventoryItemId)?.updatedAt,
-            })),
-            customerAdjustment: updatedCustomer
-              ? {
-                  customerId: updatedCustomer.id,
-                  spendDelta: sale.paymentMethod === 'credit' ? 0 : sale.grandTotal,
-                  loyaltyDelta:
-                    sale.paymentMethod === 'credit' ? 0 : Math.floor(sale.grandTotal / 100),
-                  creditDelta: sale.paymentMethod === 'credit' ? sale.grandTotal : 0,
-                }
-              : undefined,
-          },
-        });
+        const queueItem = {
+          ...createSyncQueueItem({
+            operationId,
+            entity: 'sale',
+            entityId: sale.id,
+            action: 'create',
+            conflictStrategy: 'merge-delta',
+            payload: {
+              sale,
+              stockMovements: movements,
+              inventoryAdjustments: movements.map((movement) => ({
+                inventoryItemId: movement.inventoryItemId,
+                quantityDelta: movement.quantityDelta,
+                quantityBefore: movement.quantityBefore,
+                quantityAfter: movement.quantityAfter,
+                baseUpdatedAt: inventoryById.get(movement.inventoryItemId)?.updatedAt,
+              })),
+              customerAdjustment: updatedCustomer
+                ? {
+                    customerId: updatedCustomer.id,
+                    spendDelta: sale.paymentMethod === 'credit' ? 0 : sale.grandTotal,
+                    loyaltyDelta:
+                      sale.paymentMethod === 'credit' ? 0 : Math.floor(sale.grandTotal / 100),
+                    creditDelta: sale.paymentMethod === 'credit' ? sale.grandTotal : 0,
+                  }
+                : undefined,
+            },
+          }),
+          idempotencyKey: `sale:${operationId}`,
+        };
         const movementQueueItem = createSyncQueueItem({
           operationId,
           entity: 'stockMovement',
@@ -926,13 +1290,15 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             })
           : null;
 
-        await saveInventoryItems(updatedInventory);
-        await saveStockMovements(movements);
-        if (updatedCustomer) await saveCustomer(updatedCustomer);
-        await saveSale(sale);
-        await saveSyncQueueItem(queueItem);
-        await saveSyncQueueItem(movementQueueItem);
-        if (customerQueueItem) await saveSyncQueueItem(customerQueueItem);
+        await saveOfflineSaleBundle({
+          inventory: updatedInventory,
+          stockMovements: movements,
+          sale,
+          customer: updatedCustomer,
+          queueItems: [queueItem, movementQueueItem, customerQueueItem].filter(
+            Boolean
+          ) as SyncQueueItem[],
+        });
 
         const updatedById = new Map(updatedInventory.map((item) => [item.id, item]));
         setInventory((prev) => sortInventory(prev.map((item) => updatedById.get(item.id) ?? item)));
@@ -957,11 +1323,14 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         saleInFlightRef.current = false;
       }
     },
-    [customers]
+    [customers, hasPermission, isOnline]
   );
 
   const reconcileCreditSale = useCallback(
     async (saleId: string, input: ReconcileCreditSaleInput) => {
+      if (!hasPermission('credit-sales')) {
+        throw new Error('Your role is not allowed to record credit payments.');
+      }
       const sale = sales.find((item) => item.id === saleId || item.transactionId === saleId);
       if (!sale) throw new Error('Credit sale was not found');
       if (sale.status !== 'completed') throw new Error('Only completed credit sales can be paid');
@@ -982,6 +1351,34 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
       const now = new Date().toISOString();
       const operationId = createOperationId('credit-payment');
+      if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
+        if (!isOnline) {
+          throw new Error('Credit payments require an internet connection for balance validation.');
+        }
+        const response = await fetch('/api/commands/credit-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            operationId,
+            saleId: sale.id,
+            amount,
+            method: input.method,
+            notes: input.notes,
+          }),
+        });
+        const payload = (await response.json().catch(() => null)) as {
+          sale?: SaleTransaction;
+          error?: string;
+        } | null;
+        if (!response.ok || !payload?.sale) {
+          throw new Error(payload?.error ?? 'Unable to record credit payment');
+        }
+        await cacheSalesLocally([payload.sale]);
+        setSales((prev) =>
+          prev.map((item) => (item.id === payload.sale!.id ? payload.sale! : item))
+        );
+        return payload.sale;
+      }
       const previousPaid = Number(sale.amountPaid ?? 0);
       const nextPaid = Number((previousPaid + amount).toFixed(2));
       const nextDue = Number(Math.max(0, currentDue - amount).toFixed(2));
@@ -1021,11 +1418,14 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       setSyncQueue((prev) => [queueItem, ...prev]);
       return updatedSale;
     },
-    [sales]
+    [hasPermission, isOnline, sales]
   );
 
   const refundSale = useCallback(
     async (saleId: string, reason: string) => {
+      if (!hasPermission('refunds')) {
+        throw new Error('Your role is not allowed to refund sales.');
+      }
       const sale = sales.find((item) => item.id === saleId || item.transactionId === saleId);
       if (!sale) throw new Error('Transaction was not found');
       if (sale.status === 'refunded') throw new Error('This transaction has already been refunded');
@@ -1033,6 +1433,39 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
       const now = new Date().toISOString();
       const operationId = createOperationId('refund');
+      if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
+        if (!isOnline) {
+          throw new Error(
+            'Refunds require an internet connection to prevent duplicate stock returns.'
+          );
+        }
+        const response = await fetch('/api/commands/refund', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ operationId, saleId: sale.id, reason: reason.trim() }),
+        });
+        const payload = (await response.json().catch(() => null)) as {
+          sale?: SaleTransaction;
+          inventory?: InventoryItem[];
+          stockMovements?: StockMovement[];
+          error?: string;
+        } | null;
+        if (!response.ok || !payload?.sale) {
+          throw new Error(payload?.error ?? 'Unable to refund sale');
+        }
+        await Promise.all([
+          cacheSalesLocally([payload.sale]),
+          cacheInventoryLocally(payload.inventory ?? []),
+          cacheStockMovementsLocally(payload.stockMovements ?? []),
+        ]);
+        const updates = new Map((payload.inventory ?? []).map((item) => [item.id, item]));
+        setInventory((prev) => sortInventory(prev.map((item) => updates.get(item.id) ?? item)));
+        setStockMovements((prev) => [...(payload.stockMovements ?? []), ...prev]);
+        setSales((prev) =>
+          prev.map((item) => (item.id === payload.sale!.id ? payload.sale! : item))
+        );
+        return payload.sale;
+      }
       const inventoryById = new Map(inventory.map((item) => [item.id, item]));
       const updatedInventory: VersionedInventoryItem[] = [];
 
@@ -1106,7 +1539,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
       return refundedSale;
     },
-    [currentUser?.name, inventory, sales]
+    [currentUser?.name, hasPermission, inventory, isOnline, sales]
   );
 
   const recordExpense = useCallback(async (input: RecordExpenseInput) => {
@@ -1146,6 +1579,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<PosStoreValue>(
     () => ({
+      tenant,
       inventory,
       stockMovements,
       sales,
@@ -1157,7 +1591,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       syncQueue,
       isHydrated,
       isOnline,
+      connectivity,
+      syncProgress,
       pendingSyncCount,
+      retrySyncOperation,
+      cancelFailedOfflineSale,
       activeUserId,
       currentUser,
       isAuthenticated,
@@ -1178,6 +1616,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       recordExpense,
     }),
     [
+      tenant,
       inventory,
       stockMovements,
       sales,
@@ -1189,7 +1628,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       syncQueue,
       isHydrated,
       isOnline,
+      connectivity,
+      syncProgress,
       pendingSyncCount,
+      retrySyncOperation,
+      cancelFailedOfflineSale,
       activeUserId,
       currentUser,
       isAuthenticated,

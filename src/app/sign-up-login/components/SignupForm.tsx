@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, Loader2, CheckCircle2, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -20,14 +20,18 @@ interface SignupFormData {
 }
 
 interface SignupFormProps {
-  onSwitchToLogin: () => void;
+  initialError?: string;
 }
 
-export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
-  const router = useRouter();
-  const { registerBusiness, isHydrated } = usePosStore();
+export default function SignupForm({ initialError = '' }: SignupFormProps) {
+  const { registerBusiness } = usePosStore();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [registrationResult, setRegistrationResult] = useState<{
+    message: string;
+    developmentVerificationUrl?: string;
+    emailDeliveryFailed?: boolean;
+  } | null>(null);
 
   const {
     register,
@@ -40,13 +44,8 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
   const password = watch('password');
 
   const onSubmit = async (data: SignupFormData) => {
-    if (!isHydrated) {
-      toast.error('Local database is still loading. Try again in a moment.');
-      return;
-    }
-
     try {
-      await registerBusiness({
+      const result = await registerBusiness({
         businessName: data.businessName,
         registrationNumber: data.licenseNumber,
         ownerName: data.ownerName,
@@ -55,8 +54,8 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
         address: data.address,
         password: data.password,
       });
-      toast.success(`${data.businessName} is ready. You are signed in as owner.`);
-      router.push('/dashboard');
+      setRegistrationResult(result);
+      toast.success('Registration completed. Confirm your email to continue.');
     } catch (error) {
       setError('email', {
         message: error instanceof Error ? error.message : 'Unable to register business',
@@ -80,18 +79,34 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
           <CheckCircle2 size={32} className="text-success" />
         </div>
         <div>
-          <h3 className="text-lg font-bold text-foreground">Registration Submitted</h3>
+          <h3 className="text-lg font-bold text-foreground">Check Your Email</h3>
           <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-            Your business workspace has been created locally. Backend activation can be connected
-            later.
+            {registrationResult?.message ??
+              'Your account was created. Confirm your email address to continue.'}
           </p>
         </div>
-        <button
-          onClick={onSwitchToLogin}
+        {registrationResult?.developmentVerificationUrl && (
+          <a
+            href={registrationResult.developmentVerificationUrl}
+            className="text-sm font-semibold text-primary hover:underline"
+          >
+            Open development confirmation link
+          </a>
+        )}
+        {registrationResult?.emailDeliveryFailed && (
+          <Link
+            href="/resend-verification"
+            className="text-sm font-semibold text-primary hover:underline"
+          >
+            Request another confirmation email
+          </Link>
+        )}
+        <Link
+          href="/sign-up-login?tab=login"
           className="h-11 rounded-md bg-primary px-6 text-sm font-bold text-white transition-all duration-150 hover:bg-primary/90 active:scale-95"
         >
           Back to Sign In
-        </button>
+        </Link>
       </div>
     );
   }
@@ -104,11 +119,22 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
           Register your business
         </h2>
         <p className="mt-2 text-sm leading-6 text-[#66736f]">
-          Create the workspace your store team will use for sales, stock, and reports.
+          Create your business account for sales, stock, reports, and team access.
         </p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      {initialError && (
+        <p className="mb-4 rounded-md border border-danger/25 bg-danger/10 px-3 py-2 text-sm leading-6 text-danger">
+          {initialError}
+        </p>
+      )}
+
+      <form
+        action="/api/auth/register"
+        method="post"
+        onSubmit={handleSubmit(onSubmit)}
+        className="space-y-4"
+      >
         {/* Section: Business Info */}
         <div className="space-y-3 rounded-md border border-[#dfe7e4] bg-[#f8fbfa] p-4">
           <div className="flex items-center gap-2 mb-1">
@@ -124,6 +150,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
             </label>
             <input
               id="businessName"
+              autoComplete="organization"
               {...register('businessName', { required: 'Business name is required' })}
               className={inputClass(!!errors.businessName)}
               placeholder="e.g. TOVA Supermarket"
@@ -141,6 +168,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
               </p>
               <input
                 id="licenseNumber"
+                autoComplete="off"
                 {...register('licenseNumber', {
                   required: false,
                 })}
@@ -156,6 +184,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
               <input
                 id="phone"
                 type="tel"
+                autoComplete="tel"
                 {...register('phone', { required: 'Phone number is required' })}
                 className={inputClass(!!errors.phone)}
                 placeholder="(555) 000-0000"
@@ -170,6 +199,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
             </label>
             <input
               id="address"
+              autoComplete="street-address"
               {...register('address')}
               className={inputClass(false)}
               placeholder="123 Medical Plaza, Suite 100"
@@ -187,6 +217,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
             </label>
             <input
               id="ownerName"
+              autoComplete="name"
               {...register('ownerName', { required: 'Owner name is required' })}
               className={inputClass(!!errors.ownerName)}
               placeholder="Dr. Jane Smith"
@@ -201,6 +232,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
             <input
               id="signup-email"
               type="email"
+              autoComplete="email"
               {...register('email', {
                 required: 'Email is required',
                 pattern: { value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Enter a valid email' },
@@ -226,7 +258,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
               Password <span className="text-danger">*</span>
             </label>
             <p className="mb-1 text-[10px] leading-5 text-muted-foreground">
-              Minimum 8 characters with uppercase, number, and symbol
+              Minimum 10 characters with uppercase, number, and symbol
             </p>
             <div className="relative">
               <input
@@ -234,10 +266,10 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
                 type={showPassword ? 'text' : 'password'}
                 {...register('password', {
                   required: 'Password is required',
-                  minLength: { value: 8, message: 'Minimum 8 characters' },
+                  minLength: { value: 10, message: 'Minimum 10 characters' },
                   pattern: {
-                    value: /^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*])/,
-                    message: 'Must include uppercase, number, and symbol (!@#$%^&*)',
+                    value: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/,
+                    message: 'Must include uppercase, lowercase, number, and symbol',
                   },
                 })}
                 className={`${inputClass(!!errors.password)} pr-10`}
@@ -313,7 +345,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
         {/* Submit */}
         <button
           type="submit"
-          disabled={isSubmitting || !isHydrated}
+          disabled={isSubmitting}
           className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-bold text-white transition-all duration-150 hover:bg-primary/90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSubmitting ? (
@@ -321,7 +353,7 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
           ) : (
             <>
               <CheckCircle2 size={16} />
-              {isHydrated ? 'Register Business' : 'Loading local database...'}
+              Register Business
             </>
           )}
         </button>
@@ -329,13 +361,9 @@ export default function SignupForm({ onSwitchToLogin }: SignupFormProps) {
 
       <p className="text-center text-xs text-muted-foreground mt-4">
         Already have an account?{' '}
-        <button
-          type="button"
-          onClick={onSwitchToLogin}
-          className="text-primary font-medium hover:underline"
-        >
+        <Link href="/sign-up-login?tab=login" className="text-primary font-medium hover:underline">
           Sign in instead
-        </button>
+        </Link>
       </p>
     </div>
   );

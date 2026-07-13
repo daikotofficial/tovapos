@@ -1,18 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  ensurePosSchema,
-  getPosPool,
-  upsertExpenseIndex,
-  upsertInventoryIndex,
-  upsertSaleIndex,
-} from '@/lib/server/pos-db';
+import { getPosPool } from '@/lib/server/pos-db';
 import { getSubscriptionPlan } from '@/lib/pos/subscription';
+import type { Permission } from '@/lib/pos/types';
+import { hashPasswordServer } from '@/lib/server/password';
+import {
+  assertPermission,
+  assertAnyPermission,
+  assertSameOrigin,
+  assertTenantPlanPermission,
+  errorResponse,
+  HttpError,
+  publicUser,
+  requireAuth,
+} from '@/lib/server/security';
+import {
+  upsertTenantExpenseIndex,
+  upsertTenantInventoryIndex,
+  upsertTenantSaleIndex,
+} from '@/lib/server/tenant-indexes';
+import type { AuthContext } from '@/lib/server/security';
 
 const STORE_NAMES = new Set([
   'inventory',
   'stockMovements',
   'sales',
-  'syncQueue',
   'users',
   'customers',
   'vendors',
@@ -23,10 +34,30 @@ const STORE_NAMES = new Set([
 type PosRecord = Record<string, unknown> & { id?: unknown };
 type InventoryCursor = { name: string; id: string };
 
+const READ_PERMISSIONS: Partial<Record<string, Permission[]>> = {
+  inventory: ['inventory', 'checkout', 'reports'],
+  stockMovements: ['inventory', 'reports'],
+  users: ['users'],
+  customers: ['customers', 'checkout'],
+  vendors: ['vendors', 'inventory'],
+  expenses: ['expenses', 'reports'],
+};
+
+const WRITE_PERMISSIONS: Partial<Record<string, Permission>> = {
+  inventory: 'adjust-stock',
+  stockMovements: 'adjust-stock',
+  sales: 'checkout',
+  users: 'users',
+  customers: 'customers',
+  vendors: 'vendors',
+  expenses: 'expenses',
+  settings: 'settings',
+};
+
 function getStoreName(request: NextRequest): string {
   const storeName = request.nextUrl.searchParams.get('store') ?? '';
   if (!STORE_NAMES.has(storeName)) {
-    throw new Error('Unknown POS store');
+    throw new HttpError(400, 'Unknown POS store', 'UNKNOWN_STORE');
   }
   return storeName;
 }
@@ -72,7 +103,29 @@ function clampOffset(value: string | null): number {
   return Math.max(0, Math.floor(parsed));
 }
 
-async function getInventoryMetrics(request: NextRequest) {
+function authAllows(auth: AuthContext, permission: Permission): boolean {
+  return (
+    auth.user.role === 'owner' ||
+    auth.user.role === 'super-admin' ||
+    auth.user.permissions.includes(permission)
+  );
+}
+
+function protectSaleFinancials(data: Record<string, unknown>, auth: AuthContext) {
+  if (authAllows(auth, 'view-cost-price')) return data;
+  const items = Array.isArray(data.items)
+    ? data.items.map((item) => (item && typeof item === 'object' ? { ...item, unitCost: 0 } : item))
+    : data.items;
+  return { ...data, items };
+}
+
+function protectInventoryFinancials(data: Record<string, unknown>, auth: AuthContext) {
+  if (authAllows(auth, 'view-cost-price')) return data;
+  const { unitCost: _unitCost, profitMargin: _profitMargin, ...safe } = data;
+  return { ...safe, unitCost: 0, profitMargin: 0 };
+}
+
+async function getInventoryMetrics(request: NextRequest, auth: AuthContext) {
   const expiryAlertDays = Math.max(
     0,
     Math.min(3650, Math.floor(Number(request.nextUrl.searchParams.get('expiryAlertDays')) || 30))
@@ -92,9 +145,10 @@ async function getInventoryMetrics(request: NextRequest) {
       )::bigint AS expiring_soon,
       coalesce(sum(current_qty * unit_cost), 0)::float8 AS total_value,
       coalesce(sum(current_qty * (selling_price - unit_cost)), 0)::float8 AS potential_profit
-    FROM pos_inventory
+    FROM pos_tenant_inventory
+    WHERE tenant_id = $2
     `,
-    [expiryAlertDays]
+    [expiryAlertDays, auth.tenantId]
   );
   const row = result.rows[0] ?? {};
 
@@ -106,29 +160,9 @@ async function getInventoryMetrics(request: NextRequest) {
     outOfStock: Number(row.out_of_stock ?? 0),
     expired: Number(row.expired ?? 0),
     expiringSoon: Number(row.expiring_soon ?? 0),
-    totalValue: Number(row.total_value ?? 0),
-    potentialProfit: Number(row.potential_profit ?? 0),
+    totalValue: authAllows(auth, 'view-cost-price') ? Number(row.total_value ?? 0) : 0,
+    potentialProfit: authAllows(auth, 'view-profit') ? Number(row.potential_profit ?? 0) : 0,
   });
-}
-
-function dateRangeWhere(
-  params: URLSearchParams,
-  column: string,
-  values: unknown[],
-  dateCast = false
-): string {
-  const where: string[] = [];
-  const from = params.get('from');
-  if (from) {
-    values.push(from);
-    where.push(`${column} >= $${values.length}${dateCast ? '::date' : '::timestamptz'}`);
-  }
-  const to = params.get('to');
-  if (to) {
-    values.push(to);
-    where.push(`${column} <= $${values.length}${dateCast ? '::date' : '::timestamptz'}`);
-  }
-  return where.length ? `WHERE ${where.join(' AND ')}` : '';
 }
 
 function appendDateRange(
@@ -141,22 +175,30 @@ function appendDateRange(
   const from = params.get('from');
   if (from) {
     values.push(from);
-    where.push(`${column} >= $${values.length}${dateCast ? '::date' : '::timestamptz'}`);
+    where.push(`${column} >= $${values.length}::date`);
   }
   const to = params.get('to');
   if (to) {
     values.push(to);
-    where.push(`${column} <= $${values.length}${dateCast ? '::date' : '::timestamptz'}`);
+    where.push(
+      dateCast
+        ? `${column} <= $${values.length}::date`
+        : `${column} < ($${values.length}::date + interval '1 day')`
+    );
   }
 }
 
-async function getReportRows(request: NextRequest) {
+async function getReportRows(request: NextRequest, auth: AuthContext) {
+  assertPermission(auth, 'reports');
   const params = request.nextUrl.searchParams;
   const report = params.get('report') ?? 'sales';
   const limit = clampLimit(params.get('limit'));
   const offset = clampOffset(params.get('offset'));
-  const values: unknown[] = [];
-  const where: string[] = [];
+  if (report === 'refunds') assertPermission(auth, 'refunds');
+  if (report === 'credit-sales') assertPermission(auth, 'credit-sales');
+  if (report === 'expenses') assertPermission(auth, 'expenses');
+  const values: unknown[] = [auth.tenantId];
+  const where: string[] = ['tenant_id = $1'];
 
   if (
     report === 'sales' ||
@@ -176,14 +218,18 @@ async function getReportRows(request: NextRequest) {
     const result = await getPosPool().query(
       `
       SELECT data
-      FROM pos_sales
+      FROM pos_tenant_sales
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY timestamp DESC, id DESC
       LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
     );
-    return NextResponse.json({ rows: result.rows.map((row) => row.data), limit, offset });
+    return NextResponse.json({
+      rows: result.rows.map((row) => protectSaleFinancials(row.data, auth)),
+      limit,
+      offset,
+    });
   }
 
   if (report === 'expenses') {
@@ -193,7 +239,7 @@ async function getReportRows(request: NextRequest) {
     const result = await getPosPool().query(
       `
       SELECT data
-      FROM pos_expenses
+      FROM pos_tenant_expenses
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY incurred_at DESC, id DESC
       LIMIT $${values.length - 1} OFFSET $${values.length}
@@ -214,7 +260,7 @@ async function getReportRows(request: NextRequest) {
         coalesce(sum(quantity), 0)::float8 AS qty,
         coalesce(sum(line_total), 0)::float8 AS revenue,
         coalesce(sum(gross_profit), 0)::float8 AS profit
-      FROM pos_sale_items
+      FROM pos_tenant_sale_items
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       GROUP BY inventory_item_id, product_name
       ORDER BY revenue DESC
@@ -222,7 +268,14 @@ async function getReportRows(request: NextRequest) {
       `,
       values
     );
-    return NextResponse.json({ rows: result.rows, limit, offset });
+    return NextResponse.json({
+      rows: result.rows.map((row) => ({
+        ...row,
+        profit: authAllows(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
+      })),
+      limit,
+      offset,
+    });
   }
 
   if (report === 'sales-by-category') {
@@ -235,7 +288,7 @@ async function getReportRows(request: NextRequest) {
         coalesce(sum(quantity), 0)::float8 AS qty,
         coalesce(sum(line_total), 0)::float8 AS revenue,
         coalesce(sum(gross_profit), 0)::float8 AS profit
-      FROM pos_sale_items
+      FROM pos_tenant_sale_items
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       GROUP BY category
       ORDER BY revenue DESC
@@ -243,7 +296,14 @@ async function getReportRows(request: NextRequest) {
       `,
       values
     );
-    return NextResponse.json({ rows: result.rows, limit, offset });
+    return NextResponse.json({
+      rows: result.rows.map((row) => ({
+        ...row,
+        profit: authAllows(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
+      })),
+      limit,
+      offset,
+    });
   }
 
   if (report === 'payment-methods') {
@@ -257,7 +317,7 @@ async function getReportRows(request: NextRequest) {
         coalesce(sum(grand_total) FILTER (WHERE payment_method <> 'credit'), 0)::float8 AS collected,
         coalesce(sum(amount_due), 0)::float8 AS receivable,
         coalesce(sum(grand_total), 0)::float8 AS total
-      FROM pos_sales
+      FROM pos_tenant_sales
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       GROUP BY payment_method
       ORDER BY total DESC
@@ -271,10 +331,12 @@ async function getReportRows(request: NextRequest) {
   return NextResponse.json({ rows: [], limit, offset });
 }
 
-async function getSalesMetrics(request: NextRequest) {
+async function getSalesMetrics(request: NextRequest, auth: AuthContext) {
   const params = request.nextUrl.searchParams;
-  const values: unknown[] = [];
-  const rangeSql = dateRangeWhere(params, 'timestamp', values);
+  const values: unknown[] = [auth.tenantId];
+  const salesWhere: string[] = ['tenant_id = $1'];
+  appendDateRange(params, 'timestamp', values, salesWhere);
+  const rangeSql = `WHERE ${salesWhere.join(' AND ')}`;
   const salesResult = await getPosPool().query(
     `
     SELECT
@@ -286,18 +348,20 @@ async function getSalesMetrics(request: NextRequest) {
       coalesce(sum(amount_due) FILTER (WHERE status = 'completed'), 0)::float8 AS receivables,
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed' AND payment_method = 'cash'), 0)::float8 AS cash_sales,
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed' AND payment_method <> 'cash'), 0)::float8 AS non_cash_sales
-    FROM pos_sales
+    FROM pos_tenant_sales
     ${rangeSql}
     `,
     values
   );
 
-  const expenseValues: unknown[] = [];
-  const expenseRangeSql = dateRangeWhere(params, 'incurred_at', expenseValues, true);
+  const expenseValues: unknown[] = [auth.tenantId];
+  const expenseWhere: string[] = ['tenant_id = $1'];
+  appendDateRange(params, 'incurred_at', expenseValues, expenseWhere, true);
+  const expenseRangeSql = `WHERE ${expenseWhere.join(' AND ')}`;
   const expenseResult = await getPosPool().query(
     `
     SELECT coalesce(sum(amount) FILTER (WHERE status = 'recorded'), 0)::float8 AS expenses
-    FROM pos_expenses
+    FROM pos_tenant_expenses
     ${expenseRangeSql}
     `,
     expenseValues
@@ -310,7 +374,7 @@ async function getSalesMetrics(request: NextRequest) {
     SELECT
       category,
       coalesce(sum(amount), 0)::float8 AS amount
-    FROM pos_expenses
+    FROM pos_tenant_expenses
     ${expenseCategoryWhere}
     GROUP BY category
     ORDER BY amount DESC
@@ -319,8 +383,10 @@ async function getSalesMetrics(request: NextRequest) {
     expenseValues
   );
 
-  const topProductValues: unknown[] = [];
-  const topProductRangeSql = dateRangeWhere(params, 'sold_at', topProductValues);
+  const topProductValues: unknown[] = [auth.tenantId];
+  const topProductWhere: string[] = ['tenant_id = $1'];
+  appendDateRange(params, 'sold_at', topProductValues, topProductWhere);
+  const topProductRangeSql = `WHERE ${topProductWhere.join(' AND ')}`;
   const topProductsResult = await getPosPool().query(
     `
     SELECT
@@ -329,7 +395,7 @@ async function getSalesMetrics(request: NextRequest) {
       coalesce(sum(quantity), 0)::float8 AS qty,
       coalesce(sum(line_total), 0)::float8 AS revenue,
       coalesce(sum(gross_profit), 0)::float8 AS profit
-    FROM pos_sale_items
+    FROM pos_tenant_sale_items
     ${topProductRangeSql}
     GROUP BY inventory_item_id, product_name
     ORDER BY revenue DESC
@@ -340,60 +406,66 @@ async function getSalesMetrics(request: NextRequest) {
 
   const sales = salesResult.rows[0] ?? {};
   const expenses = Number(expenseResult.rows[0]?.expenses ?? 0);
-  const grossProfit = Number(sales.gross_profit ?? 0);
+  const canViewProfit = authAllows(auth, 'view-profit');
+  const canViewExpenses = authAllows(auth, 'expenses');
+  const grossProfit = canViewProfit ? Number(sales.gross_profit ?? 0) : 0;
   return NextResponse.json({
     completedCount: Number(sales.completed_count ?? 0),
     refundedCount: Number(sales.refunded_count ?? 0),
     voidedCount: Number(sales.voided_count ?? 0),
     revenue: Number(sales.revenue ?? 0),
     grossProfit,
-    expenses,
-    netProfit: grossProfit - expenses,
+    expenses: canViewExpenses ? expenses : 0,
+    netProfit: canViewProfit && canViewExpenses ? grossProfit - expenses : 0,
     receivables: Number(sales.receivables ?? 0),
     cashSales: Number(sales.cash_sales ?? 0),
     nonCashSales: Number(sales.non_cash_sales ?? 0),
-    topProducts: topProductsResult.rows,
-    expenseCategories: expenseCategoriesResult.rows.map((row) => [
-      row.category,
-      Number(row.amount ?? 0),
-    ]),
+    topProducts: topProductsResult.rows.map((row) => ({
+      ...row,
+      profit: canViewProfit ? Number(row.profit ?? 0) : 0,
+    })),
+    expenseCategories: canViewExpenses
+      ? expenseCategoriesResult.rows.map((row) => [row.category, Number(row.amount ?? 0)])
+      : [],
   });
 }
 
-async function getSalesPage(request: NextRequest) {
+async function getSalesPage(request: NextRequest, auth: AuthContext) {
   const limit = clampLimit(request.nextUrl.searchParams.get('limit'));
   const offset = clampOffset(request.nextUrl.searchParams.get('offset'));
   const result = await getPosPool().query(
     `
     SELECT data
-    FROM pos_sales
+    FROM pos_tenant_sales
+    WHERE tenant_id = $1
     ORDER BY timestamp DESC, id DESC
-    LIMIT $1 OFFSET $2
+    LIMIT $2 OFFSET $3
     `,
-    [limit, offset]
+    [auth.tenantId, limit, offset]
   );
-  return NextResponse.json(result.rows.map((row) => row.data));
+  return NextResponse.json(result.rows.map((row) => protectSaleFinancials(row.data, auth)));
 }
 
-async function getExpensesPage(request: NextRequest) {
+async function getExpensesPage(request: NextRequest, tenantId: string) {
   const limit = clampLimit(request.nextUrl.searchParams.get('limit'));
   const offset = clampOffset(request.nextUrl.searchParams.get('offset'));
   const result = await getPosPool().query(
     `
     SELECT data
-    FROM pos_expenses
+    FROM pos_tenant_expenses
+    WHERE tenant_id = $1
     ORDER BY incurred_at DESC, id DESC
-    LIMIT $1 OFFSET $2
+    LIMIT $2 OFFSET $3
     `,
-    [limit, offset]
+    [tenantId, limit, offset]
   );
   return NextResponse.json(result.rows.map((row) => row.data));
 }
 
-async function getInventoryPage(request: NextRequest) {
+async function getInventoryPage(request: NextRequest, auth: AuthContext) {
   const params = request.nextUrl.searchParams;
   if (params.get('metrics') === 'true') {
-    return getInventoryMetrics(request);
+    return getInventoryMetrics(request, auth);
   }
 
   const scan = params.get('scan')?.trim();
@@ -401,26 +473,31 @@ async function getInventoryPage(request: NextRequest) {
     const result = await getPosPool().query(
       `
       SELECT data
-      FROM pos_inventory
-      WHERE lower(sku) = lower($1)
-        OR lower(coalesce(barcode, '')) = lower($1)
-        OR lower(name) = lower($1)
-        OR lower(name) LIKE '%' || lower($1) || '%'
+      FROM pos_tenant_inventory
+      WHERE tenant_id = $1
+        AND (
+          lower(sku) = lower($2)
+          OR lower(coalesce(barcode, '')) = lower($2)
+          OR lower(name) = lower($2)
+          OR lower(name) LIKE '%' || lower($2) || '%'
+        )
       ORDER BY
         CASE
-          WHEN lower(sku) = lower($1) THEN 0
-          WHEN lower(coalesce(barcode, '')) = lower($1) THEN 1
-          WHEN lower(name) = lower($1) THEN 2
+          WHEN lower(sku) = lower($2) THEN 0
+          WHEN lower(coalesce(barcode, '')) = lower($2) THEN 1
+          WHEN lower(name) = lower($2) THEN 2
           ELSE 3
         END,
         lower(name) ASC,
         id ASC
       LIMIT 1
       `,
-      [scan]
+      [auth.tenantId, scan]
     );
 
-    return NextResponse.json({ item: result.rows[0]?.data ?? null });
+    return NextResponse.json({
+      item: result.rows[0]?.data ? protectInventoryFinancials(result.rows[0].data, auth) : null,
+    });
   }
 
   const ids = params.get('ids');
@@ -433,21 +510,21 @@ async function getInventoryPage(request: NextRequest) {
     const result = await getPosPool().query(
       `
       SELECT data
-      FROM pos_inventory
-      WHERE id = ANY($1::text[])
+      FROM pos_tenant_inventory
+      WHERE tenant_id = $1 AND id = ANY($2::text[])
       ORDER BY lower(name) ASC, id ASC
       `,
-      [inventoryIds]
+      [auth.tenantId, inventoryIds]
     );
 
-    return NextResponse.json(result.rows.map((row) => row.data));
+    return NextResponse.json(result.rows.map((row) => protectInventoryFinancials(row.data, auth)));
   }
 
   const limit = clampLimit(params.get('limit'));
   const offset = clampOffset(params.get('offset'));
   const cursor = decodeCursor(params.get('cursor'));
-  const values: unknown[] = [];
-  const where: string[] = [];
+  const values: unknown[] = [auth.tenantId];
+  const where: string[] = ['tenant_id = $1'];
 
   const q = params.get('q')?.trim();
   if (q) {
@@ -529,7 +606,7 @@ async function getInventoryPage(request: NextRequest) {
   const result = await getPosPool().query(
     `
     SELECT data, lower(name) AS cursor_name, id
-    FROM pos_inventory
+    FROM pos_tenant_inventory
     ${whereSql}
     ORDER BY lower(name) ASC, id ASC
     LIMIT $${limitIndex}
@@ -545,7 +622,7 @@ async function getInventoryPage(request: NextRequest) {
       ? Number(
           (
             await getPosPool().query(
-              `SELECT count(*)::bigint AS total FROM pos_inventory ${whereSql}`,
+              `SELECT count(*)::bigint AS total FROM pos_tenant_inventory ${whereSql}`,
               values.slice(0, params.has('offset') ? -2 : -1)
             )
           ).rows[0]?.total ?? 0
@@ -553,7 +630,7 @@ async function getInventoryPage(request: NextRequest) {
       : undefined;
 
   return NextResponse.json({
-    items: rows.map((row) => row.data),
+    items: rows.map((row) => protectInventoryFinancials(row.data, auth)),
     nextCursor:
       result.rows.length > limit && last
         ? encodeCursor({ name: last.cursor_name, id: last.id })
@@ -565,8 +642,28 @@ async function getInventoryPage(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    await ensurePosSchema();
+    const auth = await requireAuth(request);
     const storeName = getStoreName(request);
+    const planFeature = WRITE_PERMISSIONS[storeName];
+    if (planFeature && storeName !== 'users') {
+      await assertTenantPlanPermission(auth.tenantId, planFeature);
+    }
+    const permission = READ_PERMISSIONS[storeName];
+    if (storeName === 'users') {
+      if (
+        auth.user.role !== 'owner' &&
+        auth.user.role !== 'super-admin' &&
+        !auth.user.permissions.includes('users')
+      ) {
+        return NextResponse.json([auth.user]);
+      }
+      const users = await getPosPool().query(
+        `SELECT * FROM pos_app_users WHERE tenant_id = $1 ORDER BY lower(name), id`,
+        [auth.tenantId]
+      );
+      return NextResponse.json(users.rows.map(publicUser));
+    }
+    if (permission) assertAnyPermission(auth, permission);
     if (
       storeName === 'inventory' &&
       (request.nextUrl.searchParams.has('limit') ||
@@ -580,48 +677,192 @@ export async function GET(request: NextRequest) {
         request.nextUrl.searchParams.has('supplier') ||
         request.nextUrl.searchParams.has('status'))
     ) {
-      return getInventoryPage(request);
+      return await getInventoryPage(request, auth);
     }
     if (storeName === 'sales' && request.nextUrl.searchParams.get('metrics') === 'true') {
-      return getSalesMetrics(request);
+      assertAnyPermission(auth, ['dashboard', 'reports']);
+      return await getSalesMetrics(request, auth);
     }
     if (storeName === 'sales' && request.nextUrl.searchParams.has('report')) {
-      return getReportRows(request);
+      return await getReportRows(request, auth);
     }
     if (storeName === 'sales' && request.nextUrl.searchParams.has('limit')) {
-      return getSalesPage(request);
+      assertAnyPermission(auth, ['reports', 'credit-sales', 'refunds']);
+      return await getSalesPage(request, auth);
+    }
+    if (storeName === 'sales') {
+      assertAnyPermission(auth, ['reports', 'credit-sales', 'refunds']);
     }
     if (storeName === 'expenses' && request.nextUrl.searchParams.has('limit')) {
-      return getExpensesPage(request);
+      return await getExpensesPage(request, auth.tenantId);
     }
 
     const result = await getPosPool().query(
-      'SELECT data FROM pos_records WHERE store_name = $1 ORDER BY updated_at DESC',
-      [storeName]
+      `SELECT data FROM pos_tenant_records
+       WHERE tenant_id = $1 AND store_name = $2 ORDER BY updated_at DESC`,
+      [auth.tenantId, storeName]
     );
 
     return NextResponse.json(result.rows.map((row) => row.data));
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unable to load POS records' },
-      { status: 500 }
-    );
+    return errorResponse(error);
   }
 }
 
 export async function PUT(request: NextRequest) {
   try {
-    await ensurePosSchema();
+    assertSameOrigin(request);
+    const auth = await requireAuth(request);
     const storeName = getStoreName(request);
+    if (['inventory', 'stockMovements', 'sales'].includes(storeName)) {
+      throw new HttpError(
+        405,
+        'Inventory and sales must use validated command endpoints',
+        'COMMAND_ENDPOINT_REQUIRED'
+      );
+    }
+    const permission = WRITE_PERMISSIONS[storeName];
+    if (permission) {
+      assertPermission(auth, permission);
+      await assertTenantPlanPermission(auth.tenantId, permission);
+    }
     const body = await request.json();
     let records = (Array.isArray(body) ? body : [body]) as PosRecord[];
+    if (records.length === 0 || records.length > 500) {
+      throw new HttpError(400, 'Write batch must contain 1 to 500 records', 'VALIDATION_ERROR');
+    }
+
+    if (storeName === 'users') {
+      const savedUsers = [];
+      for (const record of records) {
+        if (!record?.id || typeof record.id !== 'string') {
+          throw new HttpError(400, 'User id is required', 'VALIDATION_ERROR');
+        }
+        const email = typeof record.email === 'string' ? record.email.trim().toLowerCase() : '';
+        const name = typeof record.name === 'string' ? record.name.trim() : '';
+        if (!email || !name)
+          throw new HttpError(400, 'User name and email are required', 'VALIDATION_ERROR');
+        const existing = await getPosPool().query(
+          `SELECT * FROM pos_app_users WHERE tenant_id = $1 AND id = $2`,
+          [auth.tenantId, record.id]
+        );
+        const current = existing.rows[0];
+        const emailConflict = await getPosPool().query(
+          `SELECT 1 FROM pos_app_users
+           WHERE lower(email) = $1
+             AND NOT (tenant_id = $2 AND id = $3)
+           LIMIT 1`,
+          [email, auth.tenantId, record.id]
+        );
+        if (emailConflict.rowCount) {
+          throw new HttpError(409, 'An account already uses this email address', 'DUPLICATE_EMAIL');
+        }
+        const allowedRoles = new Set([
+          'super-admin',
+          'owner',
+          'manager',
+          'cashier',
+          'inventory',
+          'accountant',
+          'expense-clerk',
+          'auditor',
+          'viewer',
+        ]);
+        const requestedRole =
+          typeof record.role === 'string' && allowedRoles.has(record.role)
+            ? record.role
+            : 'cashier';
+        const actingUserIsAdmin = ['owner', 'super-admin'].includes(auth.user.role);
+        const protectedRoles = ['owner', 'super-admin', 'manager'];
+        if (
+          !actingUserIsAdmin &&
+          (protectedRoles.includes(requestedRole) || protectedRoles.includes(current?.role))
+        ) {
+          throw new HttpError(
+            403,
+            'Only an owner can create or modify owner or manager accounts',
+            'ADMIN_ROLE_REQUIRED'
+          );
+        }
+        const requestedPermissions = Array.isArray(record.permissions)
+          ? record.permissions.filter(
+              (permission): permission is Permission =>
+                typeof permission === 'string' &&
+                permission !== 'sync-logs' &&
+                getSubscriptionPlan('delux').permissions.includes(permission as Permission)
+            )
+          : [];
+        if (
+          !actingUserIsAdmin &&
+          requestedPermissions.some((permission) => !auth.user.permissions.includes(permission))
+        ) {
+          throw new HttpError(
+            403,
+            'You cannot grant permissions that your own account does not have',
+            'PERMISSION_ESCALATION_FORBIDDEN'
+          );
+        }
+        const newPassword = typeof record.newPassword === 'string' ? record.newPassword : '';
+        if (!current && newPassword.length < 10) {
+          throw new HttpError(
+            400,
+            'New users require a password of at least 10 characters',
+            'WEAK_PASSWORD'
+          );
+        }
+        const passwordHash = newPassword
+          ? await hashPasswordServer(newPassword)
+          : current?.password_hash;
+        const pin = typeof record.pin === 'string' ? record.pin.trim() : '';
+        const pinHash = pin ? await hashPasswordServer(pin) : (current?.pin_hash ?? null);
+        const saved = await getPosPool().query(
+          `INSERT INTO pos_app_users (
+            tenant_id, id, name, email, phone, role, permissions, status, branch,
+            pin_hash, password_hash, password_updated_at, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, nullif($9, ''), $10, $11,
+            CASE WHEN $12 THEN now() ELSE NULL END, now(), now())
+          ON CONFLICT (tenant_id, id) DO UPDATE SET
+            name = EXCLUDED.name,
+            email = EXCLUDED.email,
+            phone = EXCLUDED.phone,
+            role = EXCLUDED.role,
+            permissions = EXCLUDED.permissions,
+            status = EXCLUDED.status,
+            branch = EXCLUDED.branch,
+            pin_hash = EXCLUDED.pin_hash,
+            password_hash = EXCLUDED.password_hash,
+            password_updated_at = CASE WHEN $12 THEN now() ELSE pos_app_users.password_updated_at END,
+            updated_at = now()
+          RETURNING *`,
+          [
+            auth.tenantId,
+            record.id,
+            name,
+            email,
+            typeof record.phone === 'string' ? record.phone.trim() : '',
+            requestedRole,
+            JSON.stringify(requestedPermissions),
+            record.status === 'suspended' ? 'suspended' : 'active',
+            typeof record.branch === 'string' ? record.branch : '',
+            pinHash,
+            passwordHash,
+            Boolean(newPassword),
+          ]
+        );
+        savedUsers.push(publicUser(saved.rows[0]));
+      }
+      return NextResponse.json({ ok: true, users: savedUsers });
+    }
+
     const client = await getPosPool().connect();
 
     try {
       await client.query('BEGIN');
       if (storeName === 'settings') {
         const existing = await client.query(
-          "SELECT data FROM pos_records WHERE store_name = 'settings' AND record_id = 'settings' LIMIT 1"
+          `SELECT data FROM pos_tenant_records
+           WHERE tenant_id = $1 AND store_name = 'settings' AND record_id = 'settings' LIMIT 1`,
+          [auth.tenantId]
         );
         const currentSettings = existing.rows[0]?.data;
         records = records.map((record) => ({
@@ -637,12 +878,15 @@ export async function PUT(request: NextRequest) {
 
       if (storeName === 'inventory') {
         const settingsResult = await client.query(
-          "SELECT data FROM pos_records WHERE store_name = 'settings' AND record_id = 'settings' LIMIT 1"
+          `SELECT data FROM pos_tenant_records
+           WHERE tenant_id = $1 AND store_name = 'settings' AND record_id = 'settings' LIMIT 1`,
+          [auth.tenantId]
         );
         const plan = getSubscriptionPlan(settingsResult.rows[0]?.data?.subscriptionPlanId);
         if (plan.productLimit) {
           const existingInventory = await client.query(
-            'SELECT count(*)::bigint AS product_count FROM pos_inventory'
+            'SELECT count(*)::bigint AS product_count FROM pos_tenant_inventory WHERE tenant_id = $1',
+            [auth.tenantId]
           );
           const currentProductCount = Number(existingInventory.rows[0]?.product_count ?? 0);
           const incomingIds = Array.from(
@@ -651,10 +895,10 @@ export async function PUT(request: NextRequest) {
           const existingIncoming = await client.query(
             `
             SELECT id
-            FROM pos_inventory
-            WHERE id = ANY($1::text[])
+            FROM pos_tenant_inventory
+            WHERE tenant_id = $1 AND id = ANY($2::text[])
             `,
-            [incomingIds]
+            [auth.tenantId, incomingIds]
           );
           const existingIncomingIds = new Set<string>(
             existingIncoming.rows.map((row) => row.id as string)
@@ -662,7 +906,7 @@ export async function PUT(request: NextRequest) {
           const newProductCount = incomingIds.filter((id) => !existingIncomingIds.has(id)).length;
           if (currentProductCount + newProductCount > plan.productLimit) {
             throw new Error(
-              `${plan.name} allows ${plan.productLimit.toLocaleString()} products. Upgrade your plan to add more inventory.`
+              `${plan.name} allows ${plan.productLimit.toLocaleString()} distinct product/batch records. Stock quantities do not count toward this limit.`
             );
           }
         }
@@ -677,11 +921,11 @@ export async function PUT(request: NextRequest) {
           const existing = await client.query(
             `
             SELECT data->>'updatedAt' AS updated_at
-            FROM pos_records
-            WHERE store_name = 'inventory' AND record_id = $1
+            FROM pos_tenant_records
+            WHERE tenant_id = $1 AND store_name = 'inventory' AND record_id = $2
             FOR UPDATE
             `,
-            [record.id]
+            [auth.tenantId, record.id]
           );
           const currentUpdatedAt = existing.rows[0]?.updated_at;
           if (currentUpdatedAt && currentUpdatedAt !== record._expectedUpdatedAt) {
@@ -694,24 +938,43 @@ export async function PUT(request: NextRequest) {
         const storedRecord = prepareRecordForStorage(record);
         await client.query(
           `
-          INSERT INTO pos_records (store_name, record_id, data)
-          VALUES ($1, $2, $3::jsonb)
-          ON CONFLICT (store_name, record_id)
-          DO UPDATE SET data = EXCLUDED.data, updated_at = now()
+          INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+          VALUES ($1, $2, $3, $4::jsonb)
+          ON CONFLICT (tenant_id, store_name, record_id)
+          DO UPDATE SET data = EXCLUDED.data,
+            version = pos_tenant_records.version + 1, updated_at = now()
           `,
-          [storeName, record.id, JSON.stringify(storedRecord)]
+          [auth.tenantId, storeName, record.id, JSON.stringify(storedRecord)]
         );
 
         if (storeName === 'inventory') {
-          await upsertInventoryIndex(client, storedRecord as PosRecord & { id: string });
+          await upsertTenantInventoryIndex(
+            client,
+            auth.tenantId,
+            storedRecord as PosRecord & { id: string }
+          );
         }
         if (storeName === 'sales') {
-          await upsertSaleIndex(client, storedRecord as PosRecord & { id: string });
+          await upsertTenantSaleIndex(
+            client,
+            auth.tenantId,
+            storedRecord as PosRecord & { id: string }
+          );
         }
         if (storeName === 'expenses') {
-          await upsertExpenseIndex(client, storedRecord as PosRecord & { id: string });
+          await upsertTenantExpenseIndex(
+            client,
+            auth.tenantId,
+            storedRecord as PosRecord & { id: string }
+          );
         }
       }
+      await client.query(
+        `INSERT INTO pos_audit_log
+          (tenant_id, user_id, action, entity_type, metadata)
+         VALUES ($1, $2, 'records.upserted', $3, $4::jsonb)`,
+        [auth.tenantId, auth.user.id, storeName, JSON.stringify({ count: records.length })]
+      );
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -722,38 +985,98 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unable to save POS records' },
-      { status: 500 }
-    );
+    return errorResponse(error);
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    await ensurePosSchema();
+    assertSameOrigin(request);
+    const auth = await requireAuth(request);
     const storeName = getStoreName(request);
+    if (storeName === 'sales' || storeName === 'stockMovements') {
+      throw new HttpError(405, 'Financial records cannot be directly deleted', 'DELETE_FORBIDDEN');
+    }
+    if (storeName === 'inventory') assertPermission(auth, 'delete-product');
+    const permission = WRITE_PERMISSIONS[storeName];
+    if (permission && storeName !== 'inventory') {
+      assertPermission(auth, permission);
+      await assertTenantPlanPermission(auth.tenantId, permission);
+    }
     const { id } = await request.json();
     if (!id || typeof id !== 'string') {
       throw new Error('POS record id is required');
     }
 
+    if (storeName === 'users') {
+      if (id === auth.user.id) {
+        throw new HttpError(400, 'You cannot delete your active account', 'SELF_DELETE');
+      }
+      const target = await getPosPool().query(
+        'SELECT role FROM pos_app_users WHERE tenant_id = $1 AND id = $2',
+        [auth.tenantId, id]
+      );
+      const actingUserIsAdmin = ['owner', 'super-admin'].includes(auth.user.role);
+      if (
+        !actingUserIsAdmin &&
+        ['owner', 'super-admin', 'manager'].includes(target.rows[0]?.role)
+      ) {
+        throw new HttpError(
+          403,
+          'Only an owner can delete owner or manager accounts',
+          'ADMIN_ROLE_REQUIRED'
+        );
+      }
+      if (['owner', 'super-admin'].includes(target.rows[0]?.role)) {
+        const remaining = await getPosPool().query(
+          `SELECT count(*)::int AS count FROM pos_app_users
+           WHERE tenant_id = $1 AND id <> $2 AND status = 'active'
+             AND role IN ('owner', 'super-admin')`,
+          [auth.tenantId, id]
+        );
+        if (Number(remaining.rows[0]?.count ?? 0) < 1) {
+          throw new HttpError(400, 'At least one active owner must remain', 'LAST_OWNER');
+        }
+      }
+      await getPosPool().query('DELETE FROM pos_app_users WHERE tenant_id = $1 AND id = $2', [
+        auth.tenantId,
+        id,
+      ]);
+      return NextResponse.json({ ok: true });
+    }
+
     const client = await getPosPool().connect();
     try {
       await client.query('BEGIN');
-      await client.query('DELETE FROM pos_records WHERE store_name = $1 AND record_id = $2', [
-        storeName,
-        id,
-      ]);
+      await client.query(
+        `DELETE FROM pos_tenant_records
+         WHERE tenant_id = $1 AND store_name = $2 AND record_id = $3`,
+        [auth.tenantId, storeName, id]
+      );
       if (storeName === 'inventory') {
-        await client.query('DELETE FROM pos_inventory WHERE id = $1', [id]);
+        await client.query('DELETE FROM pos_tenant_inventory WHERE tenant_id = $1 AND id = $2', [
+          auth.tenantId,
+          id,
+        ]);
       }
       if (storeName === 'sales') {
-        await client.query('DELETE FROM pos_sales WHERE id = $1', [id]);
+        await client.query('DELETE FROM pos_tenant_sales WHERE tenant_id = $1 AND id = $2', [
+          auth.tenantId,
+          id,
+        ]);
       }
       if (storeName === 'expenses') {
-        await client.query('DELETE FROM pos_expenses WHERE id = $1', [id]);
+        await client.query('DELETE FROM pos_tenant_expenses WHERE tenant_id = $1 AND id = $2', [
+          auth.tenantId,
+          id,
+        ]);
       }
+      await client.query(
+        `INSERT INTO pos_audit_log
+          (tenant_id, user_id, action, entity_type, entity_id)
+         VALUES ($1, $2, 'record.deleted', $3, $4)`,
+        [auth.tenantId, auth.user.id, storeName, id]
+      );
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -764,9 +1087,6 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unable to delete POS record' },
-      { status: 500 }
-    );
+    return errorResponse(error);
   }
 }

@@ -33,6 +33,7 @@ interface CartPanelProps {
   removingIds: Set<string>;
   onClearCart: () => void;
   onShowRefund: () => void;
+  canRefund: boolean;
   currency: string;
   quickProducts: { id: string; barcode: string; name: string }[];
 }
@@ -51,6 +52,7 @@ export default function CartPanel({
   removingIds,
   onClearCart,
   onShowRefund,
+  canRefund,
   currency,
   quickProducts,
 }: CartPanelProps) {
@@ -83,15 +85,22 @@ export default function CartPanel({
             <Search size={14} />
             <span className="hidden sm:inline">{isScanning ? 'Finding...' : 'Scan'}</span>
           </button>
-          <button
-            onClick={onShowRefund}
-            className="flex items-center gap-1.5 px-3 py-2.5 bg-secondary text-secondary-foreground text-sm font-medium rounded-lg hover:bg-muted active:scale-95 transition-all duration-150"
-            title="Process refund or return"
-          >
-            <RefreshCw size={14} />
-            <span className="hidden sm:inline">Refund</span>
-          </button>
+          {canRefund && (
+            <button
+              onClick={onShowRefund}
+              className="flex items-center gap-1.5 px-3 py-2.5 bg-secondary text-secondary-foreground text-sm font-medium rounded-lg hover:bg-muted active:scale-95 transition-all duration-150"
+              title="Process refund or return"
+            >
+              <RefreshCw size={14} />
+              <span className="hidden sm:inline">Refund</span>
+            </button>
+          )}
         </div>
+
+        <p className="mt-1.5 text-[10px] font-medium text-muted-foreground">
+          Scanner always ready — scan a barcode anywhere on this page. Press Enter to search typed
+          names or SKUs.
+        </p>
 
         {quickProducts.length > 0 && (
           <div className="flex items-center gap-2 mt-2 overflow-x-auto scrollbar-thin pb-1">
