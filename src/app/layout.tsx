@@ -34,8 +34,25 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const themeScript = `
+    (function () {
+      try {
+        var path = window.location.pathname || '';
+        var theme = path.indexOf('/admin') === 0
+          ? window.localStorage.getItem('tovapos.adminTheme')
+          : window.localStorage.getItem('tovapos.themeMode');
+        if (theme !== 'dark' && theme !== 'light') theme = 'light';
+        document.documentElement.dataset.theme = theme;
+      } catch (_) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  `;
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body>
         <PosStoreProvider>
           {children}

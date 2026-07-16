@@ -7,8 +7,19 @@ import { assertSameOrigin, errorResponse, HttpError } from '@/lib/server/securit
 import { assertSuperAdmin, requirePlatformAdmin } from '@/lib/server/platform-admin';
 
 function inviteUrl(request: NextRequest, token: string): string {
-  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
-  return `${origin.replace(/\/$/, '')}/admin/invite?token=${encodeURIComponent(token)}`;
+  const configuredOrigin =
+    process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || process.env.APP_URL;
+  if (!configuredOrigin && process.env.NODE_ENV === 'production') {
+    throw new HttpError(
+      500,
+      'Public app URL is not configured for admin invites',
+      'PUBLIC_APP_URL_REQUIRED'
+    );
+  }
+  const origin = configuredOrigin || new URL(request.url).origin;
+  const url = new URL('/admin/invite', origin);
+  url.searchParams.set('token', token);
+  return url.toString();
 }
 
 export async function POST(request: NextRequest) {

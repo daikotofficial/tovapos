@@ -38,7 +38,9 @@ export default function SettingsPage() {
     const previousRing = root.style.getPropertyValue('--ring');
     const previousFont = root.style.getPropertyValue('--font-sans');
 
-    root.dataset.theme = form.themeMode ?? 'light';
+    const nextTheme = form.themeMode ?? 'light';
+    root.dataset.theme = nextTheme;
+    window.localStorage.setItem('tovapos.themeMode', nextTheme);
     if (form.themeColor) {
       root.style.setProperty('--primary', form.themeColor);
       root.style.setProperty('--ring', form.themeColor);

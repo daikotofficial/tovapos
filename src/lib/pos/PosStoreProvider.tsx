@@ -738,7 +738,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         `${settings.fontFamily}, ui-sans-serif, system-ui, sans-serif`
       );
     }
-    root.dataset.theme = settings.themeMode ?? 'light';
+    const themeMode = settings.themeMode ?? 'light';
+    root.dataset.theme = themeMode;
+    window.localStorage.setItem('tovapos.themeMode', themeMode);
   }, [settings.fontFamily, settings.themeColor, settings.themeMode]);
 
   const setActiveUserId = useCallback(
