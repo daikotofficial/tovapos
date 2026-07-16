@@ -540,8 +540,11 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
           coalesce(barcode, '') || ' ' ||
           coalesce(batch_lot, '')
         ) @@ plainto_tsquery('simple', $${index})
+        OR lower(name) LIKE '%' || lower($${index}) || '%'
+        OR lower(generic_name) LIKE '%' || lower($${index}) || '%'
         OR lower(sku) LIKE lower($${index}) || '%'
         OR lower(coalesce(barcode, '')) LIKE lower($${index}) || '%'
+        OR lower(batch_lot) LIKE '%' || lower($${index}) || '%'
       )
     `);
   }

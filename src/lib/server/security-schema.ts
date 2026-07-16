@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { hashPasswordServer } from './password';
 import { getPosPool } from './pos-db';
 
 let securitySchemaReady: Promise<void> | null = null;
@@ -127,6 +129,65 @@ export async function ensureSecuritySchema(): Promise<void> {
           blocked_until timestamptz,
           last_attempt_at timestamptz NOT NULL DEFAULT now()
         );
+
+        CREATE TABLE IF NOT EXISTS pos_platform_admins (
+          id text PRIMARY KEY,
+          name text NOT NULL,
+          email text NOT NULL UNIQUE,
+          role text NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'admin', 'support')),
+          status text NOT NULL DEFAULT 'active' CHECK (status IN ('invited', 'active', 'suspended')),
+          password_hash text,
+          invited_by text,
+          invited_at timestamptz,
+          accepted_at timestamptz,
+          last_login timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS pos_platform_admin_sessions (
+          id text PRIMARY KEY,
+          admin_id text NOT NULL REFERENCES pos_platform_admins(id) ON DELETE CASCADE,
+          token_hash text NOT NULL UNIQUE,
+          expires_at timestamptz NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          last_seen_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS pos_platform_admin_invites (
+          id text PRIMARY KEY,
+          admin_id text NOT NULL REFERENCES pos_platform_admins(id) ON DELETE CASCADE,
+          token_hash text NOT NULL UNIQUE,
+          expires_at timestamptz NOT NULL,
+          used_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE INDEX IF NOT EXISTS pos_platform_admin_sessions_expiry_idx
+          ON pos_platform_admin_sessions (expires_at);
+        CREATE INDEX IF NOT EXISTS pos_platform_admin_invites_expiry_idx
+          ON pos_platform_admin_invites (expires_at);
+
+        CREATE TABLE IF NOT EXISTS pos_support_tickets (
+          id text PRIMARY KEY,
+          tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
+          subject text NOT NULL,
+          message text NOT NULL,
+          status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'pending', 'resolved', 'closed')),
+          priority text NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+          created_by text NOT NULL,
+          created_by_email text,
+          response text,
+          responded_by text,
+          responded_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE INDEX IF NOT EXISTS pos_support_tickets_tenant_status_idx
+          ON pos_support_tickets (tenant_id, status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS pos_support_tickets_status_idx
+          ON pos_support_tickets (status, created_at DESC);
 
         CREATE TABLE IF NOT EXISTS pos_expiry_digest_runs (
           tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
@@ -326,6 +387,35 @@ export async function ensureSecuritySchema(): Promise<void> {
       )
       .then(async () => {
         const pool = getPosPool();
+        const seedEmail = (
+          process.env.PLATFORM_ADMIN_EMAIL || 'admin@tovapos.com.ng'
+        ).toLowerCase();
+        const seedName = process.env.PLATFORM_ADMIN_NAME || 'TOVAPOS Admin';
+        const seedPassword = process.env.PLATFORM_ADMIN_PASSWORD || 'AdminisHere123!';
+        const existingSeed = await pool.query(
+          'SELECT id, password_hash FROM pos_platform_admins WHERE lower(email) = $1 LIMIT 1',
+          [seedEmail]
+        );
+        if (!existingSeed.rows[0]) {
+          await pool.query(
+            `INSERT INTO pos_platform_admins (id, name, email, role, status, password_hash, accepted_at)
+             VALUES ($1, $2, $3, 'owner', 'active', $4, now())`,
+            [
+              `platform-admin-${randomUUID()}`,
+              seedName,
+              seedEmail,
+              await hashPasswordServer(seedPassword),
+            ]
+          );
+        } else if (!existingSeed.rows[0].password_hash) {
+          await pool.query(
+            `UPDATE pos_platform_admins
+             SET password_hash = $2, status = 'active', accepted_at = coalesce(accepted_at, now()), updated_at = now()
+             WHERE id = $1`,
+            [existingSeed.rows[0].id, await hashPasswordServer(seedPassword)]
+          );
+        }
+
         const legacyExists = await pool.query(
           "SELECT to_regclass('public.pos_records') AS table_name"
         );

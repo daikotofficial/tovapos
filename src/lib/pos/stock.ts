@@ -28,8 +28,26 @@ export function computeStockStatus(
 }
 
 export function computeProfitMargin(unitCost: number, sellingPrice: number): number {
-  if (sellingPrice <= 0) return 0;
-  return Number((((sellingPrice - unitCost) / sellingPrice) * 100).toFixed(2));
+  if (unitCost <= 0 || sellingPrice <= 0) return 0;
+  return Number((((sellingPrice - unitCost) / unitCost) * 100).toFixed(2));
+}
+
+export function computeSellingPriceFromMargin(unitCost: number, profitMargin: number): number {
+  if (unitCost <= 0) return 0;
+  const margin = Math.max(0, profitMargin) / 100;
+  return Number((unitCost * (1 + margin)).toFixed(2));
+}
+
+export function getDiscountedSellingPrice(item: InventoryItem): number {
+  const sellingPrice = Number(item.sellingPrice) || 0;
+  const discountValue = Math.max(0, Number(item.discountValue) || 0);
+  if (item.discountType === 'percentage') {
+    return Number((sellingPrice * (1 - Math.min(100, discountValue) / 100)).toFixed(2));
+  }
+  if (item.discountType === 'fixed') {
+    return Number(Math.max(0, sellingPrice - discountValue).toFixed(2));
+  }
+  return sellingPrice;
 }
 
 export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
@@ -37,6 +55,7 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
   const reorderLevel = Number(item.reorderLevel) || 1;
   const unitCost = Number(item.unitCost) || 0;
   const sellingPrice = Number(item.sellingPrice) || 0;
+  const taxRate = Number(item.taxRate) || 0;
 
   return {
     ...item,
@@ -48,8 +67,8 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     profitMargin: computeProfitMargin(unitCost, sellingPrice),
     discountType: item.discountType ?? 'none',
     discountValue: Number(item.discountValue) || 0,
-    taxApplicable: item.taxApplicable ?? false,
-    taxRate: Number(item.taxRate) || 0,
+    taxApplicable: Boolean(item.taxApplicable || taxRate > 0),
+    taxRate,
     taxMode: item.taxMode ?? 'exclusive',
     unitOfMeasurement: item.unitOfMeasurement ?? 'unit',
     productStatus: item.productStatus ?? 'active',

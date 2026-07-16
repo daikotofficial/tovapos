@@ -13,7 +13,7 @@ interface ReceiptModalProps {
   currency: string;
   businessName: string;
   receiptFooter: string;
-  taxRate: number;
+  taxLabel: string;
 }
 
 export default function ReceiptModal({
@@ -23,7 +23,7 @@ export default function ReceiptModal({
   currency,
   businessName,
   receiptFooter,
-  taxRate,
+  taxLabel,
 }: ReceiptModalProps) {
   const handlePrint = () => {
     window.print();
@@ -112,6 +112,32 @@ export default function ReceiptModal({
                       {item.quantity} x {formatMoney(item.unitPrice, currency)}
                       {item.discount > 0 ? ` (${item.discount}% off)` : ''}
                     </p>
+                    {(item.discount > 0 || (item.taxApplicable && Number(item.taxRate) > 0)) && (
+                      <div className="mt-1 space-y-0.5">
+                        {item.discount > 0 && (
+                          <p className="text-[10px] text-success">
+                            Discount: -
+                            {formatMoney(
+                              item.discountAmount ??
+                                item.unitPrice * item.quantity * (item.discount / 100),
+                              currency
+                            )}
+                          </p>
+                        )}
+                        {item.taxApplicable && Number(item.taxRate) > 0 && (
+                          <p className="text-[10px] text-primary">
+                            VAT {item.taxRate}% {item.taxMode ?? 'exclusive'}:{' '}
+                            {formatMoney(
+                              item.taxAmount ??
+                                item.unitPrice *
+                                  item.quantity *
+                                  ((Number(item.taxRate) || 0) / 100),
+                              currency
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <span className="text-xs font-semibold font-tabular text-foreground shrink-0">
                     {formatMoney(
@@ -142,7 +168,7 @@ export default function ReceiptModal({
                 </div>
               )}
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Tax ({taxRate}%)</span>
+                <span className="text-muted-foreground">Tax ({taxLabel})</span>
                 <span className="font-tabular font-medium">
                   {formatMoney(sale.taxAmount, currency)}
                 </span>

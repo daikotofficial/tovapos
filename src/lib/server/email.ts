@@ -59,6 +59,30 @@ export async function sendEmailVerification(input: {
   });
 }
 
+export async function sendPlatformAdminInviteEmail(input: {
+  to: string;
+  name: string;
+  inviteUrl: string;
+}): Promise<void> {
+  const name = escapeHtml(input.name);
+  const inviteUrl = escapeHtml(input.inviteUrl);
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#071412;max-width:560px;margin:auto">
+    <h1 style="font-size:24px">You have been invited to TOVAPOS Admin</h1>
+    <p>Hello ${name},</p>
+    <p>A platform administrator invited you to manage TOVAPOS support and business accounts.</p>
+    <p><a href="${inviteUrl}" style="display:inline-block;background:#128174;color:#fff;padding:12px 18px;border-radius:6px;text-decoration:none;font-weight:700">Accept invitation</a></p>
+    <p>This link expires in 48 hours and can only be used once.</p>
+  </div>`;
+  const text = `Hello ${input.name},\n\nAccept your TOVAPOS Admin invitation: ${input.inviteUrl}\n\nThis link expires in 48 hours.`;
+  await sendTransactionalEmail({
+    to: input.to,
+    subject: 'TOVAPOS Admin invitation',
+    html,
+    text,
+    category: 'platform-admin-invite',
+  });
+}
+
 export interface ExpiryDigestItem {
   name: string;
   sku: string;

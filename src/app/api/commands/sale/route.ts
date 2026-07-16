@@ -153,6 +153,8 @@ export async function POST(request: NextRequest) {
       const now = new Date().toISOString();
       let subtotal = 0;
       let discountTotal = 0;
+      let taxAmount = 0;
+      let exclusiveTaxAmount = 0;
       const updatedInventory: InventoryItem[] = [];
 
       const lineItems = items.map((requested) => {
@@ -191,11 +193,22 @@ export async function POST(request: NextRequest) {
         const gross = money(requested.unitPrice * requested.quantity);
         const discountAmount = money(gross * (requested.discount / 100));
         const lineTotal = money(gross - discountAmount);
+        const productData = row.data as InventoryItem;
+        const productTaxRate = Math.max(0, Number(productData.taxRate) || 0);
+        const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
+        const taxApplies = Boolean(productData.taxApplicable || productTaxRate > 0);
+        const lineTaxRate = taxApplies ? productTaxRate || defaultTaxRate : 0;
+        const lineTaxMode = productData.taxMode ?? settings.taxMode ?? 'exclusive';
+        const lineTaxAmount = lineTaxRate <= 0 ? 0 : money(gross * (lineTaxRate / 100));
         subtotal = money(subtotal + gross);
         discountTotal = money(discountTotal + discountAmount);
+        taxAmount = money(taxAmount + lineTaxAmount);
+        if (lineTaxMode === 'exclusive') {
+          exclusiveTaxAmount = money(exclusiveTaxAmount + lineTaxAmount);
+        }
         const nextQuantity = Number(row.current_qty) - requested.quantity;
         updatedInventory.push({
-          ...(row.data as InventoryItem),
+          ...productData,
           currentQty: nextQuantity,
           stockStatus: nextQuantity === 0 ? 'out' : row.stock_status,
           updatedAt: now,
@@ -215,16 +228,19 @@ export async function POST(request: NextRequest) {
           unitCost: Number(row.unit_cost),
           discount: requested.discount,
           lineTotal,
+          discountAmount,
+          taxApplicable: taxApplies,
+          taxRate: lineTaxRate,
+          taxMode: lineTaxMode,
+          taxAmount: lineTaxAmount,
           requiresApproval: Boolean(row.data?.requiresApproval),
           isControlled: Boolean(row.data?.isControlled),
           category: row.category,
         };
       });
 
-      const taxRate = Number(settings.taxRate ?? 0);
       const taxable = money(subtotal - discountTotal);
-      const taxAmount = settings.taxMode === 'inclusive' ? 0 : money(taxable * (taxRate / 100));
-      const grandTotal = money(taxable + taxAmount);
+      const grandTotal = money(taxable + exclusiveTaxAmount);
       const receipt = await client.query(
         `INSERT INTO pos_receipt_sequences (tenant_id, next_number)
          VALUES ($1, 2)

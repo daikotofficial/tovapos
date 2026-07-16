@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import Badge from '@/components/ui/Badge';
 import { CartItem } from './CheckoutScreen';
+import { InventoryItem } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
 import { getDaysUntilExpiry } from '@/lib/pos/stock';
 
@@ -27,6 +28,7 @@ interface CartPanelProps {
   onScan: (barcode: string) => Promise<void>;
   isScanning: boolean;
   scanRef: React.RefObject<HTMLInputElement | null>;
+  searchSuggestions: InventoryItem[];
   onUpdateQuantity: (id: string, qty: number) => Promise<void>;
   onUpdateDiscount: (id: string, discount: number) => void;
   onRemoveItem: (id: string) => void;
@@ -46,6 +48,7 @@ export default function CartPanel({
   onScan,
   isScanning,
   scanRef,
+  searchSuggestions,
   onUpdateQuantity,
   onUpdateDiscount,
   onRemoveItem,
@@ -74,6 +77,41 @@ export default function CartPanel({
               disabled={isScanning}
               autoFocus
             />
+            {searchSuggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-modal fade-in">
+                <div className="max-h-72 overflow-y-auto py-1">
+                  {searchSuggestions.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        void onScan(product.barcode || product.sku || product.name);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-foreground">
+                          {product.name}
+                        </span>
+                        <span className="block truncate text-[10px] text-muted-foreground">
+                          {product.sku}
+                          {product.barcode ? ` · ${product.barcode}` : ''}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-right">
+                        <span className="block text-xs font-semibold text-primary">
+                          {formatMoney(product.sellingPrice, currency)}
+                        </span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          Stock: {product.currentQty}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <button
             onClick={() => {
@@ -190,6 +228,11 @@ export default function CartPanel({
                         <FileText size={9} />
                         {item.batchLot}
                       </span>
+                      {item.taxApplicable && item.taxRate > 0 && (
+                        <span className="text-[10px] font-medium text-primary">
+                          VAT {item.taxRate}% {item.taxMode}
+                        </span>
+                      )}
                       <span
                         className={`flex items-center gap-1 text-[10px] font-medium ${(() => {
                           const days = getDaysUntilExpiry(item.expiryDate);

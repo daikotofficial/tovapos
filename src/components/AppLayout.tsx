@@ -3,7 +3,7 @@
 import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, Package, ShoppingCart, TrendingUp, WalletCards, X } from 'lucide-react';
+import { LayoutDashboard, LifeBuoy, Package, ShoppingCart, TrendingUp, X } from 'lucide-react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import BrandLoader from './ui/BrandLoader';
@@ -25,8 +25,8 @@ const mobileNavItems: {
   { label: 'Home', href: '/dashboard', icon: LayoutDashboard, permission: 'dashboard' },
   { label: 'Sales', href: '/sales', icon: ShoppingCart, permission: 'checkout' },
   { label: 'Stock', href: '/inventory-management', icon: Package, permission: 'inventory' },
-  { label: 'Credit', href: '/credit-sales', icon: WalletCards, permission: 'credit-sales' },
   { label: 'Reports', href: '/reports', icon: TrendingUp, permission: 'reports' },
+  { label: 'Support', href: '/support', icon: LifeBuoy, permission: 'dashboard' },
 ];
 
 export default function AppLayout({ children, title, subtitle }: AppLayoutProps) {

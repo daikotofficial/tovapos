@@ -7,8 +7,8 @@ import PaymentPanel from './PaymentPanel';
 import ReceiptModal from './ReceiptModal';
 import RefundModal from './RefundModal';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
-import { PaymentMethod, SaleTransaction } from '@/lib/pos/types';
-import { loadInventoryByIds, lookupInventoryItem } from '@/lib/pos/local-store';
+import { InventoryItem, PaymentMethod, SaleTransaction } from '@/lib/pos/types';
+import { loadInventoryByIds, loadInventoryPage, lookupInventoryItem } from '@/lib/pos/local-store';
 import { assertSellable, getDaysUntilExpiry } from '@/lib/pos/stock';
 import { formatMoney } from '@/lib/pos/money';
 
@@ -26,6 +26,9 @@ export interface CartItem {
   unitPrice: number;
   unitCost: number;
   discount: number;
+  taxApplicable: boolean;
+  taxRate: number;
+  taxMode: 'inclusive' | 'exclusive';
   requiresApproval: boolean;
   isControlled: boolean;
   category: string;
@@ -48,7 +51,9 @@ export default function CheckoutScreen() {
   const [showReceipt, setShowReceipt] = useState(false);
   const [showRefund, setShowRefund] = useState(false);
   const [completedSale, setCompletedSale] = useState<SaleTransaction | null>(null);
+  const [completedTaxLabel, setCompletedTaxLabel] = useState('0%');
   const [isScanning, setIsScanning] = useState(false);
+  const [searchSuggestions, setSearchSuggestions] = useState<InventoryItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const scanRef = useRef<HTMLInputElement>(null);
@@ -61,22 +66,84 @@ export default function CheckoutScreen() {
     cartRef.current = cart;
   }, [cart]);
 
-  const subtotal = cart.reduce(
-    (sum, item) => sum + item.unitPrice * item.quantity * (1 - item.discount / 100),
+  const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const itemDiscountTotal = cart.reduce(
+    (sum, item) => sum + item.unitPrice * item.quantity * (item.discount / 100),
     0
   );
-  const discountTotal =
-    cart.reduce((sum, item) => sum + item.unitPrice * item.quantity * (item.discount / 100), 0) +
-    (subtotal * globalDiscount) / 100;
-  const discountedSubtotal = subtotal * (1 - globalDiscount / 100);
-  const taxRate = Math.max(0, Number(settings.taxRate) || 0);
-  const taxAmount =
-    settings.taxMode === 'inclusive'
-      ? discountedSubtotal - discountedSubtotal / (1 + taxRate / 100)
-      : discountedSubtotal * (taxRate / 100);
-  const grandTotal =
-    settings.taxMode === 'inclusive' ? discountedSubtotal : discountedSubtotal + taxAmount;
+  const subtotalAfterLineDiscounts = subtotal - itemDiscountTotal;
+  const orderDiscountTotal = subtotalAfterLineDiscounts * (globalDiscount / 100);
+  const discountTotal = itemDiscountTotal + orderDiscountTotal;
+  const discountedSubtotal = subtotalAfterLineDiscounts - orderDiscountTotal;
+  const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
+  const taxLines = cart.map((item) => {
+    const gross = item.unitPrice * item.quantity;
+    const lineAfterDiscount = gross * (1 - item.discount / 100);
+    const orderDiscountShare =
+      subtotalAfterLineDiscounts > 0
+        ? orderDiscountTotal * (lineAfterDiscount / subtotalAfterLineDiscounts)
+        : 0;
+    const lineTotal = Math.max(0, lineAfterDiscount - orderDiscountShare);
+    const productTaxRate = Math.max(0, Number(item.taxRate) || 0);
+    const lineTaxRate = item.taxApplicable ? productTaxRate || defaultTaxRate : 0;
+    const lineTax = lineTaxRate <= 0 ? 0 : gross * (lineTaxRate / 100);
+    return { lineTotal, lineTaxRate, taxMode: item.taxMode, taxAmount: lineTax };
+  });
+  const taxAmount = taxLines.reduce((sum, line) => sum + line.taxAmount, 0);
+  const exclusiveTaxAmount = taxLines
+    .filter((line) => line.taxMode === 'exclusive')
+    .reduce((sum, line) => sum + line.taxAmount, 0);
+  const grandTotal = discountedSubtotal + exclusiveTaxAmount;
+  const appliedTaxRates = Array.from(
+    new Set(taxLines.filter((line) => line.lineTaxRate > 0).map((line) => line.lineTaxRate))
+  );
+  const taxLabel =
+    appliedTaxRates.length === 0
+      ? '0%'
+      : appliedTaxRates.length === 1
+        ? `${appliedTaxRates[0]}%`
+        : 'mixed';
   const quickProducts = useMemo(() => [], []);
+
+  useEffect(() => {
+    const query = scanInput.trim();
+    if (query.length < 2 || isScanning) {
+      setSearchSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      void loadInventoryPage({ q: query, limit: 8 })
+        .then((result) => {
+          if (cancelled) return;
+          setSearchSuggestions(
+            result.items.filter(
+              (item) => item.productStatus !== 'inactive' && item.stockStatus !== 'expired'
+            )
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setSearchSuggestions([]);
+        });
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [isScanning, scanInput]);
+
+  const getProductDiscountPercent = (product: InventoryItem): number => {
+    const sellingPrice = Number(product.sellingPrice) || 0;
+    const discountValue = Math.max(0, Number(product.discountValue) || 0);
+    if (sellingPrice <= 0 || discountValue <= 0 || product.discountType === 'none') return 0;
+    if (product.discountType === 'percentage') return Math.min(100, discountValue);
+    if (product.discountType === 'fixed') {
+      return Math.min(100, (discountValue / sellingPrice) * 100);
+    }
+    return 0;
+  };
 
   const handleScan = useCallback(
     async (rawCode: string) => {
@@ -142,7 +209,10 @@ export default function CheckoutScreen() {
             quantity: 1,
             unitPrice: product.sellingPrice,
             unitCost: product.unitCost,
-            discount: 0,
+            discount: getProductDiscountPercent(product),
+            taxApplicable: Boolean(product.taxApplicable || Number(product.taxRate) > 0),
+            taxRate: Number(product.taxRate) || Number(settings.taxRate) || 0,
+            taxMode: product.taxMode ?? settings.taxMode ?? 'exclusive',
             requiresApproval: product.requiresApproval,
             isControlled: product.isControlled,
             category: product.category,
@@ -154,6 +224,7 @@ export default function CheckoutScreen() {
         });
 
         setScanInput('');
+        setSearchSuggestions([]);
         toast.success(`Added: ${product.name}`);
       } catch (error) {
         toast.error(getErrorMessage(error));
@@ -162,7 +233,7 @@ export default function CheckoutScreen() {
         setIsScanning(false);
       }
     },
-    [isHydrated]
+    [isHydrated, settings.taxMode, settings.taxRate]
   );
 
   const queueScan = useCallback(
@@ -322,7 +393,7 @@ export default function CheckoutScreen() {
         items: cart.map((item) => ({
           inventoryItemId: item.inventoryItemId,
           quantity: item.quantity,
-          discount: item.discount,
+          discount: 100 * (1 - (1 - item.discount / 100) * (1 - globalDiscount / 100)),
           unitPrice: item.unitPrice,
         })),
         subtotal,
@@ -337,6 +408,7 @@ export default function CheckoutScreen() {
       });
 
       setCompletedSale(sale);
+      setCompletedTaxLabel(taxLabel);
       clearCart();
       setShowReceipt(true);
       toast.success(
@@ -368,6 +440,7 @@ export default function CheckoutScreen() {
           onScan={queueScan}
           isScanning={isScanning}
           scanRef={scanRef}
+          searchSuggestions={searchSuggestions}
           onUpdateQuantity={updateQuantity}
           onUpdateDiscount={updateItemDiscount}
           onRemoveItem={removeItem}
@@ -398,7 +471,7 @@ export default function CheckoutScreen() {
           onProcessPayment={processPayment}
           isProcessing={isProcessing}
           currency={settings.currency}
-          taxRate={taxRate}
+          taxLabel={taxLabel}
         />
       </div>
 
@@ -410,7 +483,7 @@ export default function CheckoutScreen() {
           currency={settings.currency}
           businessName={settings.businessName}
           receiptFooter={settings.receiptFooter}
-          taxRate={taxRate}
+          taxLabel={completedTaxLabel}
         />
       )}
 

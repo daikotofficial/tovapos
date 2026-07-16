@@ -30,6 +30,37 @@ export default function SettingsPage() {
     setForm(settings);
   }, [settings]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    const previousTheme = root.dataset.theme;
+    const previousPrimary = root.style.getPropertyValue('--primary');
+    const previousRing = root.style.getPropertyValue('--ring');
+    const previousFont = root.style.getPropertyValue('--font-sans');
+
+    root.dataset.theme = form.themeMode ?? 'light';
+    if (form.themeColor) {
+      root.style.setProperty('--primary', form.themeColor);
+      root.style.setProperty('--ring', form.themeColor);
+    }
+    if (form.fontFamily) {
+      root.style.setProperty(
+        '--font-sans',
+        `${form.fontFamily}, ui-sans-serif, system-ui, sans-serif`
+      );
+    }
+
+    return () => {
+      root.dataset.theme = previousTheme ?? settings.themeMode ?? 'light';
+      if (previousPrimary) root.style.setProperty('--primary', previousPrimary);
+      else root.style.removeProperty('--primary');
+      if (previousRing) root.style.setProperty('--ring', previousRing);
+      else root.style.removeProperty('--ring');
+      if (previousFont) root.style.setProperty('--font-sans', previousFont);
+      else root.style.removeProperty('--font-sans');
+    };
+  }, [form.fontFamily, form.themeColor, form.themeMode, settings.themeMode]);
+
   const save = async () => {
     await updateSettings(form);
     setSaved(true);

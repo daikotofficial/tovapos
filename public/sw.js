@@ -1,7 +1,12 @@
-const CACHE_NAME = 'tovapos-shell-v4';
+const CACHE_NAME = 'tovapos-shell-v5';
 const APP_SHELL = [
   '/',
   '/sign-up-login',
+  '/dashboard',
+  '/sales',
+  '/inventory-management',
+  '/sync-logs',
+  '/support',
   '/site.webmanifest',
   '/assets/brand/tovapos-mark.svg',
   '/assets/brand/tovapos-logo.svg',
@@ -17,7 +22,9 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then((keys) =>
+        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+      )
       .then(() => self.clients.claim())
   );
 });

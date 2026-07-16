@@ -66,6 +66,11 @@ export interface SaleLineItem {
   unitCost: number;
   discount: number;
   lineTotal: number;
+  discountAmount?: number;
+  taxApplicable?: boolean;
+  taxRate?: number;
+  taxMode?: 'inclusive' | 'exclusive';
+  taxAmount?: number;
   requiresApproval: boolean;
   isControlled: boolean;
   category: string;
@@ -339,4 +344,21 @@ export interface BusinessSettings {
   expenseCategories?: ExpenseCategory[];
   paymentMethods?: PaymentMethod[];
   updatedAt?: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  tenantId: string;
+  tenantName?: string;
+  subject: string;
+  message: string;
+  status: 'open' | 'pending' | 'resolved' | 'closed';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  createdBy: string;
+  createdByEmail?: string;
+  response?: string;
+  respondedBy?: string;
+  respondedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }

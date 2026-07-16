@@ -22,6 +22,7 @@ import {
   Bell,
   Tags,
   History,
+  LifeBuoy,
 } from 'lucide-react';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission } from '@/lib/pos/types';
@@ -159,13 +160,22 @@ const navItems: NavItem[] = [
     order: 3,
   },
   {
+    id: 'nav-support',
+    label: 'Support',
+    href: '/support',
+    icon: LifeBuoy,
+    group: 'Admin',
+    permission: 'dashboard',
+    order: 4,
+  },
+  {
     id: 'nav-settings',
     label: 'Settings',
     href: '/settings',
     icon: Settings,
     group: 'Admin',
     permission: 'dashboard',
-    order: 4,
+    order: 5,
   },
 ];
 

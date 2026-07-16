@@ -1,0 +1,190 @@
+import { NextRequest, NextResponse } from 'next/server';
+import type { SupportTicket } from '@/lib/pos/types';
+import { getPosPool } from '@/lib/server/pos-db';
+import { assertSameOrigin, errorResponse, HttpError } from '@/lib/server/security';
+import { requirePlatformAdmin } from '@/lib/server/platform-admin';
+
+function ticketFromRow(row: Record<string, unknown>): SupportTicket {
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenant_id),
+    tenantName: row.tenant_name ? String(row.tenant_name) : undefined,
+    subject: String(row.subject),
+    message: String(row.message),
+    status: row.status as SupportTicket['status'],
+    priority: row.priority as SupportTicket['priority'],
+    createdBy: String(row.created_by),
+    createdByEmail: row.created_by_email ? String(row.created_by_email) : undefined,
+    response: row.response ? String(row.response) : undefined,
+    respondedBy: row.responded_by ? String(row.responded_by) : undefined,
+    respondedAt: row.responded_at ? new Date(String(row.responded_at)).toISOString() : undefined,
+    createdAt: new Date(String(row.created_at)).toISOString(),
+    updatedAt: new Date(String(row.updated_at)).toISOString(),
+  };
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    await requirePlatformAdmin(request);
+
+    const [tenants, tickets] = await Promise.all([
+      getPosPool().query(
+        `
+        SELECT
+          t.id,
+          t.slug,
+          t.name,
+          t.status,
+          t.created_at,
+          t.updated_at,
+          coalesce(inv.product_count, 0)::int AS product_count,
+          coalesce(inv.active_item_count, 0)::int AS active_item_count,
+          coalesce(inv.total_units, 0)::float8 AS total_units,
+          coalesce(users.user_count, 0)::int AS user_count,
+          coalesce(users.active_user_count, 0)::int AS active_user_count,
+          coalesce(sales.sale_count, 0)::int AS sale_count,
+          coalesce(sales.revenue, 0)::float8 AS revenue,
+          coalesce(open_tickets.open_ticket_count, 0)::int AS open_ticket_count
+        FROM pos_tenants t
+        LEFT JOIN (
+          SELECT tenant_id,
+            count(*) AS product_count,
+            count(*) FILTER (WHERE product_status = 'active') AS active_item_count,
+            coalesce(sum(current_qty), 0) AS total_units
+          FROM pos_tenant_inventory
+          GROUP BY tenant_id
+        ) inv ON inv.tenant_id = t.id
+        LEFT JOIN (
+          SELECT tenant_id,
+            count(*) AS user_count,
+            count(*) FILTER (WHERE status = 'active') AS active_user_count
+          FROM pos_app_users
+          GROUP BY tenant_id
+        ) users ON users.tenant_id = t.id
+        LEFT JOIN (
+          SELECT tenant_id,
+            count(*) FILTER (WHERE status = 'completed') AS sale_count,
+            coalesce(sum(grand_total) FILTER (WHERE status = 'completed'), 0) AS revenue
+          FROM pos_tenant_sales
+          GROUP BY tenant_id
+        ) sales ON sales.tenant_id = t.id
+        LEFT JOIN (
+          SELECT tenant_id, count(*) AS open_ticket_count
+          FROM pos_support_tickets
+          WHERE status IN ('open', 'pending')
+          GROUP BY tenant_id
+        ) open_tickets ON open_tickets.tenant_id = t.id
+        ORDER BY t.created_at DESC
+        LIMIT 500
+        `
+      ),
+      getPosPool().query(
+        `
+        SELECT st.*, t.name AS tenant_name
+        FROM pos_support_tickets st
+        JOIN pos_tenants t ON t.id = st.tenant_id
+        ORDER BY st.created_at DESC
+        LIMIT 100
+        `
+      ),
+    ]);
+
+    return NextResponse.json({
+      tenants: tenants.rows.map((row) => ({
+        id: row.id,
+        slug: row.slug,
+        name: row.name,
+        status: row.status,
+        registeredAt: new Date(row.created_at).toISOString(),
+        updatedAt: new Date(row.updated_at).toISOString(),
+        productCount: Number(row.product_count),
+        activeItemCount: Number(row.active_item_count),
+        totalUnits: Number(row.total_units),
+        userCount: Number(row.user_count),
+        activeUserCount: Number(row.active_user_count),
+        saleCount: Number(row.sale_count),
+        revenue: Number(row.revenue),
+        openTicketCount: Number(row.open_ticket_count),
+      })),
+      tickets: tickets.rows.map(ticketFromRow),
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    assertSameOrigin(request);
+    const admin = await requirePlatformAdmin(request);
+    const body = (await request.json()) as Record<string, unknown>;
+    const action = typeof body.action === 'string' ? body.action : '';
+
+    if (action === 'respond-ticket') {
+      const ticketId = typeof body.ticketId === 'string' ? body.ticketId : '';
+      const response = typeof body.response === 'string' ? body.response.trim() : '';
+      const status =
+        body.status === 'open' ||
+        body.status === 'pending' ||
+        body.status === 'resolved' ||
+        body.status === 'closed'
+          ? body.status
+          : 'pending';
+      if (!ticketId || response.length < 2) {
+        throw new HttpError(400, 'Ticket response is required', 'VALIDATION_ERROR');
+      }
+      const result = await getPosPool().query(
+        `
+        UPDATE pos_support_tickets
+        SET response = $2, status = $3, responded_by = $4, responded_at = now(), updated_at = now()
+        WHERE id = $1
+        RETURNING *
+        `,
+        [ticketId, response, status, admin.name]
+      );
+      if (!result.rows[0]) throw new HttpError(404, 'Support ticket not found', 'NOT_FOUND');
+      return NextResponse.json({ ticket: ticketFromRow(result.rows[0]) });
+    }
+
+    const tenantId = typeof body.tenantId === 'string' ? body.tenantId : '';
+    if (!tenantId) throw new HttpError(400, 'Tenant id is required', 'VALIDATION_ERROR');
+
+    if (action === 'suspend-tenant' || action === 'activate-tenant') {
+      const nextStatus = action === 'suspend-tenant' ? 'suspended' : 'active';
+      const result = await getPosPool().query(
+        `
+        UPDATE pos_tenants
+        SET status = $2, updated_at = now()
+        WHERE id = $1
+        RETURNING id, status
+        `,
+        [tenantId, nextStatus]
+      );
+      if (!result.rows[0]) throw new HttpError(404, 'Business account not found', 'NOT_FOUND');
+      await getPosPool().query(
+        `INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, metadata)
+         VALUES ($1, $2, $3, 'tenant', $1, $4::jsonb)`,
+        [
+          tenantId,
+          admin.id,
+          action,
+          JSON.stringify({ performedBy: admin.email, targetStatus: nextStatus }),
+        ]
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === 'delete-tenant') {
+      const result = await getPosPool().query(
+        'DELETE FROM pos_tenants WHERE id = $1 RETURNING id',
+        [tenantId]
+      );
+      if (!result.rows[0]) throw new HttpError(404, 'Business account not found', 'NOT_FOUND');
+      return NextResponse.json({ ok: true });
+    }
+
+    throw new HttpError(400, 'Unsupported admin action', 'VALIDATION_ERROR');
+  } catch (error) {
+    return errorResponse(error);
+  }
+}

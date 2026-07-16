@@ -36,7 +36,7 @@ interface PaymentPanelProps {
   onProcessPayment: () => void;
   isProcessing: boolean;
   currency: string;
-  taxRate: number;
+  taxLabel: string;
 }
 
 const QUICK_AMOUNTS_BY_CURRENCY: Record<string, number[]> = {
@@ -63,7 +63,7 @@ export default function PaymentPanel({
   onProcessPayment,
   isProcessing,
   currency,
-  taxRate,
+  taxLabel,
 }: PaymentPanelProps) {
   const { customers, hasPermission } = usePosStore();
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
@@ -211,7 +211,7 @@ export default function PaymentPanel({
               </div>
             )}
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Tax ({taxRate}%)</span>
+              <span className="text-muted-foreground">Tax ({taxLabel})</span>
               <span className="font-tabular font-medium text-foreground">
                 {formatMoney(taxAmount, currency)}
               </span>

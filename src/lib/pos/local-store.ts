@@ -422,7 +422,8 @@ export async function loadInventory(seed: InventoryItem[]): Promise<InventoryIte
   if (shouldUsePostgresStore()) {
     try {
       const result = await apiRequest<InventoryPageResult>('inventory', undefined, {
-        limit: 100,
+        limit: 500,
+        includeTotal: true,
       });
       void putManyInBrowser('inventory', result.items).catch((error) =>
         console.warn('Unable to cache inventory in this browser', error)
@@ -443,6 +444,27 @@ export async function loadInventory(seed: InventoryItem[]): Promise<InventoryIte
   const seeded = seed.map((item) => normalizeInventoryItem(item));
   await putMany('inventory', seeded);
   return seeded;
+}
+
+export async function warmInventoryCache(maxPages = 10): Promise<number> {
+  if (!shouldUsePostgresStore()) {
+    return (await getAllFromBrowser<InventoryItem>('inventory')).length;
+  }
+
+  let cursor: string | undefined;
+  let cached = 0;
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await apiRequest<InventoryPageResult>('inventory', undefined, {
+      limit: 500,
+      cursor,
+    });
+    if (result.items.length === 0) break;
+    await putManyInBrowser('inventory', result.items.map(normalizeInventoryItem));
+    cached += result.items.length;
+    if (!result.nextCursor) break;
+    cursor = result.nextCursor;
+  }
+  return cached;
 }
 
 export async function loadInventoryPage(

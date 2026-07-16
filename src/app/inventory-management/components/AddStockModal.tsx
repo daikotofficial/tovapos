@@ -8,7 +8,12 @@ import NiceSelect from '@/components/ui/NiceSelect';
 import { Loader2, Plus, Save, ScanLine } from 'lucide-react';
 import { toast } from 'sonner';
 import type { InventoryItem, StockStatus } from '@/lib/pos/types';
-import { computeProfitMargin, computeStockStatus, getTodayIso } from '@/lib/pos/stock';
+import {
+  computeProfitMargin,
+  computeSellingPriceFromMargin,
+  computeStockStatus,
+  getTodayIso,
+} from '@/lib/pos/stock';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 
 interface AddStockModalProps {
@@ -41,6 +46,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const selectedStatus = watch('productStatus') ?? 'active';
   const selectedDiscountType = watch('discountType') ?? 'none';
   const selectedTaxMode = watch('taxMode') ?? 'exclusive';
+  const selectedTaxRate = Number(watch('taxRate')) || 0;
   const manufactureDate = watch('manufactureDate') ?? '';
   const expiryDate = watch('expiryDate') ?? '';
   const categoryOptions = useMemo(
@@ -126,13 +132,17 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
 
   useEffect(() => {
     if (pricingMode !== 'margin' || unitCost <= 0 || profitMargin <= 0) return;
-    const marginDecimal = Math.min(99, Math.max(0, profitMargin)) / 100;
-    const sellingPrice = marginDecimal >= 0.99 ? unitCost : unitCost / (1 - marginDecimal);
-    setValue('sellingPrice', Number(sellingPrice.toFixed(2)), {
+    setValue('sellingPrice', computeSellingPriceFromMargin(unitCost, profitMargin), {
       shouldDirty: true,
       shouldValidate: true,
     });
   }, [pricingMode, profitMargin, setValue, unitCost]);
+
+  useEffect(() => {
+    if (selectedTaxRate > 0) {
+      setValue('taxApplicable', true, { shouldDirty: true });
+    }
+  }, [selectedTaxRate, setValue]);
 
   const onSubmit = async (data: FormData) => {
     const expiryDate = data.expiryDate || '2099-12-31';
@@ -155,10 +165,13 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       maxStock: Number(data.maxStock) || Math.max(Number(data.currentQty) || 0, 1),
       unitCost: Number(data.unitCost),
       sellingPrice: Number(data.sellingPrice),
-      profitMargin: computeProfitMargin(Number(data.unitCost), Number(data.sellingPrice)),
+      profitMargin:
+        pricingMode === 'margin' && Number(data.profitMargin) > 0
+          ? Number(data.profitMargin)
+          : computeProfitMargin(Number(data.unitCost), Number(data.sellingPrice)),
       discountType: data.discountType ?? 'none',
       discountValue: Number(data.discountValue) || 0,
-      taxApplicable: Boolean(data.taxApplicable),
+      taxApplicable: Boolean(data.taxApplicable || Number(data.taxRate) > 0),
       taxRate: Number(data.taxRate) || 0,
       taxMode: data.taxMode ?? 'exclusive',
       unitOfMeasurement: data.unitOfMeasurement?.trim() || 'unit',
@@ -540,6 +553,14 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 onChange={(event) => {
                   profitMarginRegistration.onChange(event);
                   setPricingMode('margin');
+                  setValue(
+                    'sellingPrice',
+                    computeSellingPriceFromMargin(unitCost, Number(event.target.value) || 0),
+                    {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    }
+                  );
                 }}
                 className={`${inputClass} font-tabular`}
                 placeholder="0"
@@ -561,7 +582,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                   onChange={(event) => {
                     sellingPriceRegistration.onChange(event);
                     setPricingMode('manual');
-                    setValue('profitMargin', undefined as unknown as number, {
+                    setValue('profitMargin', 0, {
                       shouldDirty: true,
                       shouldValidate: false,
                     });

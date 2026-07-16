@@ -58,6 +58,7 @@ import {
   saveUser,
   saveVendor,
   setLocalTenant,
+  warmInventoryCache,
 } from './local-store';
 import { defaultCustomers, defaultSettings, defaultUsers, defaultVendors } from './seeds';
 import { getProductUsage, planAllowsPermission } from './subscription';
@@ -117,6 +118,13 @@ type VersionedInventoryItem = InventoryItem & {
   _expectedUpdatedAt?: string;
 };
 
+const OFFLINE_SESSION_KEY = 'tovapos.offlineSession';
+
+type CachedSession = {
+  user: TovaUser;
+  tenant: { id: string; slug: string; name: string };
+};
+
 function createTransactionId(): string {
   const date = new Date();
   const stamp = date.toISOString().replace(/\D/g, '').slice(0, 14);
@@ -173,17 +181,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      if (process.env.NODE_ENV === 'production') {
-        void navigator.serviceWorker.register('/sw.js').catch((error) => {
-          console.error('Unable to register offline application shell', error);
-        });
-      } else {
-        void navigator.serviceWorker
-          .getRegistrations()
-          .then((registrations) =>
-            Promise.all(registrations.map((registration) => registration.unregister()))
-          );
-      }
+      void navigator.serviceWorker.register('/sw.js').catch((error) => {
+        console.error('Unable to register offline application shell', error);
+      });
     }
 
     let cancelled = false;
@@ -270,28 +270,47 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
     async function hydrate() {
       await ensureCleanLocalDatabase();
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 8_000);
-      let sessionResponse: Response;
+      let session: CachedSession | null = null;
+      let sessionResponse: Response | undefined;
+      let timeout: number | undefined;
       try {
+        const controller = new AbortController();
+        timeout = window.setTimeout(() => controller.abort(), 8_000);
         sessionResponse = await fetch('/api/auth/session', {
           cache: 'no-store',
           signal: controller.signal,
         });
+      } catch (error) {
+        if (!navigator.onLine || error instanceof TypeError || error instanceof DOMException) {
+          const cached = window.localStorage.getItem(OFFLINE_SESSION_KEY);
+          session = cached ? (JSON.parse(cached) as CachedSession) : null;
+        } else {
+          throw error;
+        }
       } finally {
-        window.clearTimeout(timeout);
+        if (timeout) window.clearTimeout(timeout);
       }
-      if (!sessionResponse.ok) {
+
+      if (sessionResponse?.ok) {
+        session = (await sessionResponse.json()) as CachedSession;
+        window.localStorage.setItem(OFFLINE_SESSION_KEY, JSON.stringify(session));
+      } else if (sessionResponse && !sessionResponse.ok) {
+        window.localStorage.removeItem(OFFLINE_SESSION_KEY);
+      }
+
+      if (!session) {
         if (cancelled) return;
         setActiveUserIdState('');
         setIsAuthenticated(false);
         setIsHydrated(true);
         return;
       }
-      const session = (await sessionResponse.json()) as {
-        user: TovaUser;
-        tenant: { id: string; slug: string; name: string };
-      };
+
+      if (sessionResponse?.ok && navigator.onLine) {
+        void warmInventoryCache().catch((error) =>
+          console.warn('Unable to prepare full offline inventory cache', error)
+        );
+      }
       if (cancelled) return;
       setLocalTenant(session.tenant.id);
       setTenant(session.tenant);
@@ -707,8 +726,14 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       root.style.setProperty('--primary', settings.themeColor);
       root.style.setProperty('--ring', settings.themeColor);
     }
+    if (settings.fontFamily) {
+      root.style.setProperty(
+        '--font-sans',
+        `${settings.fontFamily}, ui-sans-serif, system-ui, sans-serif`
+      );
+    }
     root.dataset.theme = settings.themeMode ?? 'light';
-  }, [settings.themeColor, settings.themeMode]);
+  }, [settings.fontFamily, settings.themeColor, settings.themeMode]);
 
   const setActiveUserId = useCallback(
     (userId: string) => {
@@ -1022,21 +1047,56 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     return saved;
   }, []);
 
-  const updateSettings = useCallback(async (nextSettings: BusinessSettings) => {
-    const saved = { ...nextSettings, id: 'settings' as const, updatedAt: new Date().toISOString() };
-    const queueItem = createSyncQueueItem({
-      entity: 'settings',
-      entityId: saved.id,
-      action: 'update',
-      payload: saved,
-    });
+  const updateSettings = useCallback(
+    async (nextSettings: BusinessSettings) => {
+      const saved = {
+        ...nextSettings,
+        id: 'settings' as const,
+        updatedAt: new Date().toISOString(),
+      };
+      const queueItem = createSyncQueueItem({
+        entity: 'settings',
+        entityId: saved.id,
+        action: 'update',
+        payload: saved,
+      });
 
-    await saveSettings(saved);
-    await saveSyncQueueItem(queueItem);
-    setSettings(saved);
-    setSyncQueue((prev) => [queueItem, ...prev]);
-    return saved;
-  }, []);
+      if (
+        process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' &&
+        typeof navigator !== 'undefined' &&
+        isOnline
+      ) {
+        let response: Response | undefined;
+        try {
+          response = await fetch('/api/pos-store?store=settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(saved),
+          });
+        } catch (error) {
+          if (!(error instanceof TypeError)) throw error;
+          setIsOnline(false);
+        }
+
+        if (response) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          if (!response.ok) {
+            throw new Error(payload?.error ?? 'Unable to save settings');
+          }
+          await saveSettings(saved);
+          setSettings(saved);
+          return saved;
+        }
+      }
+
+      await saveSettings(saved);
+      await saveSyncQueueItem(queueItem);
+      setSettings(saved);
+      setSyncQueue((prev) => [queueItem, ...prev]);
+      return saved;
+    },
+    [isOnline]
+  );
 
   const completeSale = useCallback(
     async (input: CompleteSaleInput) => {
@@ -1143,6 +1203,15 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             updatedAt: now,
           });
           updatedInventory.push({ ...updated, _expectedUpdatedAt: item.updatedAt });
+          const gross = line.unitPrice * line.quantity;
+          const discountAmount = Number((gross * (line.discount / 100)).toFixed(2));
+          const lineTotal = Number((gross - discountAmount).toFixed(2));
+          const productTaxRate = Math.max(0, Number(item.taxRate) || 0);
+          const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
+          const taxApplicable = Boolean(item.taxApplicable || productTaxRate > 0);
+          const taxRate = taxApplicable ? productTaxRate || defaultTaxRate : 0;
+          const taxMode = item.taxMode ?? settings.taxMode ?? 'exclusive';
+          const taxAmount = taxRate > 0 ? Number((gross * (taxRate / 100)).toFixed(2)) : 0;
 
           return {
             id: `line-${operationId}-${item.id}`,
@@ -1158,9 +1227,12 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             unitPrice: line.unitPrice,
             unitCost: item.unitCost,
             discount: line.discount,
-            lineTotal: Number(
-              (line.unitPrice * line.quantity * (1 - line.discount / 100)).toFixed(2)
-            ),
+            lineTotal,
+            discountAmount,
+            taxApplicable,
+            taxRate,
+            taxMode,
+            taxAmount,
             requiresApproval: item.requiresApproval,
             isControlled: item.isControlled,
             category: item.category,
@@ -1323,7 +1395,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         saleInFlightRef.current = false;
       }
     },
-    [customers, hasPermission, isOnline]
+    [customers, hasPermission, isOnline, settings.taxMode, settings.taxRate]
   );
 
   const reconcileCreditSale = useCallback(
