@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import {
   Activity,
   Ban,
@@ -125,7 +126,7 @@ export default function AdminPage() {
   const [mfaSetup, setMfaSetup] = useState<{
     secret: string;
     otpauthUrl: string;
-    qrSvg: string;
+    qrDataUrl: string;
   } | null>(null);
   const [mfaCode, setMfaCode] = useState('');
   const [remember, setRemember] = useState(true);
@@ -417,19 +418,18 @@ export default function AdminPage() {
       const payload = (await response.json().catch(() => null)) as {
         secret?: string;
         otpauthUrl?: string;
-        qrSvg?: string;
+        qrDataUrl?: string;
         error?: string;
       } | null;
-      if (!response.ok || !payload?.secret || !payload.otpauthUrl || !payload.qrSvg) {
+      if (!response.ok || !payload?.secret || !payload.otpauthUrl || !payload.qrDataUrl) {
         throw new Error(payload?.error ?? 'Unable to start 2FA setup');
       }
       setMfaSetup({
         secret: payload.secret,
         otpauthUrl: payload.otpauthUrl,
-        qrSvg: payload.qrSvg,
+        qrDataUrl: payload.qrDataUrl,
       });
       setMfaCode('');
-      toast.success('2FA setup started');
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'Unable to start 2FA setup';
       setError(message);
@@ -1235,7 +1235,7 @@ export default function AdminPage() {
                         Once enabled, future admin logins require both the password and the
                         authenticator code.
                       </p>
-                      {!admin.mfaEnabled && !mfaSetup && (
+                      {!admin.mfaEnabled && (
                         <button
                           type="button"
                           onClick={() => void startMfaSetup()}
@@ -1253,51 +1253,7 @@ export default function AdminPage() {
                     </div>
 
                     <div className="rounded-lg border border-border p-4">
-                      {mfaSetup ? (
-                        <div className="space-y-3">
-                          <p className="text-sm font-bold">Add this account to your app</p>
-                          <p className="text-xs leading-5 text-muted-foreground">
-                            Open Google Authenticator or another authenticator app, choose scan QR
-                            code, then type the 6-digit code below.
-                          </p>
-                          <div className="flex justify-center rounded-lg border border-border bg-white p-3">
-                            <div
-                              className="h-[220px] w-[220px]"
-                              aria-label="Authenticator QR code"
-                              dangerouslySetInnerHTML={{ __html: mfaSetup.qrSvg }}
-                            />
-                          </div>
-                          <p className="text-xs font-semibold text-muted-foreground">
-                            Manual setup key
-                          </p>
-                          <p className="break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">
-                            {mfaSetup.secret}
-                          </p>
-                          <a
-                            href={mfaSetup.otpauthUrl}
-                            className="inline-flex text-xs font-semibold text-primary hover:underline"
-                          >
-                            Open authenticator setup link
-                          </a>
-                          <input
-                            value={mfaCode}
-                            onChange={(event) =>
-                              setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))
-                            }
-                            className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm tracking-[0.35em]"
-                            inputMode="numeric"
-                            placeholder="000000"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => void submitMfaAction('verify')}
-                            disabled={busy === 'mfa' || mfaCode.length !== 6}
-                            className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                          >
-                            Verify and enable
-                          </button>
-                        </div>
-                      ) : admin.mfaEnabled ? (
+                      {admin.mfaEnabled ? (
                         <div className="space-y-3">
                           <p className="text-sm font-bold text-success">2FA is active</p>
                           <p className="text-xs leading-5 text-muted-foreground">
@@ -1322,9 +1278,12 @@ export default function AdminPage() {
                           </button>
                         </div>
                       ) : (
-                        <p className="text-sm text-muted-foreground">
-                          2FA is not enabled for this admin account yet.
-                        </p>
+                        <div className="space-y-2">
+                          <p className="text-sm font-bold">2FA is not enabled</p>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            Click Set up 2FA to open the QR code setup screen.
+                          </p>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1428,6 +1387,85 @@ export default function AdminPage() {
           </div>
         </section>
       </div>
+      {mfaSetup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
+          <div className="w-full max-w-lg rounded-xl border border-border bg-card text-foreground shadow-modal">
+            <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+              <div>
+                <p className="text-lg font-black">Set Up Two-Factor Authentication</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Scan the QR code, then enter the 6-digit code from your authenticator app.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMfaSetup(null);
+                  setMfaCode('');
+                }}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <div className="flex justify-center rounded-xl border border-border bg-white p-4">
+                <Image
+                  src={mfaSetup.qrDataUrl}
+                  alt="Scan this QR code with Google Authenticator"
+                  width={220}
+                  height={220}
+                  unoptimized
+                />
+              </div>
+
+              <div className="rounded-lg border border-border p-3">
+                <p className="text-xs font-bold uppercase text-muted-foreground">
+                  Manual setup key
+                </p>
+                <p className="mt-2 break-all font-mono text-xs text-foreground">
+                  {mfaSetup.secret}
+                </p>
+              </div>
+
+              <a
+                href={mfaSetup.otpauthUrl}
+                className="inline-flex text-xs font-semibold text-primary hover:underline"
+              >
+                Open setup link on this device
+              </a>
+
+              <label className="block space-y-1">
+                <span className="text-xs font-semibold text-muted-foreground">
+                  Enter authenticator code
+                </span>
+                <input
+                  value={mfaCode}
+                  onChange={(event) =>
+                    setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))
+                  }
+                  className="h-12 w-full rounded-lg border border-border bg-background px-3 text-center text-lg font-black tracking-[0.45em]"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="000000"
+                  autoFocus
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={() => void submitMfaAction('verify')}
+                disabled={busy === 'mfa' || mfaCode.length !== 6}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {busy === 'mfa' ? <Loader2 size={15} className="animate-spin" /> : null}
+                Verify and Enable 2FA
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

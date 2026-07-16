@@ -21,8 +21,8 @@ export async function POST(request: NextRequest) {
         [admin.id, secret]
       );
       const otpauthUrl = totpUri(secret, admin.email);
-      const qrSvg = await QRCode.toString(otpauthUrl, {
-        type: 'svg',
+      const qrDataUrl = await QRCode.toDataURL(otpauthUrl, {
+        type: 'image/png',
         margin: 1,
         width: 220,
         color: {
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
           light: '#ffffff',
         },
       });
-      return NextResponse.json({ secret, otpauthUrl, qrSvg });
+      return NextResponse.json({ secret, otpauthUrl, qrDataUrl });
     }
 
     const code = typeof body.code === 'string' ? body.code.trim() : '';
