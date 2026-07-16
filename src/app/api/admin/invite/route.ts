@@ -4,7 +4,7 @@ import { sendPlatformAdminInviteEmail } from '@/lib/server/email';
 import { hashPasswordServer, passwordStrengthError } from '@/lib/server/password';
 import { getPosPool } from '@/lib/server/pos-db';
 import { assertSameOrigin, errorResponse, HttpError } from '@/lib/server/security';
-import { assertOwnerAdmin, requirePlatformAdmin } from '@/lib/server/platform-admin';
+import { assertSuperAdmin, requirePlatformAdmin } from '@/lib/server/platform-admin';
 
 function inviteUrl(request: NextRequest, token: string): string {
   const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
@@ -15,14 +15,11 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const admin = await requirePlatformAdmin(request);
-    assertOwnerAdmin(admin);
+    assertSuperAdmin(admin);
     const body = (await request.json()) as Record<string, unknown>;
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
     const name = typeof body.name === 'string' ? body.name.trim() : '';
-    const role =
-      body.role === 'admin' || body.role === 'support' || body.role === 'owner'
-        ? body.role
-        : 'support';
+    const role = body.role === 'admin' || body.role === 'support' ? body.role : 'support';
     if (!email || !name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new HttpError(400, 'Valid admin name and email are required', 'VALIDATION_ERROR');
     }

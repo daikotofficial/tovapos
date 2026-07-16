@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { SupportTicket } from '@/lib/pos/types';
 import { getPosPool } from '@/lib/server/pos-db';
 import { assertSameOrigin, errorResponse, HttpError } from '@/lib/server/security';
-import { requirePlatformAdmin } from '@/lib/server/platform-admin';
+import {
+  assertPlatformOperator,
+  assertSuperAdmin,
+  requirePlatformAdmin,
+} from '@/lib/server/platform-admin';
 
 function ticketFromRow(row: Record<string, unknown>): SupportTicket {
   return {
@@ -25,9 +29,9 @@ function ticketFromRow(row: Record<string, unknown>): SupportTicket {
 
 export async function GET(request: NextRequest) {
   try {
-    await requirePlatformAdmin(request);
+    const admin = await requirePlatformAdmin(request);
 
-    const [tenants, tickets] = await Promise.all([
+    const [tenants, tickets, admins] = await Promise.all([
       getPosPool().query(
         `
         SELECT
@@ -43,7 +47,9 @@ export async function GET(request: NextRequest) {
           coalesce(users.user_count, 0)::int AS user_count,
           coalesce(users.active_user_count, 0)::int AS active_user_count,
           coalesce(sales.sale_count, 0)::int AS sale_count,
-          coalesce(sales.revenue, 0)::float8 AS revenue,
+          coalesce(settings.data->>'subscriptionPlanId', 'starter') AS subscription_plan_id,
+          coalesce(settings.data->>'subscriptionStatus', 'active') AS subscription_status,
+          settings.data->>'subscriptionRenewsAt' AS subscription_renews_at,
           coalesce(open_tickets.open_ticket_count, 0)::int AS open_ticket_count
         FROM pos_tenants t
         LEFT JOIN (
@@ -63,11 +69,14 @@ export async function GET(request: NextRequest) {
         ) users ON users.tenant_id = t.id
         LEFT JOIN (
           SELECT tenant_id,
-            count(*) FILTER (WHERE status = 'completed') AS sale_count,
-            coalesce(sum(grand_total) FILTER (WHERE status = 'completed'), 0) AS revenue
+            count(*) FILTER (WHERE status = 'completed') AS sale_count
           FROM pos_tenant_sales
           GROUP BY tenant_id
         ) sales ON sales.tenant_id = t.id
+        LEFT JOIN pos_tenant_records settings
+          ON settings.tenant_id = t.id
+         AND settings.store_name = 'settings'
+         AND settings.record_id = 'settings'
         LEFT JOIN (
           SELECT tenant_id, count(*) AS open_ticket_count
           FROM pos_support_tickets
@@ -87,6 +96,18 @@ export async function GET(request: NextRequest) {
         LIMIT 100
         `
       ),
+      admin.role === 'super-admin'
+        ? getPosPool().query(
+            `
+            SELECT id, name, email, role, status, last_login, created_at
+            FROM pos_platform_admins
+            ORDER BY
+              CASE role WHEN 'super-admin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+              created_at DESC
+            LIMIT 100
+            `
+          )
+        : Promise.resolve({ rows: [] }),
     ]);
 
     return NextResponse.json({
@@ -103,10 +124,23 @@ export async function GET(request: NextRequest) {
         userCount: Number(row.user_count),
         activeUserCount: Number(row.active_user_count),
         saleCount: Number(row.sale_count),
-        revenue: Number(row.revenue),
+        subscriptionPlanId: row.subscription_plan_id,
+        subscriptionStatus: row.subscription_status,
+        subscriptionRenewsAt: row.subscription_renews_at
+          ? new Date(row.subscription_renews_at).toISOString()
+          : null,
         openTicketCount: Number(row.open_ticket_count),
       })),
       tickets: tickets.rows.map(ticketFromRow),
+      admins: admins.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        status: row.status,
+        lastLogin: row.last_login ? new Date(row.last_login).toISOString() : null,
+        createdAt: new Date(row.created_at).toISOString(),
+      })),
     });
   } catch (error) {
     return errorResponse(error);
@@ -150,6 +184,7 @@ export async function PATCH(request: NextRequest) {
     if (!tenantId) throw new HttpError(400, 'Tenant id is required', 'VALIDATION_ERROR');
 
     if (action === 'suspend-tenant' || action === 'activate-tenant') {
+      assertPlatformOperator(admin);
       const nextStatus = action === 'suspend-tenant' ? 'suspended' : 'active';
       const result = await getPosPool().query(
         `
@@ -175,6 +210,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === 'delete-tenant') {
+      assertSuperAdmin(admin);
       const result = await getPosPool().query(
         'DELETE FROM pos_tenants WHERE id = $1 RETURNING id',
         [tenantId]

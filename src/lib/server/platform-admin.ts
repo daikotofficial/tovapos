@@ -10,7 +10,7 @@ export interface PlatformAdmin {
   id: string;
   name: string;
   email: string;
-  role: 'owner' | 'admin' | 'support';
+  role: 'super-admin' | 'admin' | 'support';
   status: 'invited' | 'active' | 'suspended';
 }
 
@@ -88,8 +88,14 @@ export async function requirePlatformAdmin(request: NextRequest): Promise<Platfo
   };
 }
 
-export function assertOwnerAdmin(admin: PlatformAdmin): void {
-  if (admin.role !== 'owner') {
-    throw new HttpError(403, 'Only the seeded owner admin can manage platform admins', 'FORBIDDEN');
+export function assertSuperAdmin(admin: PlatformAdmin): void {
+  if (admin.role !== 'super-admin') {
+    throw new HttpError(403, 'Only the seeded super admin can perform this action', 'FORBIDDEN');
+  }
+}
+
+export function assertPlatformOperator(admin: PlatformAdmin): void {
+  if (admin.role === 'support') {
+    throw new HttpError(403, 'Support admins cannot manage business accounts', 'FORBIDDEN');
   }
 }

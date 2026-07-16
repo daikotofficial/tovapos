@@ -134,7 +134,7 @@ export async function ensureSecuritySchema(): Promise<void> {
           id text PRIMARY KEY,
           name text NOT NULL,
           email text NOT NULL UNIQUE,
-          role text NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'admin', 'support')),
+          role text NOT NULL DEFAULT 'support',
           status text NOT NULL DEFAULT 'active' CHECK (status IN ('invited', 'active', 'suspended')),
           password_hash text,
           invited_by text,
@@ -144,6 +144,30 @@ export async function ensureSecuritySchema(): Promise<void> {
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now()
         );
+
+        DO $platform_admin_role$
+        BEGIN
+          IF EXISTS (
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'pos_platform_admins_role_check'
+              AND conrelid = 'pos_platform_admins'::regclass
+          ) THEN
+            ALTER TABLE pos_platform_admins DROP CONSTRAINT pos_platform_admins_role_check;
+          END IF;
+        END
+        $platform_admin_role$;
+
+        UPDATE pos_platform_admins
+        SET role = 'super-admin'
+        WHERE role = 'owner';
+
+        ALTER TABLE pos_platform_admins
+          ALTER COLUMN role SET DEFAULT 'support';
+
+        ALTER TABLE pos_platform_admins
+          ADD CONSTRAINT pos_platform_admins_role_check
+          CHECK (role IN ('super-admin', 'admin', 'support'));
 
         CREATE TABLE IF NOT EXISTS pos_platform_admin_sessions (
           id text PRIMARY KEY,
@@ -391,29 +415,37 @@ export async function ensureSecuritySchema(): Promise<void> {
           process.env.PLATFORM_ADMIN_EMAIL || 'admin@tovapos.com.ng'
         ).toLowerCase();
         const seedName = process.env.PLATFORM_ADMIN_NAME || 'TOVAPOS Admin';
-        const seedPassword = process.env.PLATFORM_ADMIN_PASSWORD || 'AdminisHere123!';
-        const existingSeed = await pool.query(
-          'SELECT id, password_hash FROM pos_platform_admins WHERE lower(email) = $1 LIMIT 1',
-          [seedEmail]
-        );
-        if (!existingSeed.rows[0]) {
-          await pool.query(
-            `INSERT INTO pos_platform_admins (id, name, email, role, status, password_hash, accepted_at)
-             VALUES ($1, $2, $3, 'owner', 'active', $4, now())`,
-            [
-              `platform-admin-${randomUUID()}`,
-              seedName,
-              seedEmail,
-              await hashPasswordServer(seedPassword),
-            ]
+        const seedPassword = process.env.PLATFORM_ADMIN_PASSWORD;
+        if (seedPassword) {
+          const existingSeed = await pool.query(
+            'SELECT id, password_hash FROM pos_platform_admins WHERE lower(email) = $1 LIMIT 1',
+            [seedEmail]
           );
-        } else if (!existingSeed.rows[0].password_hash) {
-          await pool.query(
-            `UPDATE pos_platform_admins
-             SET password_hash = $2, status = 'active', accepted_at = coalesce(accepted_at, now()), updated_at = now()
-             WHERE id = $1`,
-            [existingSeed.rows[0].id, await hashPasswordServer(seedPassword)]
-          );
+          if (!existingSeed.rows[0]) {
+            await pool.query(
+              `INSERT INTO pos_platform_admins (id, name, email, role, status, password_hash, accepted_at)
+               VALUES ($1, $2, $3, 'super-admin', 'active', $4, now())`,
+              [
+                `platform-admin-${randomUUID()}`,
+                seedName,
+                seedEmail,
+                await hashPasswordServer(seedPassword),
+              ]
+            );
+          } else if (!existingSeed.rows[0].password_hash) {
+            await pool.query(
+              `UPDATE pos_platform_admins
+               SET role = 'super-admin',
+                   password_hash = $2,
+                   status = 'active',
+                   accepted_at = coalesce(accepted_at, now()),
+                   updated_at = now()
+               WHERE id = $1`,
+              [existingSeed.rows[0].id, await hashPasswordServer(seedPassword)]
+            );
+          }
+        } else if (process.env.NODE_ENV !== 'production') {
+          console.warn('PLATFORM_ADMIN_PASSWORD is not configured; platform admin seed skipped.');
         }
 
         const legacyExists = await pool.query(
