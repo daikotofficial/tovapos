@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import QRCode from 'qrcode';
 import { getPosPool } from '@/lib/server/pos-db';
 import { assertSameOrigin, errorResponse, HttpError } from '@/lib/server/security';
 import { requirePlatformAdmin } from '@/lib/server/platform-admin';
@@ -19,7 +20,17 @@ export async function POST(request: NextRequest) {
          WHERE id = $1`,
         [admin.id, secret]
       );
-      return NextResponse.json({ secret, otpauthUrl: totpUri(secret, admin.email) });
+      const otpauthUrl = totpUri(secret, admin.email);
+      const qrSvg = await QRCode.toString(otpauthUrl, {
+        type: 'svg',
+        margin: 1,
+        width: 220,
+        color: {
+          dark: '#071412',
+          light: '#ffffff',
+        },
+      });
+      return NextResponse.json({ secret, otpauthUrl, qrSvg });
     }
 
     const code = typeof body.code === 'string' ? body.code.trim() : '';

@@ -122,7 +122,11 @@ export default function AdminPage() {
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [mfaRequired, setMfaRequired] = useState(false);
-  const [mfaSetup, setMfaSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null);
+  const [mfaSetup, setMfaSetup] = useState<{
+    secret: string;
+    otpauthUrl: string;
+    qrSvg: string;
+  } | null>(null);
   const [mfaCode, setMfaCode] = useState('');
   const [remember, setRemember] = useState(true);
   const [activeSection, setActiveSection] = useState<AdminSection>('overview');
@@ -413,12 +417,17 @@ export default function AdminPage() {
       const payload = (await response.json().catch(() => null)) as {
         secret?: string;
         otpauthUrl?: string;
+        qrSvg?: string;
         error?: string;
       } | null;
-      if (!response.ok || !payload?.secret || !payload.otpauthUrl) {
+      if (!response.ok || !payload?.secret || !payload.otpauthUrl || !payload.qrSvg) {
         throw new Error(payload?.error ?? 'Unable to start 2FA setup');
       }
-      setMfaSetup({ secret: payload.secret, otpauthUrl: payload.otpauthUrl });
+      setMfaSetup({
+        secret: payload.secret,
+        otpauthUrl: payload.otpauthUrl,
+        qrSvg: payload.qrSvg,
+      });
       setMfaCode('');
       toast.success('2FA setup started');
     } catch (caught) {
@@ -1248,8 +1257,18 @@ export default function AdminPage() {
                         <div className="space-y-3">
                           <p className="text-sm font-bold">Add this account to your app</p>
                           <p className="text-xs leading-5 text-muted-foreground">
-                            Open your authenticator app, choose manual setup, and enter this setup
-                            key. Then type the 6-digit code below.
+                            Open Google Authenticator or another authenticator app, choose scan QR
+                            code, then type the 6-digit code below.
+                          </p>
+                          <div className="flex justify-center rounded-lg border border-border bg-white p-3">
+                            <div
+                              className="h-[220px] w-[220px]"
+                              aria-label="Authenticator QR code"
+                              dangerouslySetInnerHTML={{ __html: mfaSetup.qrSvg }}
+                            />
+                          </div>
+                          <p className="text-xs font-semibold text-muted-foreground">
+                            Manual setup key
                           </p>
                           <p className="break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">
                             {mfaSetup.secret}
