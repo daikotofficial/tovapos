@@ -12,6 +12,7 @@ export interface PlatformAdmin {
   email: string;
   role: 'super-admin' | 'admin' | 'support';
   status: 'invited' | 'active' | 'suspended';
+  mfaEnabled?: boolean;
 }
 
 export function hashAdminToken(token: string): string {
@@ -63,7 +64,7 @@ export async function requirePlatformAdmin(request: NextRequest): Promise<Platfo
   await ensureSecuritySchema();
   const result = await getPosPool().query(
     `
-    SELECT a.id, a.name, a.email, a.role, a.status, s.id AS session_id
+    SELECT a.id, a.name, a.email, a.role, a.status, a.mfa_enabled, s.id AS session_id
     FROM pos_platform_admin_sessions s
     JOIN pos_platform_admins a ON a.id = s.admin_id
     WHERE s.token_hash = $1
@@ -85,6 +86,7 @@ export async function requirePlatformAdmin(request: NextRequest): Promise<Platfo
     email: row.email,
     role: row.role,
     status: row.status,
+    mfaEnabled: Boolean(row.mfa_enabled),
   };
 }
 

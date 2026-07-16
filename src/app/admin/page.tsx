@@ -39,6 +39,7 @@ interface AdminUser {
   name: string;
   email: string;
   role: PlatformRole;
+  mfaEnabled?: boolean;
 }
 
 interface PlatformAdminRow extends AdminUser {
@@ -122,6 +123,7 @@ export default function AdminPage() {
   const [otp, setOtp] = useState('');
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaSetup, setMfaSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
   const [remember, setRemember] = useState(true);
   const [activeSection, setActiveSection] = useState<AdminSection>('overview');
   const [tenants, setTenants] = useState<TenantRow[]>([]);
@@ -253,16 +255,8 @@ export default function AdminPage() {
       } | null;
       if (response.ok && payload?.mfaRequired) {
         setMfaRequired(true);
-        setMfaSetup(
-          payload.mfaSetupRequired && payload.secret && payload.otpauthUrl
-            ? { secret: payload.secret, otpauthUrl: payload.otpauthUrl }
-            : null
-        );
-        setError(
-          payload.mfaSetupRequired
-            ? 'Set up Google Authenticator, then enter the 6-digit code.'
-            : 'Enter your 6-digit authenticator code.'
-        );
+        setMfaSetup(null);
+        setError('Enter your 6-digit authenticator code.');
         return;
       }
       if (!response.ok || !payload?.admin) throw new Error(payload?.error ?? 'Unable to sign in');
@@ -270,7 +264,6 @@ export default function AdminPage() {
       setPassword('');
       setOtp('');
       setMfaRequired(false);
-      setMfaSetup(null);
       await loadPanel();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to sign in');
@@ -319,7 +312,7 @@ export default function AdminPage() {
     const confirmed = await confirmAction({
       title:
         action === 'activate-admin'
-          ? `Restore ${target.name}?`
+          ? `Unsuspend ${target.name}?`
           : action === 'suspend-admin'
             ? `Suspend ${target.name}?`
             : `Delete ${target.name}?`,
@@ -331,7 +324,7 @@ export default function AdminPage() {
             : 'This permanently removes the platform admin account and its pending invites.',
       confirmLabel:
         action === 'activate-admin'
-          ? 'Restore admin'
+          ? 'Unsuspend admin'
           : action === 'suspend-admin'
             ? 'Suspend admin'
             : 'Delete admin',
@@ -408,6 +401,64 @@ export default function AdminPage() {
     }
   };
 
+  const startMfaSetup = async () => {
+    setBusy('mfa');
+    setError('');
+    try {
+      const response = await fetch('/api/admin/mfa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        secret?: string;
+        otpauthUrl?: string;
+        error?: string;
+      } | null;
+      if (!response.ok || !payload?.secret || !payload.otpauthUrl) {
+        throw new Error(payload?.error ?? 'Unable to start 2FA setup');
+      }
+      setMfaSetup({ secret: payload.secret, otpauthUrl: payload.otpauthUrl });
+      setMfaCode('');
+      toast.success('2FA setup started');
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Unable to start 2FA setup';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const submitMfaAction = async (action: 'verify' | 'disable') => {
+    setBusy('mfa');
+    setError('');
+    try {
+      const response = await fetch('/api/admin/mfa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, code: mfaCode }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        mfaEnabled?: boolean;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(payload?.error ?? 'Unable to update 2FA');
+      setAdmin((current) =>
+        current ? { ...current, mfaEnabled: Boolean(payload?.mfaEnabled) } : current
+      );
+      setMfaSetup(null);
+      setMfaCode('');
+      toast.success(action === 'verify' ? '2FA is now active' : '2FA has been disabled');
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Unable to update 2FA';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusy('');
+    }
+  };
+
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background text-foreground">
@@ -457,20 +508,7 @@ export default function AdminPage() {
               autoComplete="current-password"
             />
           </label>
-          {mfaSetup && (
-            <div className="mb-3 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
-              <p className="font-semibold text-foreground">Set up Google Authenticator</p>
-              <p className="mt-1">Add this setup key, then enter the 6-digit code.</p>
-              <p className="mt-2 break-all font-mono text-foreground">{mfaSetup.secret}</p>
-              <a
-                href={mfaSetup.otpauthUrl}
-                className="mt-2 inline-block font-semibold text-primary hover:underline"
-              >
-                Open authenticator setup link
-              </a>
-            </div>
-          )}
-          {(mfaRequired || mfaSetup || otp) && (
+          {(mfaRequired || otp) && (
             <label className="mb-3 block space-y-1">
               <span className="text-xs font-semibold text-muted-foreground">
                 Authenticator code
@@ -1097,7 +1135,7 @@ export default function AdminPage() {
                                     }
                                     className="rounded-md border border-border px-2 py-1 text-xs font-semibold"
                                   >
-                                    {row.status === 'active' ? 'Suspend' : 'Restore'}
+                                    {row.status === 'active' ? 'Suspend' : 'Unsuspend'}
                                   </button>
                                   <button
                                     type="button"
@@ -1170,6 +1208,109 @@ export default function AdminPage() {
 
             {activeSection === 'security' && (
               <div className="space-y-5">
+                <section className="rounded-lg border border-border bg-card">
+                  <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <LockKeyhole size={16} className="text-primary" />
+                      <p className="text-sm font-semibold">Two-Factor Authentication</p>
+                    </div>
+                    <span className={statusBadge}>{admin.mfaEnabled ? 'enabled' : 'off'}</span>
+                  </div>
+                  <div className="grid gap-4 p-4 lg:grid-cols-[1fr_420px]">
+                    <div className="space-y-3 text-sm text-muted-foreground">
+                      <p>
+                        Protect this admin account with a 6-digit authenticator code from Google
+                        Authenticator, Microsoft Authenticator, 1Password, or another TOTP app.
+                      </p>
+                      <p>
+                        Once enabled, future admin logins require both the password and the
+                        authenticator code.
+                      </p>
+                      {!admin.mfaEnabled && !mfaSetup && (
+                        <button
+                          type="button"
+                          onClick={() => void startMfaSetup()}
+                          disabled={busy === 'mfa'}
+                          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        >
+                          {busy === 'mfa' ? (
+                            <Loader2 size={15} className="animate-spin" />
+                          ) : (
+                            <ShieldCheck size={15} />
+                          )}
+                          Set up 2FA
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-border p-4">
+                      {mfaSetup ? (
+                        <div className="space-y-3">
+                          <p className="text-sm font-bold">Add this account to your app</p>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            Open your authenticator app, choose manual setup, and enter this setup
+                            key. Then type the 6-digit code below.
+                          </p>
+                          <p className="break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">
+                            {mfaSetup.secret}
+                          </p>
+                          <a
+                            href={mfaSetup.otpauthUrl}
+                            className="inline-flex text-xs font-semibold text-primary hover:underline"
+                          >
+                            Open authenticator setup link
+                          </a>
+                          <input
+                            value={mfaCode}
+                            onChange={(event) =>
+                              setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))
+                            }
+                            className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm tracking-[0.35em]"
+                            inputMode="numeric"
+                            placeholder="000000"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void submitMfaAction('verify')}
+                            disabled={busy === 'mfa' || mfaCode.length !== 6}
+                            className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                          >
+                            Verify and enable
+                          </button>
+                        </div>
+                      ) : admin.mfaEnabled ? (
+                        <div className="space-y-3">
+                          <p className="text-sm font-bold text-success">2FA is active</p>
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            To disable it, enter a current authenticator code.
+                          </p>
+                          <input
+                            value={mfaCode}
+                            onChange={(event) =>
+                              setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))
+                            }
+                            className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm tracking-[0.35em]"
+                            inputMode="numeric"
+                            placeholder="000000"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => void submitMfaAction('disable')}
+                            disabled={busy === 'mfa' || mfaCode.length !== 6}
+                            className="w-full rounded-lg border border-danger/30 px-4 py-2 text-sm font-semibold text-danger disabled:opacity-60"
+                          >
+                            Disable 2FA
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          2FA is not enabled for this admin account yet.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   {[
                     {

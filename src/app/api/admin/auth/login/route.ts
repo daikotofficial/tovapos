@@ -4,7 +4,7 @@ import { verifyPasswordServer } from '@/lib/server/password';
 import { assertSameOrigin, errorResponse, HttpError } from '@/lib/server/security';
 import { ensureSecuritySchema } from '@/lib/server/security-schema';
 import { createPlatformAdminSession, setPlatformAdminCookie } from '@/lib/server/platform-admin';
-import { generateTotpSecret, totpUri, verifyTotp } from '@/lib/server/totp';
+import { verifyTotp } from '@/lib/server/totp';
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,31 +28,15 @@ export async function POST(request: NextRequest) {
     if (!row?.password_hash || !(await verifyPasswordServer(password, row.password_hash))) {
       throw new HttpError(401, 'Admin email or password is incorrect', 'INVALID_CREDENTIALS');
     }
-    let mfaSecret = typeof row.mfa_secret === 'string' ? row.mfa_secret : '';
-    if (!mfaSecret) {
-      mfaSecret = generateTotpSecret();
-      await getPosPool().query(
-        `UPDATE pos_platform_admins SET mfa_secret = $2, mfa_enabled = false, updated_at = now()
-         WHERE id = $1`,
-        [row.id, mfaSecret]
-      );
-    }
-    if (!otp) {
+    const mfaSecret = typeof row.mfa_secret === 'string' ? row.mfa_secret : '';
+    if (row.mfa_enabled && !otp) {
       return NextResponse.json({
         mfaRequired: true,
-        mfaSetupRequired: !row.mfa_enabled,
-        secret: row.mfa_enabled ? undefined : mfaSecret,
-        otpauthUrl: row.mfa_enabled ? undefined : totpUri(mfaSecret, row.email),
+        mfaSetupRequired: false,
       });
     }
-    if (!verifyTotp(mfaSecret, otp)) {
+    if (row.mfa_enabled && (!mfaSecret || !verifyTotp(mfaSecret, otp))) {
       throw new HttpError(401, 'Authenticator code is incorrect or expired', 'INVALID_MFA_CODE');
-    }
-    if (!row.mfa_enabled) {
-      await getPosPool().query(
-        `UPDATE pos_platform_admins SET mfa_enabled = true, updated_at = now() WHERE id = $1`,
-        [row.id]
-      );
     }
     await getPosPool().query(
       `UPDATE pos_platform_admins SET last_login = now(), updated_at = now() WHERE id = $1`,
@@ -66,6 +50,7 @@ export async function POST(request: NextRequest) {
         email: row.email,
         role: row.role,
         status: row.status,
+        mfaEnabled: Boolean(row.mfa_enabled),
       },
     });
     setPlatformAdminCookie(response, session.token, session.expiresAt);
