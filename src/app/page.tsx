@@ -27,37 +27,52 @@ const navItems = [
 
 const solutionPillars = [
   {
-    title: 'Sell with speed',
-    text: 'Barcode checkout, discounts, payments, receipts, refunds, and searchable sales history.',
+    title: 'Checkout without delays',
+    text: 'Barcode search, cart discounts, VAT-aware receipts, credit sales, refunds, and fast payment capture.',
     icon: Barcode,
   },
   {
-    title: 'Stock with confidence',
-    text: 'Inventory levels, vendor records, batches, expiry dates, reorder alerts, and product control.',
+    title: 'Inventory that stays accountable',
+    text: 'Batches, expiry dates, vendors, reorder levels, stock movement logs, and controlled item visibility.',
     icon: Package,
   },
   {
-    title: 'Decide with clarity',
-    text: 'Sales reports, revenue signals, customer activity, staff permissions, and sync visibility.',
+    title: 'Owner-grade oversight',
+    text: 'Role permissions, sales history, support visibility, offline sync logs, and practical reporting.',
     icon: BarChart3,
   },
 ];
 
 const featureRows = [
-  ['Sales records', 'Trace every transaction, payment method, discount, refund, and receipt.'],
   [
-    'Insightful dashboard',
-    'See revenue, profit, top products, stock alerts, and activity signals.',
+    'VAT and discount clarity',
+    'Show product-level tax and discounts through checkout and receipt records.',
   ],
-  ['Vendor tracking', 'Manage suppliers, purchase relationships, payment terms, and balances.'],
+  [
+    'Operational dashboard',
+    'Track sales, profit, top products, low stock, pending sync, and staff activity signals.',
+  ],
+  [
+    'Vendor and customer records',
+    'Keep supplier contacts, customer credit, loyalty, and purchase history close.',
+  ],
   ['Barcode scan', 'Sell and search by barcode, SKU, product name, or batch.'],
-  ['Reports', 'Review stock movement, sales performance, and customer spend.'],
-  ['Access control', 'Create roles for admins, managers, stock officers, and cashiers.'],
   [
-    'Online and offline sync',
-    'Keep selling during short outages; updates are sent automatically when the network returns.',
+    'Audit-ready reports',
+    'Review stock movement, sales performance, customer spend, and user actions.',
   ],
-  ['Customer tracking', 'Record loyalty points, credit limits, buying history, and repeat value.'],
+  [
+    'Access control',
+    'Create practical roles for owners, managers, cashiers, stock teams, and auditors.',
+  ],
+  [
+    'Offline-aware selling',
+    'Keep working during short outages with sync visibility and conflict-safe reconciliation.',
+  ],
+  [
+    'Platform support',
+    'Send tickets from the app and receive platform notifications from TOVAPOS support.',
+  ],
 ];
 
 const businessTypes = [
@@ -157,14 +172,15 @@ export default function LandingPage() {
         <div className="relative mx-auto flex min-h-[78svh] max-w-7xl items-center px-4 pb-12 pt-24 sm:px-6 lg:px-8">
           <div className="max-w-2xl text-white">
             <p className="text-xs font-bold uppercase text-[#19b8a6]">
-              POS, inventory, access, reports
+              Retail POS, inventory, teams, and support
             </p>
             <h1 className="mt-4 text-4xl font-bold leading-[1.05] sm:text-5xl">
-              Smart sales operations for modern retail businesses.
+              Run sales, stock, staff, and receipts from one serious retail system.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-white/75 sm:text-lg">
-              TOVAPOS helps supermarkets, pharmacies, mini-marts, boutiques, and product-selling
-              businesses sell faster, stock smarter, manage teams, and understand performance.
+              TOVAPOS gives supermarkets, pharmacies, mini-marts, boutiques, wholesalers, and
+              product-selling teams the daily controls they need: fast checkout, clean inventory,
+              VAT/discount accuracy, user permissions, reporting, and offline-aware sync.
             </p>
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
@@ -183,9 +199,18 @@ export default function LandingPage() {
       <section className="bg-white">
         <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-4 py-6 sm:grid-cols-3 sm:px-6 lg:px-8">
           {[
-            ['Retail scope', 'Supermarkets, pharmacies, boutiques, wholesale'],
-            ['Operational control', 'Sales, inventory, vendors, customers, access'],
-            ['Business insight', 'Reports, alerts, sync status, and team activity'],
+            [
+              'Built for Nigeria-ready retail',
+              'VAT, receipts, business roles, and realistic phone/contact flows',
+            ],
+            [
+              'Controls that matter',
+              'Sales, inventory, customers, vendors, staff, support, and admin oversight',
+            ],
+            [
+              'Prepared for scale',
+              'Offline-aware sync, subscriptions, platform admin, and secure access',
+            ],
           ].map(([label, value]) => (
             <div key={label} className="border-l border-[#19b8a6] bg-[#f6f8f8] px-4 py-4">
               <p className="text-[11px] font-bold uppercase text-[#66736f]">{label}</p>
@@ -201,11 +226,12 @@ export default function LandingPage() {
             <div>
               <p className="text-xs font-bold uppercase text-[#128174]">Product</p>
               <h2 className="mt-3 text-3xl font-bold leading-tight text-[#071412] sm:text-4xl">
-                A clearer view of daily sales decisions.
+                Built around the pressure points of everyday retail.
               </h2>
               <p className="mt-4 text-sm leading-7 text-[#596662] sm:text-base">
-                Cashiers move faster, stock officers stay ahead, managers control access, and owners
-                get the insight they need without fighting the interface.
+                Cashiers need speed, stock teams need accuracy, managers need control, and owners
+                need trustworthy numbers. TOVAPOS keeps those jobs connected without making the
+                interface heavy.
               </p>
             </div>
 
@@ -234,7 +260,7 @@ export default function LandingPage() {
                 <div>
                   <p className="text-sm font-bold text-[#128174]">Operations overview</p>
                   <h3 className="mt-1 text-xl font-bold text-[#071412]">
-                    Key signals without visual noise.
+                    The numbers people actually check every day.
                   </h3>
                 </div>
                 <span className="w-fit rounded-md bg-[#e7f8f5] px-3 py-1 text-xs font-bold text-[#128174]">
@@ -244,10 +270,10 @@ export default function LandingPage() {
 
               <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[
-                  ['Sales', 'N1.82M'],
-                  ['Profit', 'N418K'],
+                  ['Sales', 'NGN 1.82M'],
+                  ['Profit', 'NGN 418K'],
                   ['Receipts', '386'],
-                  ['Alerts', '14'],
+                  ['Stock Alerts', '14'],
                 ].map(([label, value]) => (
                   <div key={label} className="border border-[#e5ece9] bg-[#f8fbfa] p-4">
                     <p className="text-xs font-semibold text-[#66736f]">{label}</p>
@@ -288,11 +314,11 @@ export default function LandingPage() {
           <div>
             <p className="text-xs font-bold uppercase text-[#128174]">Features</p>
             <h2 className="mt-3 text-3xl font-bold leading-tight text-[#071412] sm:text-4xl">
-              Serious control without a messy interface.
+              A practical control surface for growing retail teams.
             </h2>
             <p className="mt-4 text-sm leading-7 text-[#596662] sm:text-base">
-              Built around the daily questions retailers ask: what sold, what is low, who did what,
-              who bought what, and what needs action.
+              Built around the questions operators ask every day: what sold, what is low, who did
+              what, which customer owes, which batch expires soon, and what needs action now.
             </p>
           </div>
 

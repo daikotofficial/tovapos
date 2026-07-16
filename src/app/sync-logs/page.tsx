@@ -3,9 +3,10 @@
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, PackagePlus, RefreshCw, XCircle } from 'lucide-react';
-import { toast, Toaster } from 'sonner';
+import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
+import { confirmAction } from '@/components/ui/confirmAction';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { SaleTransaction, SyncQueueItem } from '@/lib/pos/types';
 
@@ -64,7 +65,6 @@ export default function SyncLogsPage() {
 
   return (
     <AppLayout title="Sync Logs" subtitle="Review and resolve offline reconciliation problems">
-      <Toaster position="bottom-right" richColors />
       <PermissionGate permission="sync-logs">
         {!isAdmin ? (
           <div className="p-6">
@@ -154,12 +154,14 @@ export default function SyncLogsPage() {
                                 <button
                                   type="button"
                                   disabled={busy || !isOnline}
-                                  onClick={() => {
-                                    if (
-                                      window.confirm(
-                                        'Cancel this rejected sale? The sale will be marked void and the stock count on this device will be corrected.'
-                                      )
-                                    ) {
+                                  onClick={async () => {
+                                    const confirmed = await confirmAction({
+                                      title: 'Cancel rejected sale?',
+                                      description:
+                                        'The sale will be marked void and the stock count on this device will be corrected.',
+                                      confirmLabel: 'Cancel sale',
+                                    });
+                                    if (confirmed) {
                                       void run(
                                         operation.operationId,
                                         () => cancelFailedOfflineSale(operation.operationId),

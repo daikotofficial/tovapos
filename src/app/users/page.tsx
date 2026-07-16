@@ -2,10 +2,12 @@
 
 import React, { useMemo, useState } from 'react';
 import { ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import Modal from '@/components/ui/Modal';
 import NiceSelect from '@/components/ui/NiceSelect';
+import { confirmAction } from '@/components/ui/confirmAction';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission, TovaUser, UserRole } from '@/lib/pos/types';
 
@@ -219,12 +221,17 @@ export default function UsersPage() {
   const removeUser = async (user: TovaUser) => {
     if (!canDeleteUsers) return;
     if (user.id === currentUser.id) return;
-    const confirmed = window.confirm(`Delete ${user.name}? This removes the user account.`);
+    const confirmed = await confirmAction({
+      title: `Delete ${user.name}?`,
+      description: 'This removes the user account and prevents that person from signing in again.',
+      confirmLabel: 'Delete user',
+    });
     if (!confirmed) return;
     try {
       await deleteUser(user.id);
+      toast.success(`${user.name} was deleted`);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to delete user.');
+      toast.error(error instanceof Error ? error.message : 'Unable to delete user.');
     }
   };
 

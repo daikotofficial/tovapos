@@ -64,7 +64,7 @@ import { defaultCustomers, defaultSettings, defaultUsers, defaultVendors } from 
 import { getProductUsage, planAllowsPermission } from './subscription';
 
 interface PosStoreValue {
-  tenant: { id: string; slug: string; name: string } | null;
+  tenant: { id: string; slug: string; name: string; status?: 'active' | 'suspended' } | null;
   inventory: InventoryItem[];
   stockMovements: StockMovement[];
   sales: SaleTransaction[];
@@ -122,7 +122,7 @@ const OFFLINE_SESSION_KEY = 'tovapos.offlineSession';
 
 type CachedSession = {
   user: TovaUser;
-  tenant: { id: string; slug: string; name: string };
+  tenant: { id: string; slug: string; name: string; status?: 'active' | 'suspended' };
 };
 
 function createTransactionId(): string {
@@ -174,7 +174,12 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   });
   const [activeUserId, setActiveUserIdState] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [tenant, setTenant] = useState<{ id: string; slug: string; name: string } | null>(null);
+  const [tenant, setTenant] = useState<{
+    id: string;
+    slug: string;
+    name: string;
+    status?: 'active' | 'suspended';
+  } | null>(null);
   const saleInFlightRef = useRef(false);
   const syncInFlightRef = useRef(false);
   const healthFailuresRef = useRef(0);
@@ -721,6 +726,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
+    if (window.location.pathname.startsWith('/admin')) return;
     const root = document.documentElement;
     if (settings.themeColor) {
       root.style.setProperty('--primary', settings.themeColor);

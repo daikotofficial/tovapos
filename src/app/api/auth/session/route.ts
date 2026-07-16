@@ -6,7 +6,12 @@ export async function GET(request: NextRequest) {
     const auth = await requireAuth(request);
     return NextResponse.json({
       user: auth.user,
-      tenant: { id: auth.tenantId, slug: auth.tenantSlug, name: auth.tenantName },
+      tenant: {
+        id: auth.tenantId,
+        slug: auth.tenantSlug,
+        name: auth.tenantName,
+        status: auth.tenantStatus,
+      },
     });
   } catch (error) {
     return errorResponse(error);

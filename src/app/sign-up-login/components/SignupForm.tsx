@@ -187,7 +187,7 @@ export default function SignupForm({ initialError = '' }: SignupFormProps) {
                 autoComplete="tel"
                 {...register('phone', { required: 'Phone number is required' })}
                 className={inputClass(!!errors.phone)}
-                placeholder="(555) 000-0000"
+                placeholder="0803 123 4567 or +234 803 123 4567"
               />
               {errors.phone && <p className={errorClass}>{errors.phone.message}</p>}
             </div>

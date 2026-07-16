@@ -44,11 +44,10 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await getPosPool().query(
-      `SELECT u.*, t.slug AS tenant_slug, t.name AS tenant_name
+      `SELECT u.*, t.slug AS tenant_slug, t.name AS tenant_name, t.status AS tenant_status
        FROM pos_app_users u
        JOIN pos_tenants t ON t.id = u.tenant_id
        WHERE lower(u.email) = $1
-         AND t.status = 'active' AND u.status = 'active'
        ORDER BY u.created_at DESC
        LIMIT 2`,
       [email]
@@ -61,6 +60,20 @@ export async function POST(request: NextRequest) {
       );
     }
     const candidate = result.rows[0];
+    if (!candidate) {
+      throw new HttpError(
+        404,
+        'No TOVAPOS user was found with this email. Check the email address or register a new business.',
+        'ACCOUNT_NOT_FOUND'
+      );
+    }
+    if (candidate.status !== 'active') {
+      throw new HttpError(
+        403,
+        'This user account has been suspended. Contact your business owner or support.',
+        'USER_SUSPENDED'
+      );
+    }
     const row =
       candidate && (await verifyPasswordServer(password, candidate.password_hash))
         ? candidate
@@ -88,7 +101,7 @@ export async function POST(request: NextRequest) {
       );
       throw new HttpError(
         401,
-        'The email or password is incorrect. If you are new to TOVAPOS, select Register.',
+        'The password is incorrect. Use Forgot password if you need to reset it.',
         'INVALID_CREDENTIALS'
       );
     }
@@ -126,7 +139,12 @@ export async function POST(request: NextRequest) {
       ? NextResponse.redirect(sameOriginRedirectUrl(request, '/dashboard'), 303)
       : NextResponse.json({
           user: publicUser({ ...row, last_login: new Date() }),
-          tenant: { id: row.tenant_id, slug: row.tenant_slug, name: row.tenant_name },
+          tenant: {
+            id: row.tenant_id,
+            slug: row.tenant_slug,
+            name: row.tenant_name,
+            status: row.tenant_status,
+          },
         });
     setSessionCookie(response, session.token, session.expiresAt);
     return response;

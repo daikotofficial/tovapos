@@ -7,6 +7,7 @@ import {
   assertPermission,
   assertAnyPermission,
   assertSameOrigin,
+  assertTenantActive,
   assertTenantPlanPermission,
   errorResponse,
   HttpError,
@@ -716,6 +717,7 @@ export async function PUT(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
+    assertTenantActive(auth);
     const storeName = getStoreName(request);
     if (['inventory', 'stockMovements', 'sales'].includes(storeName)) {
       throw new HttpError(
@@ -996,6 +998,7 @@ export async function DELETE(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
+    assertTenantActive(auth);
     const storeName = getStoreName(request);
     if (storeName === 'sales' || storeName === 'stockMovements') {
       throw new HttpError(405, 'Financial records cannot be directly deleted', 'DELETE_FORBIDDEN');

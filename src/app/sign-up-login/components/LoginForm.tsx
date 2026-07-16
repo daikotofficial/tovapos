@@ -17,6 +17,10 @@ interface LoginFormProps {
   initialError?: string;
 }
 
+const labelClass = 'block text-sm font-semibold text-[#243b36] mb-1.5';
+const inputClass =
+  'auth-light-input h-12 w-full rounded-md border bg-white px-3 text-sm text-[#071412] caret-[#071412] placeholder:text-[#8b9a96] transition-all duration-150 [color-scheme:light] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30';
+
 export default function LoginForm({ initialError = '' }: LoginFormProps) {
   const { signIn } = usePosStore();
   const [showPassword, setShowPassword] = useState(false);
@@ -69,7 +73,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
       >
         {/* Email */}
         <div>
-          <label htmlFor="login-email" className="block text-sm font-medium text-foreground mb-1.5">
+          <label htmlFor="login-email" className={labelClass}>
             Email Address
           </label>
           <input
@@ -82,7 +86,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
                 message: 'Enter a valid email address',
               },
             })}
-            className={`h-12 w-full rounded-md border bg-white px-3 text-sm transition-all duration-150 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+            className={`${inputClass} ${
               errors.email
                 ? 'border-danger focus:ring-danger/30 focus:border-danger'
                 : 'border-border'
@@ -100,7 +104,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
         {/* Password */}
         <div>
           <div className="mb-1.5 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <label htmlFor="login-password" className="block text-sm font-medium text-foreground">
+            <label htmlFor="login-password" className={labelClass}>
               Password
             </label>
             <Link
@@ -118,7 +122,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
                 required: 'Password is required',
                 minLength: { value: 10, message: 'Password must be at least 10 characters' },
               })}
-              className={`h-12 w-full rounded-md border bg-white px-3 pr-10 text-sm transition-all duration-150 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+              className={`${inputClass} pr-10 ${
                 errors.password
                   ? 'border-danger focus:ring-danger/30 focus:border-danger'
                   : 'border-border'
@@ -129,7 +133,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors duration-150"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#5f6f6a] transition-colors duration-150 hover:text-[#071412]"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -141,17 +145,14 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
         </div>
 
         {/* Remember me */}
-        <div className="flex items-start gap-2 rounded-md bg-muted/50 px-3 py-2">
+        <div className="flex items-start gap-2 rounded-md bg-[#eef5f3] px-3 py-2">
           <input
             id="remember"
             type="checkbox"
             {...register('remember')}
             className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-primary"
           />
-          <label
-            htmlFor="remember"
-            className="cursor-pointer text-sm leading-5 text-muted-foreground"
-          >
+          <label htmlFor="remember" className="cursor-pointer text-sm leading-5 text-[#5f6f6a]">
             Stay signed in for 14 days (otherwise, 8 hours)
           </label>
         </div>

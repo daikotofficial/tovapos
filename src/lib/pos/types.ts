@@ -362,3 +362,18 @@ export interface SupportTicket {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface AppNotification {
+  id: string;
+  tenantId: string;
+  tenantName?: string;
+  targetUserId?: string | null;
+  targetUserName?: string | null;
+  title: string;
+  message: string;
+  tone: 'info' | 'success' | 'warning' | 'danger';
+  sentBy: string;
+  sentByEmail?: string;
+  createdAt: string;
+  readAt?: string | null;
+}

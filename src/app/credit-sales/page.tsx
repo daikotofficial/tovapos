@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { CheckCircle2, CreditCard, Landmark, Search, Smartphone, Wallet } from 'lucide-react';
-import { toast, Toaster } from 'sonner';
+import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import { formatMoney } from '@/lib/pos/money';
@@ -114,7 +114,6 @@ export default function CreditSalesPage() {
   return (
     <AppLayout title="Credit Sales" subtitle="Receive full or partial payments for customer credit">
       <PermissionGate permission="credit-sales">
-        <Toaster position="bottom-right" richColors />
         <div className="mx-auto max-w-screen-2xl space-y-5 p-4 sm:p-6">
           {pendingSyncCount > 0 && (
             <section className="rounded-lg border border-warning/25 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">

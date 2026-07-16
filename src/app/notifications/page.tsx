@@ -7,12 +7,14 @@ import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import Badge from '@/components/ui/Badge';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import type { AppNotification } from '@/lib/pos/types';
 import { getDaysUntilExpiry } from '@/lib/pos/stock';
 
 export default function NotificationsPage() {
   const { inventory, syncQueue, settings, isOnline } = usePosStore();
   const router = useRouter();
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
   const alerts = useMemo(() => {
     const expiryDays = settings.expiryAlertDays ?? 30;
     return inventory
@@ -50,7 +52,9 @@ export default function NotificationsPage() {
   }, [inventory, settings.expiryAlertDays]);
 
   const pendingSync = syncQueue.filter((item) => item.status !== 'synced');
-  const unreadAlerts = alerts.filter((alert) => !readIds.has(alert.id)).length;
+  const unreadAlerts =
+    alerts.filter((alert) => !readIds.has(alert.id)).length +
+    appNotifications.filter((notice) => !notice.readAt && !readIds.has(notice.id)).length;
 
   useEffect(() => {
     const raw = window.localStorage.getItem('tovapos.readNotifications');
@@ -62,9 +66,44 @@ export default function NotificationsPage() {
     window.localStorage.setItem('tovapos.readNotifications', JSON.stringify([...next]));
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadNotifications = async () => {
+      try {
+        const response = await fetch('/api/notifications', { cache: 'no-store' });
+        const payload = (await response.json().catch(() => null)) as {
+          notifications?: AppNotification[];
+        } | null;
+        if (!cancelled && response.ok) setAppNotifications(payload?.notifications ?? []);
+      } catch {
+        if (!cancelled) setAppNotifications([]);
+      }
+    };
+    void loadNotifications();
+    const interval = window.setInterval(loadNotifications, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   const openAlert = (alert: (typeof alerts)[number]) => {
     saveReadIds(new Set([...readIds, alert.id]));
     router.push(`/inventory-management?status=${alert.targetStatus}`);
+  };
+
+  const markAppNotificationRead = async (notice: AppNotification) => {
+    saveReadIds(new Set([...readIds, notice.id]));
+    setAppNotifications((current) =>
+      current.map((item) =>
+        item.id === notice.id ? { ...item, readAt: item.readAt ?? new Date().toISOString() } : item
+      )
+    );
+    await fetch('/api/notifications', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: notice.id }),
+    }).catch(() => undefined);
   };
 
   return (
@@ -94,6 +133,48 @@ export default function NotificationsPage() {
               icon={Clock}
             />
           </div>
+
+          <section className="rounded-xl border border-border bg-card shadow-card">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+              <Bell size={16} className="text-primary" />
+              <h2 className="text-sm font-semibold">Messages From TOVAPOS</h2>
+            </div>
+            <div className="divide-y divide-border">
+              {appNotifications.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No platform messages yet.
+                </p>
+              ) : (
+                appNotifications.map((notice) => (
+                  <button
+                    key={notice.id}
+                    type="button"
+                    onClick={() => void markAppNotificationRead(notice)}
+                    className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/30"
+                  >
+                    <div>
+                      <p
+                        className={`text-sm font-semibold ${
+                          notice.readAt || readIds.has(notice.id)
+                            ? 'text-muted-foreground'
+                            : 'text-foreground'
+                        }`}
+                      >
+                        {notice.title}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">{notice.message}</p>
+                      <p className="mt-2 text-[10px] uppercase text-muted-foreground">
+                        {notice.sentBy} · {new Date(notice.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-muted px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">
+                      {notice.tone}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
 
           <section className="rounded-xl border border-border bg-card shadow-card">
             <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">

@@ -108,6 +108,15 @@
     padding: 2px;
   }
 
+  .auth-light-input:-webkit-autofill,
+  .auth-light-input:-webkit-autofill:hover,
+  .auth-light-input:-webkit-autofill:focus {
+    -webkit-text-fill-color: #071412;
+    box-shadow: 0 0 0 1000px #ffffff inset;
+    caret-color: #071412;
+    transition: background-color 9999s ease-in-out 0s;
+  }
+
   :root[data-theme='dark'] input,
   :root[data-theme='dark'] select,
   :root[data-theme='dark'] textarea {
@@ -257,6 +266,15 @@
 
   .scan-pulse {
     animation: scan-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes marquee {
+    0% {
+      transform: translateX(100%);
+    }
+    100% {
+      transform: translateX(-100%);
+    }
   }
 
   @keyframes scan-pulse {

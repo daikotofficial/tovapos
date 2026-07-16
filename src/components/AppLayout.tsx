@@ -77,6 +77,16 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
           </footer>
         </main>
       </div>
+      <Link
+        href="/support#new-ticket"
+        className={`fixed right-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-modal transition-transform hover:scale-105 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/30 lg:bottom-5 ${
+          pathname === '/support' ? 'bottom-20 opacity-70 lg:opacity-70' : 'bottom-20'
+        }`}
+        aria-label="Open support"
+        title="Open support"
+      >
+        <LifeBuoy size={22} />
+      </Link>
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <button

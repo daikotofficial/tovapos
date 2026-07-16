@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import type { SupportTicket } from '@/lib/pos/types';
 import { getPosPool } from '@/lib/server/pos-db';
 import { assertSameOrigin, errorResponse, HttpError } from '@/lib/server/security';
@@ -27,11 +28,15 @@ function ticketFromRow(row: Record<string, unknown>): SupportTicket {
   };
 }
 
+function safeText(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value.trim() : fallback;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const admin = await requirePlatformAdmin(request);
 
-    const [tenants, tickets, admins] = await Promise.all([
+    const [tenants, tickets, admins, users, security] = await Promise.all([
       getPosPool().query(
         `
         SELECT
@@ -108,6 +113,36 @@ export async function GET(request: NextRequest) {
             `
           )
         : Promise.resolve({ rows: [] }),
+      getPosPool().query(
+        `
+        SELECT
+          u.tenant_id,
+          u.id,
+          u.name,
+          u.email,
+          u.role,
+          u.status,
+          u.last_login,
+          t.name AS tenant_name,
+          t.slug AS tenant_slug
+        FROM pos_app_users u
+        JOIN pos_tenants t ON t.id = u.tenant_id
+        ORDER BY u.last_login DESC NULLS LAST, u.created_at DESC
+        LIMIT 500
+        `
+      ),
+      getPosPool().query(
+        `
+        SELECT
+          (SELECT count(*)::int FROM pos_sessions WHERE expires_at > now()) AS active_app_sessions,
+          (SELECT count(*)::int FROM pos_platform_admin_sessions WHERE expires_at > now()) AS active_admin_sessions,
+          (SELECT count(*)::int FROM pos_platform_admin_invites WHERE used_at IS NULL AND expires_at > now()) AS pending_admin_invites,
+          (SELECT count(*)::int FROM pos_auth_attempts WHERE blocked_until > now()) AS blocked_login_attempts,
+          (SELECT coalesce(sum(failures), 0)::int FROM pos_auth_attempts WHERE last_attempt_at > now() - interval '24 hours') AS failed_logins_24h,
+          (SELECT count(*)::int FROM pos_app_users WHERE status = 'active') AS active_app_users,
+          (SELECT count(*)::int FROM pos_app_notifications WHERE created_at > now() - interval '7 days') AS notifications_7d
+        `
+      ),
     ]);
 
     return NextResponse.json({
@@ -141,6 +176,28 @@ export async function GET(request: NextRequest) {
         lastLogin: row.last_login ? new Date(row.last_login).toISOString() : null,
         createdAt: new Date(row.created_at).toISOString(),
       })),
+      users: users.rows.map((row) => ({
+        tenantId: row.tenant_id,
+        tenantName: row.tenant_name,
+        tenantSlug: row.tenant_slug,
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        status: row.status,
+        lastLogin: row.last_login ? new Date(row.last_login).toISOString() : null,
+      })),
+      security: {
+        apiStatus: 'healthy',
+        activeAppSessions: Number(security.rows[0]?.active_app_sessions ?? 0),
+        activeAdminSessions: Number(security.rows[0]?.active_admin_sessions ?? 0),
+        pendingAdminInvites: Number(security.rows[0]?.pending_admin_invites ?? 0),
+        blockedLoginAttempts: Number(security.rows[0]?.blocked_login_attempts ?? 0),
+        failedLogins24h: Number(security.rows[0]?.failed_logins_24h ?? 0),
+        activeAppUsers: Number(security.rows[0]?.active_app_users ?? 0),
+        notifications7d: Number(security.rows[0]?.notifications_7d ?? 0),
+        checkedAt: new Date().toISOString(),
+      },
     });
   } catch (error) {
     return errorResponse(error);
@@ -178,6 +235,122 @@ export async function PATCH(request: NextRequest) {
       );
       if (!result.rows[0]) throw new HttpError(404, 'Support ticket not found', 'NOT_FOUND');
       return NextResponse.json({ ticket: ticketFromRow(result.rows[0]) });
+    }
+
+    if (action === 'send-notification') {
+      const title = safeText(body.title);
+      const message = safeText(body.message);
+      const tenantId = safeText(body.tenantId);
+      const targetUserId = safeText(body.targetUserId);
+      const scope = body.scope === 'tenant' || body.scope === 'user' ? body.scope : 'all';
+      const tone =
+        body.tone === 'success' ||
+        body.tone === 'warning' ||
+        body.tone === 'danger' ||
+        body.tone === 'info'
+          ? body.tone
+          : 'info';
+      if (title.length < 3 || message.length < 5) {
+        throw new HttpError(400, 'Notification title and message are required', 'VALIDATION_ERROR');
+      }
+      const tenantIds =
+        scope === 'all'
+          ? await getPosPool().query('SELECT id FROM pos_tenants WHERE status = $1', ['active'])
+          : await getPosPool().query('SELECT id FROM pos_tenants WHERE id = $1 LIMIT 1', [
+              tenantId,
+            ]);
+      if (tenantIds.rows.length === 0) {
+        throw new HttpError(
+          400,
+          'Select a valid business for this notification',
+          'VALIDATION_ERROR'
+        );
+      }
+      if (scope === 'user' && !targetUserId) {
+        throw new HttpError(400, 'Select a user for this notification', 'VALIDATION_ERROR');
+      }
+      if (scope === 'user') {
+        const target = await getPosPool().query(
+          'SELECT id FROM pos_app_users WHERE tenant_id = $1 AND id = $2 AND status = $3 LIMIT 1',
+          [tenantId, targetUserId, 'active']
+        );
+        if (!target.rows[0]) {
+          throw new HttpError(
+            400,
+            'Select an active user in the selected business',
+            'VALIDATION_ERROR'
+          );
+        }
+      }
+      const client = await getPosPool().connect();
+      try {
+        await client.query('BEGIN');
+        for (const row of tenantIds.rows) {
+          await client.query(
+            `
+            INSERT INTO pos_app_notifications (
+              id, tenant_id, target_user_id, title, message, tone, sent_by, sent_by_email
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `,
+            [
+              `notification-${randomUUID()}`,
+              row.id,
+              scope === 'user' ? targetUserId : null,
+              title,
+              message,
+              tone,
+              admin.name,
+              admin.email,
+            ]
+          );
+        }
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+      return NextResponse.json({ ok: true, delivered: tenantIds.rows.length });
+    }
+
+    if (action === 'suspend-admin' || action === 'activate-admin' || action === 'delete-admin') {
+      assertSuperAdmin(admin);
+      const adminId = safeText(body.adminId);
+      if (!adminId) throw new HttpError(400, 'Admin id is required', 'VALIDATION_ERROR');
+      if (adminId === admin.id) {
+        throw new HttpError(400, 'You cannot change your own active admin account', 'SELF_ADMIN');
+      }
+      const target = await getPosPool().query(
+        'SELECT id, role, status FROM pos_platform_admins WHERE id = $1 LIMIT 1',
+        [adminId]
+      );
+      if (!target.rows[0]) throw new HttpError(404, 'Admin account not found', 'NOT_FOUND');
+      if (target.rows[0].role === 'super-admin') {
+        const remaining = await getPosPool().query(
+          `SELECT count(*)::int AS count
+           FROM pos_platform_admins
+           WHERE id <> $1 AND role = 'super-admin' AND status = 'active'`,
+          [adminId]
+        );
+        if (Number(remaining.rows[0]?.count ?? 0) < 1) {
+          throw new HttpError(
+            400,
+            'At least one active super admin must remain',
+            'LAST_SUPER_ADMIN'
+          );
+        }
+      }
+      if (action === 'delete-admin') {
+        await getPosPool().query('DELETE FROM pos_platform_admins WHERE id = $1', [adminId]);
+      } else {
+        await getPosPool().query(
+          `UPDATE pos_platform_admins SET status = $2, updated_at = now() WHERE id = $1`,
+          [adminId, action === 'suspend-admin' ? 'suspended' : 'active']
+        );
+      }
+      return NextResponse.json({ ok: true });
     }
 
     const tenantId = typeof body.tenantId === 'string' ? body.tenantId : '';

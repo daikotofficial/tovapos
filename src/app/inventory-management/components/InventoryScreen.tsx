@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Toaster } from 'sonner';
 import InventoryKPICards from './InventoryKPICards';
 import InventoryFilters from './InventoryFilters';
 import InventoryTable from './InventoryTable';
@@ -196,8 +195,6 @@ export default function InventoryScreen() {
 
   return (
     <div className="p-6 max-w-screen-2xl mx-auto">
-      <Toaster position="bottom-right" richColors />
-
       {!isHydrated && (
         <div className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
           Loading inventory...

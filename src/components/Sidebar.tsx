@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
 import AppLogo from '@/components/ui/AppLogo';
 import {
   ShoppingCart,
@@ -426,7 +427,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
                   router.replace('/sign-up-login');
                   router.refresh();
                 } catch (error) {
-                  window.alert(error instanceof Error ? error.message : 'Unable to sign out');
+                  toast.error(error instanceof Error ? error.message : 'Unable to sign out');
                 }
               }}
               className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-danger transition-colors duration-150"

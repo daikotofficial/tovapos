@@ -4,6 +4,7 @@ import type { Customer, InventoryItem, SaleTransaction, StockMovement } from '@/
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
+  assertTenantActive,
   assertTenantPlanPermission,
   assertSameOrigin,
   errorResponse,
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
+    assertTenantActive(auth);
     assertPermission(auth, 'checkout');
     const body = (await request.json()) as Record<string, unknown>;
     const operationId =

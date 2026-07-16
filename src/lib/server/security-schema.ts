@@ -137,6 +137,8 @@ export async function ensureSecuritySchema(): Promise<void> {
           role text NOT NULL DEFAULT 'support',
           status text NOT NULL DEFAULT 'active' CHECK (status IN ('invited', 'active', 'suspended')),
           password_hash text,
+          mfa_secret text,
+          mfa_enabled boolean NOT NULL DEFAULT false,
           invited_by text,
           invited_at timestamptz,
           accepted_at timestamptz,
@@ -144,6 +146,10 @@ export async function ensureSecuritySchema(): Promise<void> {
           created_at timestamptz NOT NULL DEFAULT now(),
           updated_at timestamptz NOT NULL DEFAULT now()
         );
+
+        ALTER TABLE pos_platform_admins
+          ADD COLUMN IF NOT EXISTS mfa_secret text,
+          ADD COLUMN IF NOT EXISTS mfa_enabled boolean NOT NULL DEFAULT false;
 
         DO $platform_admin_role$
         BEGIN
@@ -212,6 +218,24 @@ export async function ensureSecuritySchema(): Promise<void> {
           ON pos_support_tickets (tenant_id, status, created_at DESC);
         CREATE INDEX IF NOT EXISTS pos_support_tickets_status_idx
           ON pos_support_tickets (status, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS pos_app_notifications (
+          id text PRIMARY KEY,
+          tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
+          target_user_id text,
+          title text NOT NULL,
+          message text NOT NULL,
+          tone text NOT NULL DEFAULT 'info' CHECK (tone IN ('info', 'success', 'warning', 'danger')),
+          sent_by text NOT NULL,
+          sent_by_email text,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          read_at timestamptz
+        );
+
+        CREATE INDEX IF NOT EXISTS pos_app_notifications_tenant_time_idx
+          ON pos_app_notifications (tenant_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS pos_app_notifications_target_idx
+          ON pos_app_notifications (tenant_id, target_user_id, created_at DESC);
 
         CREATE TABLE IF NOT EXISTS pos_expiry_digest_runs (
           tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,

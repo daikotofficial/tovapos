@@ -1,8 +1,20 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Bell, AlertTriangle, Clock, Cloud, Wifi, WifiOff, Menu, LoaderCircle } from 'lucide-react';
+import {
+  Bell,
+  AlertTriangle,
+  Clock,
+  Cloud,
+  Wifi,
+  WifiOff,
+  Menu,
+  LoaderCircle,
+  LifeBuoy,
+} from 'lucide-react';
+import Link from 'next/link';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import type { AppNotification } from '@/lib/pos/types';
 import { getDaysUntilExpiry } from '@/lib/pos/stock';
 
 interface TopbarProps {
@@ -12,11 +24,12 @@ interface TopbarProps {
 }
 
 export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
-  const { isOnline, connectivity, syncProgress, pendingSyncCount, currentUser, inventory } =
+  const { isOnline, connectivity, syncProgress, pendingSyncCount, currentUser, inventory, tenant } =
     usePosStore();
   const [showNotifs, setShowNotifs] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
   const notifications = useMemo(() => {
     const stockAlerts = inventory
       .filter((item) =>
@@ -47,10 +60,18 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
       });
     }
 
-    return stockAlerts;
-  }, [inventory, isOnline, pendingSyncCount]);
+    const platformAlerts = appNotifications.slice(0, 5).map((notice) => ({
+      id: notice.id,
+      type: notice.tone,
+      message: `${notice.title}: ${notice.message}`,
+      time: new Date(notice.createdAt).toLocaleDateString(),
+      platform: true,
+    }));
+
+    return [...platformAlerts, ...stockAlerts];
+  }, [appNotifications, inventory, isOnline, pendingSyncCount]);
   const unread = notifications.filter(
-    (n) => (n.type === 'warning' || n.type === 'danger') && !readIds.has(n.id)
+    (n) => ('platform' in n || n.type === 'warning' || n.type === 'danger') && !readIds.has(n.id)
   ).length;
 
   useEffect(() => {
@@ -58,9 +79,39 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
     if (raw) setReadIds(new Set(JSON.parse(raw) as string[]));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadNotifications = async () => {
+      try {
+        const response = await fetch('/api/notifications', { cache: 'no-store' });
+        const payload = (await response.json().catch(() => null)) as {
+          notifications?: AppNotification[];
+        } | null;
+        if (!cancelled && response.ok) setAppNotifications(payload?.notifications ?? []);
+      } catch {
+        if (!cancelled) setAppNotifications([]);
+      }
+    };
+    void loadNotifications();
+    const interval = window.setInterval(loadNotifications, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
   const saveReadIds = (next: Set<string>) => {
     setReadIds(next);
     window.localStorage.setItem('tovapos.readNotifications', JSON.stringify([...next]));
+  };
+
+  const markNotificationRead = (id: string) => {
+    saveReadIds(new Set([...readIds, id]));
+    void fetch('/api/notifications', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -83,151 +134,174 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
   }, []);
 
   return (
-    <header className="min-h-14 bg-card border-b border-border flex items-center justify-between gap-3 px-4 py-2 shrink-0 z-30 sm:px-6">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          {onOpenMenu && (
-            <button
-              type="button"
-              onClick={onOpenMenu}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
-              aria-label="Open navigation"
-            >
-              <Menu size={18} />
-            </button>
-          )}
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold text-foreground leading-tight">
-              {title}
-            </h1>
-            {subtitle && (
-              <p className="hidden truncate text-xs text-muted-foreground sm:block">{subtitle}</p>
-            )}
+    <header className="shrink-0 border-b border-border bg-card z-30">
+      {tenant?.status === 'suspended' && (
+        <div className="flex items-center gap-3 bg-danger px-4 py-2 text-xs font-bold text-white sm:px-6">
+          <div className="relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/15">
+            <AlertTriangle size={15} />
           </div>
-        </div>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-2">
-        {/* Time */}
-        <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground md:flex">
-          <Clock size={12} />
-          <span className="font-tabular">{currentTime || 'Loading time...'}</span>
-        </div>
-
-        <div
-          className={`hidden h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium sm:flex ${
-            connectivity.status === 'online'
-              ? 'bg-success/10 text-success'
-              : connectivity.status === 'checking'
-                ? 'bg-muted text-muted-foreground'
-                : 'bg-warning/10 text-warning'
-          }`}
-          title={
-            connectivity.status === 'online'
-              ? `TOVAPOS is online${connectivity.latencyMs === null ? '' : ` (${connectivity.latencyMs} ms response)`}`
-              : connectivity.status === 'degraded'
-                ? 'The connection is unstable; sales can continue safely'
-                : connectivity.status === 'checking'
-                  ? 'Checking service availability'
-                  : 'TOVAPOS cannot reach the service; sales can continue on this device'
-          }
-        >
-          {connectivity.status === 'checking' ? (
-            <LoaderCircle size={12} className="animate-spin" />
-          ) : connectivity.status === 'online' ? (
-            <Wifi size={12} />
-          ) : (
-            <WifiOff size={12} />
-          )}
-          <span>
-            {connectivity.status === 'online'
-              ? 'Online'
-              : connectivity.status === 'checking'
-                ? 'Checking connection'
-                : connectivity.status === 'degraded'
-                  ? 'Connection unstable'
-                  : 'Offline — sales can continue'}
-          </span>
-        </div>
-
-        <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground lg:flex">
-          <Cloud size={12} />
-          <span className="font-tabular">
-            {syncProgress.isSyncing
-              ? `Sending ${syncProgress.completed}/${syncProgress.total}`
-              : `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting`}
-          </span>
-        </div>
-
-        {currentUser && (
-          <div className="hidden h-8 max-w-[220px] items-center gap-2 rounded-md bg-primary/10 px-3 text-xs font-semibold text-primary xl:flex">
-            <span className="truncate">{currentUser.name}</span>
-            <span className="capitalize text-primary/70">{currentUser.role.replace('-', ' ')}</span>
+          <div className="relative min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+            <span className="inline-block animate-[marquee_18s_linear_infinite] [padding-left:100%]">
+              Your account has been blocked. Please contact support to resolve this restriction.
+            </span>
           </div>
-        )}
-
-        {/* Notifications */}
-        <div className="relative">
-          <button
-            onClick={() => setShowNotifs(!showNotifs)}
-            className="relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
-            aria-label="Open alerts"
+          <Link
+            href="/support#new-ticket"
+            className="relative z-10 inline-flex shrink-0 items-center gap-1 rounded-md bg-white/15 px-2 py-1 hover:bg-white/25"
           >
-            <Bell size={18} />
-            {unread > 0 && (
-              <span className="absolute top-1 right-1 w-4 h-4 bg-danger text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                {unread}
-              </span>
+            <LifeBuoy size={13} />
+            Support
+          </Link>
+        </div>
+      )}
+      <div className="flex min-h-14 items-center justify-between gap-3 px-4 py-2 sm:px-6">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {onOpenMenu && (
+              <button
+                type="button"
+                onClick={onOpenMenu}
+                className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
+                aria-label="Open navigation"
+              >
+                <Menu size={18} />
+              </button>
             )}
-          </button>
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-semibold text-foreground leading-tight">
+                {title}
+              </h1>
+              {subtitle && (
+                <p className="hidden truncate text-xs text-muted-foreground sm:block">{subtitle}</p>
+              )}
+            </div>
+          </div>
+        </div>
 
-          {showNotifs && (
-            <div className="absolute right-0 top-full mt-2 w-[min(20rem,calc(100vw-2rem))] bg-card border border-border rounded-xl shadow-modal z-50 fade-in">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <span className="text-sm font-semibold text-foreground">Alerts</span>
-                <span className="text-xs text-muted-foreground">{unread} unread</span>
-              </div>
-              <div className="max-h-72 overflow-y-auto scrollbar-thin">
-                {notifications.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-xs text-muted-foreground">
-                    No active alerts.
-                  </div>
-                ) : (
-                  notifications.map((n) => (
-                    <div
-                      key={n.id}
-                      onClick={() => saveReadIds(new Set([...readIds, n.id]))}
-                      className="flex items-start gap-3 border-b border-border px-4 py-3 transition-colors duration-100 last:border-0 hover:bg-muted/50"
-                    >
-                      <AlertTriangle
-                        size={14}
-                        className={`mt-0.5 shrink-0 ${n.type === 'danger' ? 'text-danger' : n.type === 'warning' ? 'text-warning' : 'text-info'}`}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p
-                          className={`text-xs leading-relaxed ${
-                            readIds.has(n.id) ? 'text-muted-foreground' : 'text-foreground'
-                          }`}
-                        >
-                          {n.message}
-                        </p>
-                        <p className="mt-1 text-[10px] text-muted-foreground">{n.time}</p>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="px-4 py-2 border-t border-border">
-                <button
-                  type="button"
-                  onClick={() => saveReadIds(new Set(notifications.map((item) => item.id)))}
-                  className="text-xs text-primary font-medium hover:underline"
-                >
-                  Mark all as read
-                </button>
-              </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Time */}
+          <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground md:flex">
+            <Clock size={12} />
+            <span className="font-tabular">{currentTime || 'Loading time...'}</span>
+          </div>
+
+          <div
+            className={`hidden h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium sm:flex ${
+              connectivity.status === 'online'
+                ? 'bg-success/10 text-success'
+                : connectivity.status === 'checking'
+                  ? 'bg-muted text-muted-foreground'
+                  : 'bg-warning/10 text-warning'
+            }`}
+            title={
+              connectivity.status === 'online'
+                ? `TOVAPOS is online${connectivity.latencyMs === null ? '' : ` (${connectivity.latencyMs} ms response)`}`
+                : connectivity.status === 'degraded'
+                  ? 'The connection is unstable; sales can continue safely'
+                  : connectivity.status === 'checking'
+                    ? 'Checking service availability'
+                    : 'TOVAPOS cannot reach the service; sales can continue on this device'
+            }
+          >
+            {connectivity.status === 'checking' ? (
+              <LoaderCircle size={12} className="animate-spin" />
+            ) : connectivity.status === 'online' ? (
+              <Wifi size={12} />
+            ) : (
+              <WifiOff size={12} />
+            )}
+            <span>
+              {connectivity.status === 'online'
+                ? 'Online'
+                : connectivity.status === 'checking'
+                  ? 'Checking connection'
+                  : connectivity.status === 'degraded'
+                    ? 'Connection unstable'
+                    : 'Offline — sales can continue'}
+            </span>
+          </div>
+
+          <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground lg:flex">
+            <Cloud size={12} />
+            <span className="font-tabular">
+              {syncProgress.isSyncing
+                ? `Sending ${syncProgress.completed}/${syncProgress.total}`
+                : `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting`}
+            </span>
+          </div>
+
+          {currentUser && (
+            <div className="hidden h-8 max-w-[220px] items-center gap-2 rounded-md bg-primary/10 px-3 text-xs font-semibold text-primary xl:flex">
+              <span className="truncate">{currentUser.name}</span>
+              <span className="capitalize text-primary/70">
+                {currentUser.role.replace('-', ' ')}
+              </span>
             </div>
           )}
+
+          {/* Notifications */}
+          <div className="relative">
+            <button
+              onClick={() => setShowNotifs(!showNotifs)}
+              className="relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"
+              aria-label="Open alerts"
+            >
+              <Bell size={18} />
+              {unread > 0 && (
+                <span className="absolute top-1 right-1 w-4 h-4 bg-danger text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                  {unread}
+                </span>
+              )}
+            </button>
+
+            {showNotifs && (
+              <div className="absolute right-0 top-full mt-2 w-[min(20rem,calc(100vw-2rem))] bg-card border border-border rounded-xl shadow-modal z-50 fade-in">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                  <span className="text-sm font-semibold text-foreground">Alerts</span>
+                  <span className="text-xs text-muted-foreground">{unread} unread</span>
+                </div>
+                <div className="max-h-72 overflow-y-auto scrollbar-thin">
+                  {notifications.length === 0 ? (
+                    <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                      No active alerts.
+                    </div>
+                  ) : (
+                    notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        onClick={() => markNotificationRead(n.id)}
+                        className="flex items-start gap-3 border-b border-border px-4 py-3 transition-colors duration-100 last:border-0 hover:bg-muted/50"
+                      >
+                        <AlertTriangle
+                          size={14}
+                          className={`mt-0.5 shrink-0 ${n.type === 'danger' ? 'text-danger' : n.type === 'warning' ? 'text-warning' : 'text-info'}`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className={`text-xs leading-relaxed ${
+                              readIds.has(n.id) ? 'text-muted-foreground' : 'text-foreground'
+                            }`}
+                          >
+                            {n.message}
+                          </p>
+                          <p className="mt-1 text-[10px] text-muted-foreground">{n.time}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="px-4 py-2 border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => saveReadIds(new Set(notifications.map((item) => item.id)))}
+                    className="text-xs text-primary font-medium hover:underline"
+                  >
+                    Mark all as read
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>

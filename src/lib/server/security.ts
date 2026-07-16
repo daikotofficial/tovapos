@@ -21,6 +21,7 @@ export interface AuthContext {
   tenantId: string;
   tenantSlug: string;
   tenantName: string;
+  tenantStatus: 'active' | 'suspended';
   user: TovaUser;
   sessionId: string;
 }
@@ -109,6 +110,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthContext> {
         s.tenant_id,
         t.slug AS tenant_slug,
         t.name AS tenant_name,
+        t.status AS tenant_status,
         u.id,
         u.name,
         u.email,
@@ -126,7 +128,6 @@ export async function requireAuth(request: NextRequest): Promise<AuthContext> {
       JOIN pos_app_users u ON u.tenant_id = s.tenant_id AND u.id = s.user_id
       WHERE s.token_hash = $1
         AND s.expires_at > now()
-        AND t.status = 'active'
         AND u.status = 'active'
       LIMIT 1
     `,
@@ -142,9 +143,20 @@ export async function requireAuth(request: NextRequest): Promise<AuthContext> {
     tenantId: row.tenant_id,
     tenantSlug: row.tenant_slug,
     tenantName: row.tenant_name,
+    tenantStatus: row.tenant_status,
     user: publicUser(row),
     sessionId: row.session_id,
   };
+}
+
+export function assertTenantActive(auth: AuthContext): void {
+  if (auth.tenantStatus !== 'active') {
+    throw new HttpError(
+      403,
+      'This business account has been blocked. Please contact support.',
+      'TENANT_SUSPENDED'
+    );
+  }
 }
 
 export function assertPermission(auth: AuthContext, permission: Permission): void {

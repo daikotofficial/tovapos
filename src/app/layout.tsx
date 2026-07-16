@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Metadata, Viewport } from 'next';
+import AppToaster from '@/components/ui/AppToaster';
 import { PosStoreProvider } from '@/lib/pos/PosStoreProvider';
 import '../styles/tailwind.css';
 
@@ -36,7 +37,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <PosStoreProvider>{children}</PosStoreProvider>
+        <PosStoreProvider>
+          {children}
+          <AppToaster />
+        </PosStoreProvider>
       </body>
     </html>
   );

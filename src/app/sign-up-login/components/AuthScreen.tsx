@@ -4,7 +4,6 @@ import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeft, BarChart3, CheckCircle2, ShieldCheck, Wifi, LockKeyhole } from 'lucide-react';
-import { Toaster } from 'sonner';
 import LoginForm from './LoginForm';
 import SignupForm from './SignupForm';
 
@@ -48,8 +47,6 @@ export default function AuthScreen({ initialTab = 'login', initialError = '' }: 
   const formWidth = tab === 'signup' ? 'max-w-[620px]' : 'max-w-[480px] lg:self-center';
   return (
     <main className="min-h-screen bg-[#f4f7f6] text-[#071412]">
-      <Toaster position="bottom-right" richColors />
-
       <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
         <header className="flex h-14 shrink-0 items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
