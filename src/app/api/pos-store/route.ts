@@ -873,7 +873,11 @@ export async function PUT(request: NextRequest) {
         records = records.map((record) => ({
           ...record,
           subscriptionPlanId:
-            currentSettings?.subscriptionPlanId ?? record.subscriptionPlanId ?? 'starter',
+            record.subscriptionPlanId === 'starter' ||
+            record.subscriptionPlanId === 'pro' ||
+            record.subscriptionPlanId === 'delux'
+              ? record.subscriptionPlanId
+              : (currentSettings?.subscriptionPlanId ?? 'starter'),
           subscriptionStatus:
             currentSettings?.subscriptionStatus ?? record.subscriptionStatus ?? 'active',
           subscriptionRenewsAt:

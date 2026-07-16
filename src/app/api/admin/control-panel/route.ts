@@ -32,6 +32,18 @@ function safeText(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value.trim() : fallback;
 }
 
+function safePlanId(value: unknown): 'starter' | 'pro' | 'delux' | null {
+  return value === 'starter' || value === 'pro' || value === 'delux' ? value : null;
+}
+
+function safeSubscriptionStatus(
+  value: unknown
+): 'trialing' | 'active' | 'past-due' | 'cancelled' | null {
+  return value === 'trialing' || value === 'active' || value === 'past-due' || value === 'cancelled'
+    ? value
+    : null;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const admin = await requirePlatformAdmin(request);
@@ -243,6 +255,13 @@ export async function PATCH(request: NextRequest) {
       const tenantId = safeText(body.tenantId);
       const targetUserId = safeText(body.targetUserId);
       const scope = body.scope === 'tenant' || body.scope === 'user' ? body.scope : 'all';
+      if (admin.role === 'support' && scope === 'all') {
+        throw new HttpError(
+          403,
+          'Support admins can notify one business or one user at a time',
+          'FORBIDDEN'
+        );
+      }
       const tone =
         body.tone === 'success' ||
         body.tone === 'warning' ||
@@ -355,6 +374,51 @@ export async function PATCH(request: NextRequest) {
 
     const tenantId = typeof body.tenantId === 'string' ? body.tenantId : '';
     if (!tenantId) throw new HttpError(400, 'Tenant id is required', 'VALIDATION_ERROR');
+
+    if (action === 'update-plan') {
+      assertPlatformOperator(admin);
+      const subscriptionPlanId = safePlanId(body.subscriptionPlanId);
+      const subscriptionStatus = safeSubscriptionStatus(body.subscriptionStatus) ?? 'active';
+      if (!subscriptionPlanId) {
+        throw new HttpError(400, 'Select a valid subscription plan', 'VALIDATION_ERROR');
+      }
+      const tenant = await getPosPool().query('SELECT id FROM pos_tenants WHERE id = $1 LIMIT 1', [
+        tenantId,
+      ]);
+      if (!tenant.rows[0]) throw new HttpError(404, 'Business account not found', 'NOT_FOUND');
+      const patch = {
+        id: 'settings',
+        subscriptionPlanId,
+        subscriptionStatus,
+        subscriptionRenewsAt: null,
+      };
+      await getPosPool().query(
+        `
+        INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+        VALUES ($1, 'settings', 'settings', $2::jsonb)
+        ON CONFLICT (tenant_id, store_name, record_id)
+        DO UPDATE SET
+          data = pos_tenant_records.data || EXCLUDED.data,
+          version = pos_tenant_records.version + 1,
+          updated_at = now()
+        `,
+        [tenantId, JSON.stringify(patch)]
+      );
+      await getPosPool().query(
+        `INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, metadata)
+         VALUES ($1, $2, 'update-plan', 'tenant', $1, $3::jsonb)`,
+        [
+          tenantId,
+          admin.id,
+          JSON.stringify({
+            performedBy: admin.email,
+            subscriptionPlanId,
+            subscriptionStatus,
+          }),
+        ]
+      );
+      return NextResponse.json({ ok: true });
+    }
 
     if (action === 'suspend-tenant' || action === 'activate-tenant') {
       assertPlatformOperator(admin);

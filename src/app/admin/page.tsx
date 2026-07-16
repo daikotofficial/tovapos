@@ -34,6 +34,8 @@ import type { SupportTicket } from '@/lib/pos/types';
 
 type PlatformRole = 'super-admin' | 'admin' | 'support';
 type AdminSection = 'overview' | 'businesses' | 'support' | 'admins' | 'billing' | 'security';
+type PlanId = 'starter' | 'pro' | 'delux';
+type SubscriptionStatus = 'trialing' | 'active' | 'past-due' | 'cancelled';
 
 interface AdminUser {
   id: string;
@@ -61,8 +63,8 @@ interface TenantRow {
   userCount: number;
   activeUserCount: number;
   saleCount: number;
-  subscriptionPlanId: 'starter' | 'pro' | 'delux' | string;
-  subscriptionStatus: 'trialing' | 'active' | 'past-due' | 'cancelled' | string;
+  subscriptionPlanId: PlanId | string;
+  subscriptionStatus: SubscriptionStatus | string;
   subscriptionRenewsAt?: string | null;
   openTicketCount: number;
 }
@@ -106,6 +108,8 @@ const sectionItems: Array<{
 
 const statusBadge =
   'rounded-full bg-muted px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground';
+const planIds: PlanId[] = ['starter', 'pro', 'delux'];
+const subscriptionStatuses: SubscriptionStatus[] = ['active', 'trialing', 'past-due', 'cancelled'];
 
 function formatDate(value?: string | null): string {
   if (!value) return 'Never';
@@ -115,6 +119,14 @@ function formatDate(value?: string | null): string {
 function roleLabel(role: PlatformRole): string {
   if (role === 'super-admin') return 'Super admin';
   return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function isPlanId(value: string): value is PlanId {
+  return planIds.includes(value as PlanId);
+}
+
+function isSubscriptionStatus(value: string): value is SubscriptionStatus {
+  return subscriptionStatuses.includes(value as SubscriptionStatus);
 }
 
 export default function AdminPage() {
@@ -150,6 +162,9 @@ export default function AdminPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'support'>('support');
   const [inviteUrl, setInviteUrl] = useState('');
+  const [planDrafts, setPlanDrafts] = useState<
+    Record<string, { subscriptionPlanId: PlanId; subscriptionStatus: SubscriptionStatus }>
+  >({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -203,6 +218,12 @@ export default function AdminPage() {
     document.documentElement.dataset.theme = adminTheme;
     window.localStorage.setItem('tovapos.adminTheme', adminTheme);
   }, [adminTheme]);
+
+  useEffect(() => {
+    if (admin?.role === 'support' && noticeScope === 'all') {
+      setNoticeScope('tenant');
+    }
+  }, [admin?.role, noticeScope]);
 
   const loadPanel = useCallback(async () => {
     const response = await fetch('/api/admin/control-panel', { cache: 'no-store' });
@@ -302,8 +323,10 @@ export default function AdminPage() {
       setResponseText('');
       setSelectedTicketId('');
       await loadPanel();
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Admin action failed');
+      return false;
     } finally {
       setBusy('');
     }
@@ -368,6 +391,10 @@ export default function AdminPage() {
 
   const sendNotification = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (admin?.role === 'support' && noticeScope === 'all') {
+      toast.error('Support admins can notify one business or one user at a time');
+      return;
+    }
     setBusy('notify');
     setError('');
     try {
@@ -404,6 +431,43 @@ export default function AdminPage() {
     } finally {
       setBusy('');
     }
+  };
+
+  const planDraftFor = (tenant: TenantRow) =>
+    planDrafts[tenant.id] ?? {
+      subscriptionPlanId: isPlanId(tenant.subscriptionPlanId)
+        ? tenant.subscriptionPlanId
+        : 'starter',
+      subscriptionStatus: isSubscriptionStatus(tenant.subscriptionStatus)
+        ? tenant.subscriptionStatus
+        : 'active',
+    };
+
+  const setPlanDraft = (
+    tenant: TenantRow,
+    patch: Partial<{ subscriptionPlanId: PlanId; subscriptionStatus: SubscriptionStatus }>
+  ) => {
+    setPlanDrafts((current) => ({
+      ...current,
+      [tenant.id]: {
+        ...planDraftFor(tenant),
+        ...patch,
+      },
+    }));
+  };
+
+  const saveTenantPlan = async (tenant: TenantRow) => {
+    const draft = planDraftFor(tenant);
+    const saved = await runAction(
+      {
+        action: 'update-plan',
+        tenantId: tenant.id,
+        subscriptionPlanId: draft.subscriptionPlanId,
+        subscriptionStatus: draft.subscriptionStatus,
+      },
+      `plan-${tenant.id}`
+    );
+    if (saved) toast.success(`${tenant.name} moved to ${draft.subscriptionPlanId}`);
   };
 
   const startMfaSetup = async () => {
@@ -560,6 +624,15 @@ export default function AdminPage() {
   const canManageBusinesses = admin.role === 'super-admin' || admin.role === 'admin';
   const canDeleteBusinesses = admin.role === 'super-admin';
   const isSuperAdmin = admin.role === 'super-admin';
+  const canManagePlans = canManageBusinesses;
+  const visibleSectionItems = sectionItems.filter((item) => {
+    if (item.id === 'admins') return isSuperAdmin;
+    if (item.id === 'businesses' || item.id === 'billing') return canManageBusinesses;
+    return true;
+  });
+  const currentSection = visibleSectionItems.some((item) => item.id === activeSection)
+    ? activeSection
+    : 'overview';
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -583,9 +656,9 @@ export default function AdminPage() {
             </button>
           </div>
           <nav className="flex gap-2 overflow-x-auto px-4 pb-4 lg:block lg:space-y-1">
-            {sectionItems.map((item) => {
+            {visibleSectionItems.map((item) => {
               const Icon = item.icon;
-              const active = activeSection === item.id;
+              const active = currentSection === item.id;
               return (
                 <button
                   key={item.id}
@@ -618,7 +691,7 @@ export default function AdminPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xl font-black">
-                  {sectionItems.find((item) => item.id === activeSection)?.label}
+                  {visibleSectionItems.find((item) => item.id === currentSection)?.label}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   Secure control for businesses, support, admins, and billing readiness.
@@ -653,7 +726,7 @@ export default function AdminPage() {
               </p>
             )}
 
-            {activeSection === 'overview' && (
+            {currentSection === 'overview' && (
               <div className="space-y-5">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6">
                   {[
@@ -721,7 +794,7 @@ export default function AdminPage() {
               </div>
             )}
 
-            {activeSection === 'businesses' && (
+            {currentSection === 'businesses' && (
               <section className="rounded-lg border border-border bg-card">
                 <div className="flex items-center gap-2 border-b border-border px-4 py-3">
                   <Building2 size={16} className="text-primary" />
@@ -743,91 +816,150 @@ export default function AdminPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {tenants.map((tenant) => (
-                        <tr key={tenant.id}>
-                          <td className="px-4 py-3">
-                            <p className="font-semibold text-foreground">{tenant.name}</p>
-                            <p className="text-xs text-muted-foreground">{tenant.slug}</p>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground">
-                            {formatDate(tenant.registeredAt)}
-                          </td>
-                          <td className="px-4 py-3 font-tabular">{tenant.productCount}</td>
-                          <td className="px-4 py-3 font-tabular">{tenant.activeItemCount}</td>
-                          <td className="px-4 py-3 font-tabular">
-                            {tenant.activeUserCount}/{tenant.userCount}
-                          </td>
-                          <td className="px-4 py-3">
-                            <p className="font-semibold capitalize">{tenant.subscriptionPlanId}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {tenant.subscriptionStatus}
-                            </p>
-                          </td>
-                          <td className="px-4 py-3 font-tabular">{tenant.openTicketCount}</td>
-                          <td className="px-4 py-3">
-                            <span className={statusBadge}>{tenant.status}</span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void runAction(
-                                    {
-                                      action:
-                                        tenant.status === 'active'
-                                          ? 'suspend-tenant'
-                                          : 'activate-tenant',
-                                      tenantId: tenant.id,
-                                    },
-                                    tenant.id
-                                  )
-                                }
-                                disabled={!canManageBusinesses || busy === tenant.id}
-                                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold disabled:opacity-50"
-                              >
-                                {tenant.status === 'active' ? (
-                                  <Ban size={12} />
-                                ) : (
-                                  <CheckCircle2 size={12} />
-                                )}
-                                {tenant.status === 'active' ? 'Block' : 'Unblock'}
-                              </button>
-                              {canDeleteBusinesses && (
+                      {tenants.map((tenant) => {
+                        const planDraft = planDraftFor(tenant);
+                        const planBusy = busy === `plan-${tenant.id}`;
+                        return (
+                          <tr key={tenant.id}>
+                            <td className="px-4 py-3">
+                              <p className="font-semibold text-foreground">{tenant.name}</p>
+                              <p className="text-xs text-muted-foreground">{tenant.slug}</p>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {formatDate(tenant.registeredAt)}
+                            </td>
+                            <td className="px-4 py-3 font-tabular">{tenant.productCount}</td>
+                            <td className="px-4 py-3 font-tabular">{tenant.activeItemCount}</td>
+                            <td className="px-4 py-3 font-tabular">
+                              {tenant.activeUserCount}/{tenant.userCount}
+                            </td>
+                            <td className="px-4 py-3">
+                              {canManagePlans ? (
+                                <div className="grid min-w-40 gap-2">
+                                  <select
+                                    value={planDraft.subscriptionPlanId}
+                                    onChange={(event) =>
+                                      setPlanDraft(tenant, {
+                                        subscriptionPlanId: event.target.value as PlanId,
+                                      })
+                                    }
+                                    className="rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold capitalize"
+                                  >
+                                    {planIds.map((plan) => (
+                                      <option key={plan} value={plan}>
+                                        {plan}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    value={planDraft.subscriptionStatus}
+                                    onChange={(event) =>
+                                      setPlanDraft(tenant, {
+                                        subscriptionStatus: event.target
+                                          .value as SubscriptionStatus,
+                                      })
+                                    }
+                                    className="rounded-md border border-border bg-background px-2 py-1 text-xs capitalize"
+                                  >
+                                    {subscriptionStatuses.map((status) => (
+                                      <option key={status} value={status}>
+                                        {status}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              ) : (
+                                <>
+                                  <p className="font-semibold capitalize">
+                                    {tenant.subscriptionPlanId}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {tenant.subscriptionStatus}
+                                  </p>
+                                </>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 font-tabular">{tenant.openTicketCount}</td>
+                            <td className="px-4 py-3">
+                              <span className={statusBadge}>{tenant.status}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-wrap gap-2">
                                 <button
                                   type="button"
-                                  onClick={async () => {
-                                    const confirmed = await confirmAction({
-                                      title: `Delete ${tenant.name}?`,
-                                      description:
-                                        'This permanently removes the business account, users, inventory, sales, tickets, and tenant data. This cannot be undone.',
-                                      confirmLabel: 'Delete business',
-                                    });
-                                    if (confirmed) {
-                                      void runAction(
-                                        { action: 'delete-tenant', tenantId: tenant.id },
-                                        tenant.id
-                                      );
-                                    }
-                                  }}
-                                  disabled={busy === tenant.id}
-                                  className="inline-flex items-center gap-1 rounded-md border border-danger/30 px-2 py-1 text-xs font-semibold text-danger"
+                                  onClick={() =>
+                                    void runAction(
+                                      {
+                                        action:
+                                          tenant.status === 'active'
+                                            ? 'suspend-tenant'
+                                            : 'activate-tenant',
+                                        tenantId: tenant.id,
+                                      },
+                                      tenant.id
+                                    )
+                                  }
+                                  disabled={!canManageBusinesses || busy === tenant.id}
+                                  className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold disabled:opacity-50"
                                 >
-                                  <Trash2 size={12} />
-                                  Delete
+                                  {tenant.status === 'active' ? (
+                                    <Ban size={12} />
+                                  ) : (
+                                    <CheckCircle2 size={12} />
+                                  )}
+                                  {tenant.status === 'active' ? 'Block' : 'Unblock'}
                                 </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                                {canManagePlans && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void saveTenantPlan(tenant)}
+                                    disabled={planBusy}
+                                    className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold disabled:opacity-50"
+                                  >
+                                    {planBusy ? (
+                                      <Loader2 size={12} className="animate-spin" />
+                                    ) : (
+                                      <CreditCard size={12} />
+                                    )}
+                                    Save plan
+                                  </button>
+                                )}
+                                {canDeleteBusinesses && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const confirmed = await confirmAction({
+                                        title: `Delete ${tenant.name}?`,
+                                        description:
+                                          'This permanently removes the business account, users, inventory, sales, tickets, and tenant data. This cannot be undone.',
+                                        confirmLabel: 'Delete business',
+                                      });
+                                      if (confirmed) {
+                                        void runAction(
+                                          { action: 'delete-tenant', tenantId: tenant.id },
+                                          tenant.id
+                                        );
+                                      }
+                                    }}
+                                    disabled={busy === tenant.id}
+                                    className="inline-flex items-center gap-1 rounded-md border border-danger/30 px-2 py-1 text-xs font-semibold text-danger"
+                                  >
+                                    <Trash2 size={12} />
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </section>
             )}
 
-            {activeSection === 'support' && (
+            {currentSection === 'support' && (
               <div className="space-y-5">
                 <section className="rounded-lg border border-border bg-card">
                   <div className="flex items-center gap-2 border-b border-border px-4 py-3">
@@ -946,7 +1078,7 @@ export default function AdminPage() {
                           }}
                           className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
                         >
-                          <option value="all">All businesses</option>
+                          {admin.role !== 'support' && <option value="all">All businesses</option>}
                           <option value="tenant">One business</option>
                           <option value="user">One user</option>
                         </select>
@@ -1051,7 +1183,7 @@ export default function AdminPage() {
               </div>
             )}
 
-            {activeSection === 'admins' && (
+            {currentSection === 'admins' && (
               <div className="space-y-5">
                 {isSuperAdmin ? (
                   <form
@@ -1172,7 +1304,7 @@ export default function AdminPage() {
               </div>
             )}
 
-            {activeSection === 'billing' && (
+            {currentSection === 'billing' && (
               <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
                 <section className="rounded-lg border border-border bg-card">
                   <div className="border-b border-border px-4 py-3">
@@ -1215,7 +1347,7 @@ export default function AdminPage() {
               </div>
             )}
 
-            {activeSection === 'security' && (
+            {currentSection === 'security' && (
               <div className="space-y-5">
                 <section className="rounded-lg border border-border bg-card">
                   <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
@@ -1388,11 +1520,11 @@ export default function AdminPage() {
         </section>
       </div>
       {mfaSetup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/50 p-4">
-          <div className="w-full max-w-lg rounded-xl border border-border bg-card text-foreground shadow-modal">
-            <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-foreground/50 p-3 sm:items-center sm:p-4">
+          <div className="my-3 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-modal sm:my-0">
+            <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
               <div>
-                <p className="text-lg font-black">Set Up Two-Factor Authentication</p>
+                <p className="text-base font-black sm:text-lg">Set Up Two-Factor Authentication</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Scan the QR code, then enter the 6-digit code from your authenticator app.
                 </p>
@@ -1403,19 +1535,20 @@ export default function AdminPage() {
                   setMfaSetup(null);
                   setMfaCode('');
                 }}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="w-full rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground sm:w-auto sm:py-1.5"
               >
                 Cancel
               </button>
             </div>
 
-            <div className="space-y-4 p-5">
-              <div className="flex justify-center rounded-xl border border-border bg-white p-4">
+            <div className="max-h-[calc(100svh-8rem)] space-y-4 overflow-y-auto p-4 sm:max-h-[calc(100svh-4rem)] sm:p-5">
+              <div className="flex justify-center rounded-xl border border-border bg-white p-3 sm:p-4">
                 <Image
                   src={mfaSetup.qrDataUrl}
                   alt="Scan this QR code with Google Authenticator"
                   width={220}
                   height={220}
+                  className="h-auto w-full max-w-[220px]"
                   unoptimized
                 />
               </div>
@@ -1445,7 +1578,7 @@ export default function AdminPage() {
                   onChange={(event) =>
                     setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))
                   }
-                  className="h-12 w-full rounded-lg border border-border bg-background px-3 text-center text-lg font-black tracking-[0.45em]"
+                  className="h-12 w-full rounded-lg border border-border bg-background px-3 text-center text-base font-black tracking-[0.28em] sm:text-lg sm:tracking-[0.45em]"
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   placeholder="000000"

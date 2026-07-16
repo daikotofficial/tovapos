@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import {
   Bell,
   Building2,
+  CheckCircle2,
+  CreditCard,
   KeyRound,
   Loader2,
   Palette,
@@ -18,13 +20,18 @@ import PermissionGate from '@/components/PermissionGate';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { BusinessSettings } from '@/lib/pos/types';
-import { getProductUsage } from '@/lib/pos/subscription';
+import {
+  getProductUsage,
+  subscriptionPlans,
+  type SubscriptionPlanId,
+} from '@/lib/pos/subscription';
 
 export default function SettingsPage() {
   const { settings, updateSettings, pendingSyncCount, inventory } = usePosStore();
   const [form, setForm] = useState<BusinessSettings>(settings);
   const [saved, setSaved] = useState(false);
   const productUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
+  const planOptions = Object.values(subscriptionPlans);
 
   useEffect(() => {
     setForm(settings);
@@ -69,6 +76,18 @@ export default function SettingsPage() {
     window.setTimeout(() => setSaved(false), 1800);
   };
 
+  const changePlan = async (subscriptionPlanId: SubscriptionPlanId) => {
+    const nextSettings: BusinessSettings = {
+      ...form,
+      subscriptionPlanId,
+      subscriptionStatus: 'active',
+    };
+    setForm(nextSettings);
+    await updateSettings(nextSettings);
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 1800);
+  };
+
   return (
     <AppLayout
       title="Settings"
@@ -79,8 +98,8 @@ export default function SettingsPage() {
         <div className="p-6 max-w-6xl mx-auto space-y-5">
           <div className="bg-card border border-border rounded-xl shadow-card">
             <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-              <ShieldCheck size={16} className="text-primary" />
-              <span className="text-sm font-semibold">Subscription & Plan Limits</span>
+              <CreditCard size={16} className="text-primary" />
+              <span className="text-sm font-semibold">Subscription & Plan</span>
             </div>
             <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-3">
               <div className="rounded-lg bg-muted/40 px-4 py-3">
@@ -103,6 +122,49 @@ export default function SettingsPage() {
                   {settings.subscriptionStatus ?? 'active'}
                 </p>
               </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 border-t border-border p-5 lg:grid-cols-3">
+              {planOptions.map((plan) => {
+                const active = (form.subscriptionPlanId ?? 'starter') === plan.id;
+                return (
+                  <div
+                    key={plan.id}
+                    className={`flex flex-col rounded-xl border p-4 ${
+                      active ? 'border-primary bg-primary/5' : 'border-border bg-background'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-base font-black">{plan.name}</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {plan.description}
+                        </p>
+                      </div>
+                      {active && <CheckCircle2 size={18} className="shrink-0 text-primary" />}
+                    </div>
+                    <p className="mt-3 text-sm font-bold">
+                      {plan.monthlyPrice
+                        ? `NGN ${plan.monthlyPrice.toLocaleString()} / month`
+                        : 'Custom'}
+                      <span className="ml-2 rounded-full bg-success/10 px-2 py-1 text-[10px] font-black uppercase text-success">
+                        Free now
+                      </span>
+                    </p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Product limit:{' '}
+                      {plan.productLimit ? plan.productLimit.toLocaleString() : 'Custom'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void changePlan(plan.id)}
+                      disabled={active}
+                      className="mt-4 rounded-lg border border-border px-3 py-2 text-sm font-semibold disabled:opacity-60"
+                    >
+                      {active ? 'Current plan' : `Switch to ${plan.name}`}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
