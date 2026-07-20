@@ -11,6 +11,12 @@ import { InventoryItem, PaymentMethod, SaleTransaction } from '@/lib/pos/types';
 import { loadInventoryByIds, loadInventoryPage, lookupInventoryItem } from '@/lib/pos/local-store';
 import { assertSellable, getDaysUntilExpiry } from '@/lib/pos/stock';
 import { formatMoney } from '@/lib/pos/money';
+import {
+  calculateLineTax,
+  getProductDiscountPercent,
+  money,
+  resolveTaxRate,
+} from '@/lib/pos/sale-calculations';
 
 export interface CartItem {
   id: string;
@@ -66,34 +72,26 @@ export default function CheckoutScreen() {
     cartRef.current = cart;
   }, [cart]);
 
-  const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const itemDiscountTotal = cart.reduce(
-    (sum, item) => sum + item.unitPrice * item.quantity * (item.discount / 100),
-    0
+  const subtotal = money(cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0));
+  const itemDiscountTotal = money(
+    cart.reduce((sum, item) => sum + item.unitPrice * item.quantity * (item.discount / 100), 0)
   );
-  const subtotalAfterLineDiscounts = subtotal - itemDiscountTotal;
-  const orderDiscountTotal = subtotalAfterLineDiscounts * (globalDiscount / 100);
-  const discountTotal = itemDiscountTotal + orderDiscountTotal;
-  const discountedSubtotal = subtotalAfterLineDiscounts - orderDiscountTotal;
+  const subtotalAfterLineDiscounts = money(subtotal - itemDiscountTotal);
+  const orderDiscountTotal = money(subtotalAfterLineDiscounts * (globalDiscount / 100));
+  const discountTotal = money(itemDiscountTotal + orderDiscountTotal);
+  const discountedSubtotal = money(subtotalAfterLineDiscounts - orderDiscountTotal);
   const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
   const taxLines = cart.map((item) => {
-    const gross = item.unitPrice * item.quantity;
-    const lineAfterDiscount = gross * (1 - item.discount / 100);
-    const orderDiscountShare =
-      subtotalAfterLineDiscounts > 0
-        ? orderDiscountTotal * (lineAfterDiscount / subtotalAfterLineDiscounts)
-        : 0;
-    const lineTotal = Math.max(0, lineAfterDiscount - orderDiscountShare);
-    const productTaxRate = Math.max(0, Number(item.taxRate) || 0);
-    const lineTaxRate = item.taxApplicable ? productTaxRate || defaultTaxRate : 0;
-    const lineTax = lineTaxRate <= 0 ? 0 : gross * (lineTaxRate / 100);
-    return { lineTotal, lineTaxRate, taxMode: item.taxMode, taxAmount: lineTax };
+    const gross = money(item.unitPrice * item.quantity);
+    const lineTaxRate = resolveTaxRate(item.taxApplicable, item.taxRate, defaultTaxRate);
+    const { taxAmount, exclusiveTaxAmount } = calculateLineTax(gross, lineTaxRate, item.taxMode);
+    return { lineTaxRate, taxMode: item.taxMode, taxAmount, exclusiveTaxAmount };
   });
-  const taxAmount = taxLines.reduce((sum, line) => sum + line.taxAmount, 0);
-  const exclusiveTaxAmount = taxLines
-    .filter((line) => line.taxMode === 'exclusive')
-    .reduce((sum, line) => sum + line.taxAmount, 0);
-  const grandTotal = discountedSubtotal + exclusiveTaxAmount;
+  const taxAmount = money(taxLines.reduce((sum, line) => sum + line.taxAmount, 0));
+  const exclusiveTaxAmount = money(
+    taxLines.reduce((sum, line) => sum + line.exclusiveTaxAmount, 0)
+  );
+  const grandTotal = money(discountedSubtotal + exclusiveTaxAmount);
   const appliedTaxRates = Array.from(
     new Set(taxLines.filter((line) => line.lineTaxRate > 0).map((line) => line.lineTaxRate))
   );
@@ -133,17 +131,6 @@ export default function CheckoutScreen() {
       window.clearTimeout(timeout);
     };
   }, [isScanning, scanInput]);
-
-  const getProductDiscountPercent = (product: InventoryItem): number => {
-    const sellingPrice = Number(product.sellingPrice) || 0;
-    const discountValue = Math.max(0, Number(product.discountValue) || 0);
-    if (sellingPrice <= 0 || discountValue <= 0 || product.discountType === 'none') return 0;
-    if (product.discountType === 'percentage') return Math.min(100, discountValue);
-    if (product.discountType === 'fixed') {
-      return Math.min(100, (discountValue / sellingPrice) * 100);
-    }
-    return 0;
-  };
 
   const handleScan = useCallback(
     async (rawCode: string) => {
@@ -422,8 +409,8 @@ export default function CheckoutScreen() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <div className="flex-1 flex flex-col min-w-0 border-r border-border overflow-hidden">
+    <div className="flex min-h-full flex-col overflow-visible lg:h-full lg:flex-row lg:overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col border-border lg:border-r lg:overflow-hidden">
         {pendingSyncCount > 0 && (
           <div className="px-4 py-2 bg-warning/10 border-b border-warning/20 text-xs font-medium text-warning">
             {pendingSyncCount} sale{pendingSyncCount === 1 ? '' : 's'} waiting to be sent. This will
@@ -451,7 +438,7 @@ export default function CheckoutScreen() {
         />
       </div>
 
-      <div className="w-80 xl:w-96 flex flex-col shrink-0 bg-card overflow-hidden">
+      <div className="flex w-full shrink-0 flex-col bg-card lg:w-80 lg:overflow-hidden xl:w-96">
         <PaymentPanel
           cart={cart}
           subtotal={subtotal}

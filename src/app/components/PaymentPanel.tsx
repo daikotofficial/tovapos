@@ -69,12 +69,14 @@ export default function PaymentPanel({
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const quickAmounts = QUICK_AMOUNTS_BY_CURRENCY[currency] ?? QUICK_AMOUNTS_BY_CURRENCY.NGN;
   const currencyPrefix = getCurrencyInputPrefix(currency);
+  const tenderedAmount = Number(cashTendered);
   const change =
-    paymentMethod === 'cash' && cashTendered ? parseFloat(cashTendered) - grandTotal : 0;
-  const isChangeReady = paymentMethod === 'cash' && parseFloat(cashTendered) >= grandTotal;
+    paymentMethod === 'cash' && Number.isFinite(tenderedAmount) ? tenderedAmount - grandTotal : 0;
+  const isChangeReady =
+    paymentMethod === 'cash' && Number.isFinite(tenderedAmount) && tenderedAmount >= grandTotal;
 
   return (
-    <div className="flex flex-col h-full border-l border-border overflow-hidden">
+    <div className="flex h-auto flex-col overflow-visible border-t border-border lg:h-full lg:overflow-hidden lg:border-l lg:border-t-0">
       {/* Header */}
       <div className="px-4 py-3 border-b border-border bg-muted/30 shrink-0">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -82,7 +84,7 @@ export default function PaymentPanel({
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
+      <div className="flex-1 overflow-visible scrollbar-thin lg:overflow-y-auto">
         {/* Customer */}
         <div className="px-4 pt-4 pb-3 border-b border-border">
           <label className="block text-xs font-medium text-muted-foreground mb-1.5">
@@ -151,8 +153,8 @@ export default function PaymentPanel({
           <label className="block text-xs font-medium text-muted-foreground mb-1.5">
             Order Discount
           </label>
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[8rem] flex-1">
               <Percent
                 size={12}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -170,19 +172,21 @@ export default function PaymentPanel({
               />
             </div>
             <span className="text-sm text-muted-foreground">%</span>
-            {[5, 10, 15, 20].map((pct) => (
-              <button
-                key={`pct-${pct}`}
-                onClick={() => setGlobalDiscount(pct)}
-                className={`px-2 py-1.5 text-xs font-medium rounded-md transition-colors duration-100 ${
-                  globalDiscount === pct
-                    ? 'bg-primary text-white'
-                    : 'bg-secondary text-secondary-foreground hover:bg-muted'
-                }`}
-              >
-                {pct}%
-              </button>
-            ))}
+            <div className="grid w-full grid-cols-4 gap-1.5 sm:w-auto sm:flex sm:items-center">
+              {[5, 10, 15, 20].map((pct) => (
+                <button
+                  key={`pct-${pct}`}
+                  onClick={() => setGlobalDiscount(pct)}
+                  className={`px-2 py-1.5 text-xs font-medium rounded-md transition-colors duration-100 ${
+                    globalDiscount === pct
+                      ? 'bg-primary text-white'
+                      : 'bg-secondary text-secondary-foreground hover:bg-muted'
+                  }`}
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -230,7 +234,7 @@ export default function PaymentPanel({
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
             Payment Method
           </p>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-3 gap-2">
             {(
               [
                 { id: 'cash', label: 'Cash', icon: Banknote },
@@ -246,7 +250,7 @@ export default function PaymentPanel({
                 <button
                   key={`pm-${id}`}
                   onClick={() => setPaymentMethod(id)}
-                  className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 transition-all duration-150 active:scale-95 ${
+                  className={`flex min-h-20 flex-col items-center justify-center gap-1.5 rounded-lg border-2 px-2 py-3 transition-all duration-150 active:scale-95 ${
                     paymentMethod === id
                       ? 'border-primary bg-primary/5 text-primary'
                       : 'border-border bg-background text-muted-foreground hover:border-primary/30 hover:bg-primary/3'
@@ -280,19 +284,19 @@ export default function PaymentPanel({
               />
             </div>
             {/* Quick amounts */}
-            <div className="flex gap-1.5 mt-2">
+            <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-5 lg:flex">
               {quickAmounts.map((amt) => (
                 <button
                   key={`cash-${amt}`}
                   onClick={() => setCashTendered(amt.toString())}
-                  className="flex-1 py-1.5 text-xs font-semibold bg-secondary hover:bg-muted rounded-md transition-colors duration-100 text-foreground active:scale-95"
+                  className="min-h-9 flex-1 rounded-md bg-secondary px-2 py-1.5 text-xs font-semibold text-foreground transition-colors duration-100 hover:bg-muted active:scale-95"
                 >
                   {formatMoney(amt, currency)}
                 </button>
               ))}
               <button
                 onClick={() => setCashTendered(grandTotal.toFixed(2))}
-                className="flex-1 py-1.5 text-xs font-semibold bg-primary/10 hover:bg-primary/20 rounded-md transition-colors duration-100 text-primary active:scale-95"
+                className="min-h-9 flex-1 rounded-md bg-primary/10 px-2 py-1.5 text-xs font-semibold text-primary transition-colors duration-100 hover:bg-primary/20 active:scale-95 sm:col-span-1"
               >
                 Exact
               </button>
@@ -361,7 +365,7 @@ export default function PaymentPanel({
       </div>
 
       {/* Process Button */}
-      <div className="px-4 py-4 border-t border-border bg-card shrink-0">
+      <div className="sticky bottom-16 z-20 shrink-0 border-t border-border bg-card/95 px-4 py-4 shadow-[0_-12px_28px_rgba(15,23,42,0.08)] backdrop-blur lg:static lg:shadow-none">
         <button
           onClick={onProcessPayment}
           disabled={isProcessing || cart.length === 0}

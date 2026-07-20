@@ -60,11 +60,11 @@ export default function CartPanel({
   quickProducts,
 }: CartPanelProps) {
   return (
-    <div className="flex flex-col h-full bg-background">
+    <div className="flex min-h-[58svh] flex-col bg-background lg:h-full lg:min-h-0">
       {/* Scan Bar */}
-      <div className="px-4 py-3 bg-card border-b border-border">
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
+      <div className="border-b border-border bg-card px-3 py-3 sm:px-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[min(100%,18rem)] flex-1">
             <Scan size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary" />
             <input
               ref={scanRef}
@@ -118,7 +118,7 @@ export default function CartPanel({
               if (scanInput) void onScan(scanInput);
             }}
             disabled={isScanning || !scanInput.trim()}
-            className="flex items-center gap-1.5 px-3 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 active:scale-95 transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:bg-primary/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
           >
             <Search size={14} />
             <span className="hidden sm:inline">{isScanning ? 'Finding...' : 'Scan'}</span>
@@ -126,7 +126,7 @@ export default function CartPanel({
           {canRefund && (
             <button
               onClick={onShowRefund}
-              className="flex items-center gap-1.5 px-3 py-2.5 bg-secondary text-secondary-foreground text-sm font-medium rounded-lg hover:bg-muted active:scale-95 transition-all duration-150"
+              className="flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-secondary px-3 py-2.5 text-sm font-medium text-secondary-foreground transition-all duration-150 hover:bg-muted active:scale-95 sm:flex-none"
               title="Process refund or return"
             >
               <RefreshCw size={14} />
@@ -160,7 +160,7 @@ export default function CartPanel({
       </div>
 
       {/* Cart Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-card border-b border-border">
+      <div className="flex items-center justify-between border-b border-border bg-card px-3 py-2 sm:px-4">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-foreground">Cart</span>
           {cart.length > 0 && (
@@ -181,9 +181,9 @@ export default function CartPanel({
       </div>
 
       {/* Cart Items */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin">
+      <div className="flex-1 overflow-visible scrollbar-thin lg:overflow-y-auto">
         {cart.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 py-16">
+          <div className="flex min-h-[34svh] flex-col items-center justify-center gap-3 py-12 lg:h-full lg:min-h-0 lg:py-16">
             <div className="w-16 h-16 rounded-2xl bg-primary/5 flex items-center justify-center">
               <Package size={28} className="text-primary/40" />
             </div>
@@ -199,13 +199,13 @@ export default function CartPanel({
             {cart.map((item) => (
               <div
                 key={item.id}
-                className={`px-4 py-3 hover:bg-muted/30 transition-all duration-150 ${removingIds.has(item.id) ? 'cart-item-exit' : 'fade-in'}`}
+                className={`px-3 py-3 transition-all duration-150 hover:bg-muted/30 sm:px-4 ${removingIds.has(item.id) ? 'cart-item-exit' : 'fade-in'}`}
               >
                 <div className="flex items-start gap-3">
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[200px]">
+                      <span className="max-w-full truncate text-sm font-semibold leading-tight text-foreground sm:max-w-[18rem]">
                         {item.name}
                       </span>
                       {item.requiresApproval && <Badge variant="approval" />}
@@ -256,9 +256,9 @@ export default function CartPanel({
                 </div>
 
                 {/* Qty + Price Row */}
-                <div className="flex items-center justify-between mt-2.5 gap-3">
+                <div className="mt-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                   {/* Quantity Controls */}
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       onClick={() => {
                         void onUpdateQuantity(item.id, item.quantity - 1);
@@ -293,7 +293,7 @@ export default function CartPanel({
                   </div>
 
                   {/* Discount + Subtotal */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between gap-2 sm:justify-end">
                     <div className="flex items-center gap-1">
                       <span className="text-[10px] text-muted-foreground">Disc:</span>
                       <div className="relative">

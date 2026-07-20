@@ -27,6 +27,7 @@ import {
   Vendor,
 } from './types';
 import { assertSellable, normalizeInventoryItem } from './stock';
+import { calculateSaleLine, calculateSaleTotals } from './sale-calculations';
 import {
   createSyncQueueItem,
   cacheCustomersLocally,
@@ -1199,6 +1200,22 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
         const updatedInventory: VersionedInventoryItem[] = [];
 
+        const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
+        const saleTotals = calculateSaleTotals(
+          [...requestedByItem.entries()].map(([inventoryItemId, line]) => {
+            const item = inventoryById.get(inventoryItemId);
+            return {
+              unitPrice: line.unitPrice,
+              quantity: line.quantity,
+              discount: line.discount,
+              taxApplicable: Boolean(item?.taxApplicable || Number(item?.taxRate) > 0),
+              taxRate: Number(item?.taxRate) || 0,
+              taxMode: item?.taxMode ?? settings.taxMode ?? 'exclusive',
+            };
+          }),
+          defaultTaxRate
+        );
+
         const lineItems = [...requestedByItem.entries()].map(([inventoryItemId, line]) => {
           const item = inventoryById.get(inventoryItemId);
           if (!item) throw new Error('One of the scanned products no longer exists in inventory');
@@ -1211,15 +1228,17 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             updatedAt: now,
           });
           updatedInventory.push({ ...updated, _expectedUpdatedAt: item.updatedAt });
-          const gross = line.unitPrice * line.quantity;
-          const discountAmount = Number((gross * (line.discount / 100)).toFixed(2));
-          const lineTotal = Number((gross - discountAmount).toFixed(2));
-          const productTaxRate = Math.max(0, Number(item.taxRate) || 0);
-          const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
-          const taxApplicable = Boolean(item.taxApplicable || productTaxRate > 0);
-          const taxRate = taxApplicable ? productTaxRate || defaultTaxRate : 0;
-          const taxMode = item.taxMode ?? settings.taxMode ?? 'exclusive';
-          const taxAmount = taxRate > 0 ? Number((gross * (taxRate / 100)).toFixed(2)) : 0;
+          const calculated = calculateSaleLine(
+            {
+              unitPrice: line.unitPrice,
+              quantity: line.quantity,
+              discount: line.discount,
+              taxApplicable: Boolean(item.taxApplicable || Number(item.taxRate) > 0),
+              taxRate: Number(item.taxRate) || 0,
+              taxMode: item.taxMode ?? settings.taxMode ?? 'exclusive',
+            },
+            defaultTaxRate
+          );
 
           return {
             id: `line-${operationId}-${item.id}`,
@@ -1235,12 +1254,12 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             unitPrice: line.unitPrice,
             unitCost: item.unitCost,
             discount: line.discount,
-            lineTotal,
-            discountAmount,
-            taxApplicable,
-            taxRate,
-            taxMode,
-            taxAmount,
+            lineTotal: calculated.lineTotal,
+            discountAmount: calculated.discountAmount,
+            taxApplicable: calculated.taxApplicable,
+            taxRate: calculated.taxRate,
+            taxMode: calculated.taxMode,
+            taxAmount: calculated.taxAmount,
             requiresApproval: item.requiresApproval,
             isControlled: item.isControlled,
             category: item.category,
@@ -1251,16 +1270,19 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           id: `sale-${operationId}`,
           transactionId: createTransactionId(),
           items: lineItems,
-          subtotal: input.subtotal,
-          discountTotal: input.discountTotal,
-          taxAmount: input.taxAmount,
-          grandTotal: input.grandTotal,
+          subtotal: saleTotals.subtotal,
+          discountTotal: saleTotals.discountTotal,
+          taxAmount: saleTotals.taxAmount,
+          grandTotal: saleTotals.grandTotal,
           paymentMethod: input.paymentMethod,
           paymentStatus: input.paymentMethod === 'credit' ? 'unpaid' : 'paid',
-          amountPaid: input.paymentMethod === 'credit' ? 0 : input.grandTotal,
-          amountDue: input.paymentMethod === 'credit' ? input.grandTotal : 0,
+          amountPaid: input.paymentMethod === 'credit' ? 0 : saleTotals.grandTotal,
+          amountDue: input.paymentMethod === 'credit' ? saleTotals.grandTotal : 0,
           cashTendered: input.cashTendered,
-          changeGiven: input.changeGiven,
+          changeGiven:
+            input.paymentMethod === 'cash' && input.cashTendered !== undefined
+              ? Math.max(0, Number((input.cashTendered - saleTotals.grandTotal).toFixed(2)))
+              : input.changeGiven,
           customerName: input.customerName || 'Walk-in Customer',
           timestamp: now,
           cashier: input.cashier,

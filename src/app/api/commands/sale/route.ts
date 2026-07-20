@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Customer, InventoryItem, SaleTransaction, StockMovement } from '@/lib/pos/types';
+import { calculateSaleLine, money } from '@/lib/pos/sale-calculations';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
@@ -18,10 +19,6 @@ interface SaleCommandItem {
   quantity: number;
   discount: number;
   unitPrice: number;
-}
-
-function money(value: number): number {
-  return Number(value.toFixed(2));
 }
 
 function commandHash(body: unknown): string {
@@ -156,7 +153,6 @@ export async function POST(request: NextRequest) {
       let subtotal = 0;
       let discountTotal = 0;
       let taxAmount = 0;
-      let exclusiveTaxAmount = 0;
       const updatedInventory: InventoryItem[] = [];
 
       const lineItems = items.map((requested) => {
@@ -192,22 +188,22 @@ export async function POST(request: NextRequest) {
         ) {
           throw new HttpError(409, `${row.name} cannot be sold below cost`, 'BELOW_COST_FORBIDDEN');
         }
-        const gross = money(requested.unitPrice * requested.quantity);
-        const discountAmount = money(gross * (requested.discount / 100));
-        const lineTotal = money(gross - discountAmount);
         const productData = row.data as InventoryItem;
-        const productTaxRate = Math.max(0, Number(productData.taxRate) || 0);
         const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
-        const taxApplies = Boolean(productData.taxApplicable || productTaxRate > 0);
-        const lineTaxRate = taxApplies ? productTaxRate || defaultTaxRate : 0;
-        const lineTaxMode = productData.taxMode ?? settings.taxMode ?? 'exclusive';
-        const lineTaxAmount = lineTaxRate <= 0 ? 0 : money(gross * (lineTaxRate / 100));
-        subtotal = money(subtotal + gross);
-        discountTotal = money(discountTotal + discountAmount);
-        taxAmount = money(taxAmount + lineTaxAmount);
-        if (lineTaxMode === 'exclusive') {
-          exclusiveTaxAmount = money(exclusiveTaxAmount + lineTaxAmount);
-        }
+        const calculated = calculateSaleLine(
+          {
+            unitPrice: requested.unitPrice,
+            quantity: requested.quantity,
+            discount: requested.discount,
+            taxApplicable: Boolean(productData.taxApplicable || Number(productData.taxRate) > 0),
+            taxRate: Number(productData.taxRate) || 0,
+            taxMode: productData.taxMode ?? settings.taxMode ?? 'exclusive',
+          },
+          defaultTaxRate
+        );
+        subtotal = money(subtotal + calculated.gross);
+        discountTotal = money(discountTotal + calculated.discountAmount);
+        taxAmount = money(taxAmount + calculated.taxAmount);
         const nextQuantity = Number(row.current_qty) - requested.quantity;
         updatedInventory.push({
           ...productData,
@@ -229,12 +225,12 @@ export async function POST(request: NextRequest) {
           unitPrice: requested.unitPrice,
           unitCost: Number(row.unit_cost),
           discount: requested.discount,
-          lineTotal,
-          discountAmount,
-          taxApplicable: taxApplies,
-          taxRate: lineTaxRate,
-          taxMode: lineTaxMode,
-          taxAmount: lineTaxAmount,
+          lineTotal: calculated.lineTotal,
+          discountAmount: calculated.discountAmount,
+          taxApplicable: calculated.taxApplicable,
+          taxRate: calculated.taxRate,
+          taxMode: calculated.taxMode,
+          taxAmount: calculated.taxAmount,
           requiresApproval: Boolean(row.data?.requiresApproval),
           isControlled: Boolean(row.data?.isControlled),
           category: row.category,
@@ -242,7 +238,13 @@ export async function POST(request: NextRequest) {
       });
 
       const taxable = money(subtotal - discountTotal);
+      const exclusiveTaxAmount = lineItems
+        .filter((line) => line.taxMode === 'exclusive')
+        .reduce((sum, line) => money(sum + Number(line.taxAmount ?? 0)), 0);
       const grandTotal = money(taxable + exclusiveTaxAmount);
+      if (paymentMethod === 'cash' && cashTendered < grandTotal) {
+        throw new HttpError(400, 'Cash tendered is less than the sale total', 'VALIDATION_ERROR');
+      }
       const receipt = await client.query(
         `INSERT INTO pos_receipt_sequences (tenant_id, next_number)
          VALUES ($1, 2)

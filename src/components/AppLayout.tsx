@@ -55,10 +55,10 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
           <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
         </Suspense>
       </div>
-      <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar title={title} subtitle={subtitle} onOpenMenu={() => setMobileMenuOpen(true)} />
-        <main className="flex flex-1 flex-col overflow-y-auto bg-background pb-20 scrollbar-thin lg:pb-0">
-          <div className="flex-1">{children}</div>
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-background pb-20 scrollbar-thin lg:pb-0">
+          <div className="min-h-0 flex-1">{children}</div>
           <footer className="border-t border-border bg-card/95 px-4 py-4 text-xs text-muted-foreground">
             <div className="mx-auto flex max-w-screen-2xl flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
@@ -79,7 +79,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       </div>
       <Link
         href="/support#new-ticket"
-        className={`fixed right-4 z-40 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-modal transition-transform hover:scale-105 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/30 lg:bottom-5 ${
+        className={`fixed right-4 z-40 hidden h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-modal transition-transform hover:scale-105 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/30 lg:bottom-5 lg:inline-flex ${
           pathname === '/support' ? 'bottom-20 opacity-70 lg:opacity-70' : 'bottom-20'
         }`}
         aria-label="Open support"
