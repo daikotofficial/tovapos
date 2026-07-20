@@ -47,9 +47,9 @@ export default function VendorsPage() {
   return (
     <AppLayout title="Vendors" subtitle="Manage suppliers, contacts, and purchasing relationships">
       <PermissionGate permission="vendors">
-        <div className="p-6 max-w-screen-2xl mx-auto space-y-5">
-          <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="mx-auto max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
+          <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card sm:rounded-xl">
+            <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <Truck size={16} className="text-primary" />
                 <span className="text-sm font-semibold">{vendors.length} Vendors</span>
@@ -60,7 +60,7 @@ export default function VendorsPage() {
                   setForm(next);
                   setEditing(next);
                 }}
-                className="flex items-center gap-2 px-3 py-2 bg-primary text-white rounded-lg text-sm font-semibold"
+                className="flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white"
               >
                 <Plus size={14} />
                 Add Vendor
@@ -76,7 +76,7 @@ export default function VendorsPage() {
               />
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
               <table className="w-full min-w-[840px]">
                 <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
                   <tr>

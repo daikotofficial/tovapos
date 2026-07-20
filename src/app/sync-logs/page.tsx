@@ -67,7 +67,7 @@ export default function SyncLogsPage() {
     <AppLayout title="Sync Logs" subtitle="Review and resolve offline reconciliation problems">
       <PermissionGate permission="sync-logs">
         {!isAdmin ? (
-          <div className="p-6">
+          <div className="px-3 py-4 sm:p-6">
             <div className="mx-auto max-w-xl rounded-xl border border-warning/30 bg-warning/10 p-5 text-warning">
               Sync Logs are restricted to owners and super administrators.
             </div>

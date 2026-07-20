@@ -95,7 +95,7 @@ export default function SettingsPage() {
     >
       <AccountSecurityCard />
       <PermissionGate permission="settings">
-        <div className="p-6 max-w-6xl mx-auto space-y-5">
+        <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
           <div className="bg-card border border-border rounded-xl shadow-card">
             <div className="px-4 py-3 border-b border-border flex items-center gap-2">
               <CreditCard size={16} className="text-primary" />

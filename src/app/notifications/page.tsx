@@ -112,7 +112,7 @@ export default function NotificationsPage() {
       subtitle="Stock alerts, expiry alerts, and offline sync status"
     >
       <PermissionGate permission="notifications">
-        <div className="mx-auto max-w-screen-2xl space-y-5 p-6">
+        <div className="mx-auto max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
             <Metric
               label="Stock & Expiry Alerts"
@@ -225,7 +225,7 @@ export default function NotificationsPage() {
               <WifiOff size={16} className="text-primary" />
               <h2 className="text-sm font-semibold">Updates Waiting</h2>
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
               <table className="w-full min-w-[760px]">
                 <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
                   <tr>

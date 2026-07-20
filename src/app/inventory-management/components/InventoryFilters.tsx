@@ -63,9 +63,9 @@ export default function InventoryFilters({
   const categories = settings.productCategories ?? [];
 
   return (
-    <div className="bg-card border border-border rounded-xl shadow-card mb-4">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
+    <div className="mb-4 rounded-lg border border-border bg-card shadow-card sm:rounded-xl">
+      <div className="flex flex-col gap-3 border-b border-border px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Filter size={15} className="text-muted-foreground" />
           <span className="text-sm font-semibold text-foreground">Filters</span>
           {(search ||
@@ -85,13 +85,15 @@ export default function InventoryFilters({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
           {selectedCount > 0 && (
             <>
-              <span className="text-xs text-muted-foreground">{selectedCount} selected</span>
+              <span className="col-span-2 text-xs text-muted-foreground sm:col-span-1">
+                {selectedCount} selected
+              </span>
               <button
                 onClick={onClearSelection}
-                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-danger/10 text-danger hover:bg-danger/20 rounded-lg transition-colors duration-150"
+                className="flex min-h-9 items-center justify-center gap-1 rounded-lg bg-danger/10 px-3 py-1.5 text-xs font-medium text-danger transition-colors duration-150 hover:bg-danger/20"
               >
                 <Trash2 size={11} />
                 Delete Selected
@@ -100,14 +102,14 @@ export default function InventoryFilters({
           )}
           <button
             onClick={onExport}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary hover:bg-muted text-secondary-foreground rounded-lg transition-colors duration-150"
+            className="flex min-h-9 items-center justify-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors duration-150 hover:bg-muted"
           >
             <Download size={12} />
             Export CSV
           </button>
           <button
             onClick={onAddProduct}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary text-white hover:bg-primary/90 rounded-lg active:scale-95 transition-all duration-150"
+            className="flex min-h-9 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white transition-all duration-150 hover:bg-primary/90 active:scale-95"
           >
             <Plus size={12} />
             Add Product
@@ -115,9 +117,9 @@ export default function InventoryFilters({
         </div>
       </div>
 
-      <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
+      <div className="grid min-w-0 grid-cols-1 gap-2 px-3 py-3 sm:grid-cols-2 sm:gap-3 sm:px-4 lg:grid-cols-[minmax(18rem,1fr)_auto_auto_auto]">
         {/* Search */}
-        <div className="relative flex-1 min-w-48">
+        <div className="relative min-w-0">
           <Search
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -135,7 +137,7 @@ export default function InventoryFilters({
         <NiceSelect
           value={categoryFilter}
           onChange={setCategoryFilter}
-          className="min-w-36"
+          className="w-full lg:min-w-36"
           options={[
             { value: 'all', label: 'All Categories' },
             ...categories.map((category) => ({ value: category, label: category })),
@@ -146,7 +148,7 @@ export default function InventoryFilters({
         <NiceSelect
           value={statusFilter}
           onChange={setStatusFilter}
-          className="min-w-40"
+          className="w-full lg:min-w-40"
           options={[
             { value: 'all', label: 'All Statuses' },
             ...statuses.map((status) => ({ value: status, label: statusLabels[status] })),
@@ -157,7 +159,7 @@ export default function InventoryFilters({
         <NiceSelect
           value={supplierFilter}
           onChange={setSupplierFilter}
-          className="min-w-40"
+          className="w-full lg:min-w-40"
           options={[
             { value: 'all', label: 'All Suppliers' },
             ...suppliers.map((supplier) => ({ value: supplier, label: supplier })),

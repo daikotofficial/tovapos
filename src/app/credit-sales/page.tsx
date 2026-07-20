@@ -166,7 +166,7 @@ export default function CreditSalesPage() {
                   </select>
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
                 <table className="w-full min-w-[900px]">
                   <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
                     <tr>

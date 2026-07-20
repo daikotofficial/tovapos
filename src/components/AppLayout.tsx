@@ -49,7 +49,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   }
 
   return (
-    <div className="pos-app-shell flex h-screen overflow-hidden bg-background text-foreground">
+    <div className="pos-app-shell flex h-screen w-full max-w-full overflow-hidden bg-background text-foreground">
       <div className="hidden lg:block">
         <Suspense fallback={<div className="h-screen w-60 border-r border-border bg-card" />}>
           <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
@@ -57,9 +57,9 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       </div>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar title={title} subtitle={subtitle} onOpenMenu={() => setMobileMenuOpen(true)} />
-        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-background pb-20 scrollbar-thin lg:pb-0">
-          <div className="min-h-0 flex-1">{children}</div>
-          <footer className="border-t border-border bg-card/95 px-4 py-4 text-xs text-muted-foreground">
+        <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-background pb-[calc(5.25rem+env(safe-area-inset-bottom))] scrollbar-thin lg:pb-0">
+          <div className="min-w-0 flex-none lg:min-h-0 lg:flex-1">{children}</div>
+          <footer className="hidden border-t border-border bg-card/95 px-4 py-4 text-xs text-muted-foreground lg:block">
             <div className="mx-auto flex max-w-screen-2xl flex-col justify-between gap-3 sm:flex-row sm:items-center">
               <div>
                 <p className="text-sm font-black tracking-tight text-foreground">TOVAPOS</p>
@@ -114,7 +114,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
           </div>
         </div>
       )}
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 px-2 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
         <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
           {mobileNavItems
             .filter((item) => hasPermission(item.permission))

@@ -241,7 +241,7 @@ export default function UsersPage() {
       subtitle="Create users, assign roles, and control access"
     >
       <PermissionGate permission="users">
-        <div className="p-6 max-w-screen-2xl mx-auto space-y-5">
+        <div className="mx-auto max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-card border border-border rounded-xl p-4 shadow-card">
               <p className="text-xs text-muted-foreground uppercase font-semibold">Total Users</p>
@@ -259,22 +259,22 @@ export default function UsersPage() {
             </div>
           </div>
 
-          <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card sm:rounded-xl">
+            <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck size={16} className="text-primary" />
                 <span className="text-sm font-semibold">User Accounts</span>
               </div>
               <button
                 onClick={openCreate}
-                className="flex items-center gap-2 px-3 py-2 bg-primary text-white rounded-lg text-sm font-semibold"
+                className="flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white"
               >
                 <UserPlus size={14} />
                 Add User
               </button>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
               <table className="w-full min-w-[860px]">
                 <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
                   <tr>

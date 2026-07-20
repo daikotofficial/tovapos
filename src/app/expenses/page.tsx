@@ -107,7 +107,7 @@ export default function ExpensesPage() {
       subtitle="Record operating costs and include them in profit reporting"
     >
       <PermissionGate permission="expenses">
-        <div className="mx-auto max-w-screen-2xl space-y-5 p-6">
+        <div className="mx-auto max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
           {!canRecordExpenses && (
             <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
               Your current role can view this page only if expenses permission is assigned.
@@ -140,8 +140,8 @@ export default function ExpensesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_320px]">
-            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-[1fr_320px]">
+            <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-card sm:rounded-xl">
               <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
                 <div className="flex items-center gap-2">
                   <ReceiptText size={16} className="text-primary" />
@@ -157,7 +157,7 @@ export default function ExpensesPage() {
                 </button>
               </div>
 
-              <div className="grid gap-3 border-b border-border p-4 md:grid-cols-[1fr_220px]">
+              <div className="grid min-w-0 gap-3 border-b border-border p-4 md:grid-cols-[1fr_220px]">
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -174,7 +174,7 @@ export default function ExpensesPage() {
                 />
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
                 <table className="w-full min-w-[860px]">
                   <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
                     <tr>

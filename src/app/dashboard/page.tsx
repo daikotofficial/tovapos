@@ -204,10 +204,10 @@ export default function DashboardPage() {
   return (
     <AppLayout title="Dashboard" subtitle="Business summary">
       <PermissionGate permission="dashboard">
-        <div className="mx-auto max-w-screen-2xl space-y-5 p-4 sm:p-6">
-          <section className="overflow-hidden rounded-xl border border-border bg-[#071412] text-white shadow-card">
-            <div className="grid gap-5 p-5 lg:grid-cols-[1fr_420px] lg:p-6">
-              <div>
+        <div className="mx-auto w-full max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
+          <section className="overflow-hidden rounded-lg border border-border bg-[#071412] text-white shadow-card sm:rounded-xl">
+            <div className="grid min-w-0 gap-4 p-4 lg:grid-cols-[1fr_420px] lg:p-6">
+              <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-md bg-[#19b8a6]/20 px-3 py-1 text-xs font-bold uppercase text-[#8ee8df]">
                     Summary
@@ -216,31 +216,31 @@ export default function DashboardPage() {
                     {pendingSyncCount} pending sync
                   </span>
                 </div>
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-lg border border-white/10 bg-white/[0.06] p-3">
+                <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-3">
+                  <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
                     <p className="text-[11px] font-bold uppercase text-white/50">Month Revenue</p>
-                    <p className="mt-1 text-xl font-bold font-tabular">
+                    <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
                       {formatMoney(data.monthRevenue, settings.currency)}
                     </p>
                   </div>
-                  <div className="rounded-lg border border-white/10 bg-white/[0.06] p-3">
+                  <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
                     <p className="text-[11px] font-bold uppercase text-white/50">Gross Profit</p>
-                    <p className="mt-1 text-xl font-bold font-tabular">
+                    <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
                       {formatMoney(data.grossProfit, settings.currency)}
                     </p>
                   </div>
-                  <div className="rounded-lg border border-white/10 bg-white/[0.06] p-3">
+                  <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
                     <p className="text-[11px] font-bold uppercase text-white/50">
                       Potential Margin
                     </p>
-                    <p className="mt-1 text-xl font-bold font-tabular">
+                    <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
                       {formatMoney(data.potentialMargin, settings.currency)}
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-lg border border-white/10 bg-white/[0.06] p-4">
+              <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-4">
                 <p className="text-sm font-bold">Cash position</p>
                 <div className="mt-4 space-y-3">
                   {[
@@ -252,9 +252,9 @@ export default function DashboardPage() {
                     const max = Math.max(data.revenue, data.expenseTotal, 1);
                     return (
                       <div key={String(label)}>
-                        <div className="mb-1 flex justify-between gap-3 text-xs">
-                          <span className="text-white/65">{label}</span>
-                          <span className="font-semibold font-tabular">
+                        <div className="mb-1 flex min-w-0 justify-between gap-3 text-xs">
+                          <span className="min-w-0 text-white/65">{label}</span>
+                          <span className="shrink-0 font-semibold font-tabular">
                             {formatMoney(value, settings.currency)}
                           </span>
                         </div>
@@ -272,20 +272,22 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <section className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             {kpis.map((item) => {
               const Icon = item.icon;
               return (
                 <article
                   key={item.label}
-                  className="rounded-xl border border-border bg-white p-4 shadow-card"
+                  className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs font-bold uppercase text-muted-foreground">
                         {item.label}
                       </p>
-                      <p className={`mt-2 text-2xl font-bold font-tabular ${item.tone}`}>
+                      <p
+                        className={`mt-2 break-words text-[1.65rem] font-bold leading-tight font-tabular sm:text-2xl ${item.tone}`}
+                      >
                         {item.value}
                       </p>
                     </div>
@@ -301,8 +303,8 @@ export default function DashboardPage() {
             })}
           </section>
 
-          <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
-            <div className="overflow-hidden rounded-xl border border-border bg-white shadow-card">
+          <section className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-[1fr_360px]">
+            <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-white shadow-card sm:rounded-xl">
               <div className="flex items-center justify-between border-b border-border px-4 py-3">
                 <div>
                   <p className="text-sm font-bold">Product performance</p>
@@ -310,7 +312,7 @@ export default function DashboardPage() {
                 </div>
                 <TrendingUp size={18} className="text-primary" />
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
                 <table className="w-full min-w-[760px]">
                   <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
                     <tr>
@@ -355,13 +357,13 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="space-y-5">
-              <div className="rounded-xl border border-border bg-white p-4 shadow-card">
+            <div className="min-w-0 space-y-4 sm:space-y-5">
+              <div className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-bold">Stock risk</p>
                   <AlertTriangle size={18} className="text-warning" />
                 </div>
-                <div className="mt-4 grid grid-cols-3 gap-2">
+                <div className="mt-4 grid min-w-0 grid-cols-3 gap-2">
                   <div className="rounded-md bg-warning/10 p-3 text-warning">
                     <p className="text-[10px] font-bold uppercase">Alerts</p>
                     <p className="mt-1 text-2xl font-bold font-tabular">
@@ -413,7 +415,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="rounded-xl border border-border bg-white p-4 shadow-card">
+              <div className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-bold">Expense pressure</p>
                   <Banknote size={18} className="text-danger" />
@@ -448,7 +450,7 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+          <section className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-3">
             {[
               {
                 label: 'Operational health',
@@ -482,7 +484,7 @@ export default function DashboardPage() {
               return (
                 <article
                   key={panel.label}
-                  className="rounded-xl border border-border bg-white p-4 shadow-card"
+                  className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl"
                 >
                   <div className="flex items-center gap-2">
                     <Icon size={18} className="text-primary" />

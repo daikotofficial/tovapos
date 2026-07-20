@@ -1887,7 +1887,7 @@ function ReportTable({
         <p className="text-sm font-bold">{title}</p>
         <p className="text-xs text-muted-foreground">{subtitle}</p>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
         <table className="w-full min-w-[860px]">
           <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
             <tr>

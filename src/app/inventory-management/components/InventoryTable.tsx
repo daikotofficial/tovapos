@@ -112,7 +112,7 @@ export default function InventoryTable({
   return (
     <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
       {/* Table */}
-      <div className="overflow-x-auto scrollbar-thin">
+      <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
         <table className="w-full min-w-[1100px]">
           <thead>
             <tr className="bg-muted/40 border-b border-border">

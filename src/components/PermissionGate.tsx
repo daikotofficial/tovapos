@@ -16,7 +16,7 @@ export default function PermissionGate({ permission, children }: PermissionGateP
   if (hasPermission(permission)) return <>{children}</>;
 
   return (
-    <div className="p-6">
+    <div className="px-3 py-4 sm:p-6">
       <div className="mx-auto max-w-xl rounded-xl border border-warning/30 bg-warning/10 p-5 text-warning">
         <div className="flex items-start gap-3">
           <ShieldAlert size={22} className="mt-0.5 shrink-0" />

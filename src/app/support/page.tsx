@@ -71,7 +71,7 @@ export default function SupportPage() {
 
   return (
     <AppLayout title="Support" subtitle="Send tickets to TOVAPOS support and track responses">
-      <div className="mx-auto grid max-w-6xl gap-5 p-6 lg:grid-cols-[380px_1fr]">
+      <div className="mx-auto grid max-w-6xl gap-4 px-3 py-4 sm:gap-5 sm:p-6 lg:grid-cols-[380px_1fr]">
         <form
           id="new-ticket"
           onSubmit={submitTicket}
