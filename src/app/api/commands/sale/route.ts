@@ -197,7 +197,7 @@ export async function POST(request: NextRequest) {
             discount: requested.discount,
             taxApplicable: Boolean(productData.taxApplicable || Number(productData.taxRate) > 0),
             taxRate: Number(productData.taxRate) || 0,
-            taxMode: productData.taxMode ?? settings.taxMode ?? 'exclusive',
+            taxMode: 'exclusive' as const,
           },
           defaultTaxRate
         );
@@ -262,7 +262,7 @@ export async function POST(request: NextRequest) {
         items: lineItems,
         subtotal,
         discountTotal,
-        taxAmount,
+        taxAmount: exclusiveTaxAmount,
         grandTotal,
         paymentMethod: paymentMethod as SaleTransaction['paymentMethod'],
         paymentStatus: paymentMethod === 'credit' ? 'unpaid' : 'paid',

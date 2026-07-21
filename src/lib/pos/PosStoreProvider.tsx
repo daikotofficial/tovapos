@@ -522,9 +522,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               } else if (inventoryQueueItem) {
                 const movementQueueItem = group.find((item) => item.entity === 'stockMovement');
                 const movementPayload = movementQueueItem?.payload as
-                  | StockMovement
-                  | StockMovement[]
-                  | undefined;
+                  StockMovement | StockMovement[] | undefined;
                 const movement = Array.isArray(movementPayload)
                   ? movementPayload[0]
                   : movementPayload;
@@ -1210,7 +1208,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               discount: line.discount,
               taxApplicable: Boolean(item?.taxApplicable || Number(item?.taxRate) > 0),
               taxRate: Number(item?.taxRate) || 0,
-              taxMode: item?.taxMode ?? settings.taxMode ?? 'exclusive',
+              taxMode: 'exclusive' as const,
             };
           }),
           defaultTaxRate
@@ -1235,7 +1233,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               discount: line.discount,
               taxApplicable: Boolean(item.taxApplicable || Number(item.taxRate) > 0),
               taxRate: Number(item.taxRate) || 0,
-              taxMode: item.taxMode ?? settings.taxMode ?? 'exclusive',
+              taxMode: 'exclusive' as const,
             },
             defaultTaxRate
           );

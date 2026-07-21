@@ -84,7 +84,14 @@ export default function CheckoutScreen() {
   const taxLines = cart.map((item) => {
     const gross = money(item.unitPrice * item.quantity);
     const lineTaxRate = resolveTaxRate(item.taxApplicable, item.taxRate, defaultTaxRate);
-    const { taxAmount, exclusiveTaxAmount } = calculateLineTax(gross, lineTaxRate, item.taxMode);
+    const taxAmount = money(gross * (lineTaxRate / 100));
+
+    return {
+      lineTaxRate,
+      taxMode: 'exclusive' as const,
+      taxAmount,
+      exclusiveTaxAmount: taxAmount,
+    };
     return { lineTaxRate, taxMode: item.taxMode, taxAmount, exclusiveTaxAmount };
   });
   const taxAmount = money(taxLines.reduce((sum, line) => sum + line.taxAmount, 0));
@@ -199,7 +206,7 @@ export default function CheckoutScreen() {
             discount: getProductDiscountPercent(product),
             taxApplicable: Boolean(product.taxApplicable || Number(product.taxRate) > 0),
             taxRate: Number(product.taxRate) || Number(settings.taxRate) || 0,
-            taxMode: product.taxMode ?? settings.taxMode ?? 'exclusive',
+            taxMode: 'exclusive',
             requiresApproval: product.requiresApproval,
             isControlled: product.isControlled,
             category: product.category,
@@ -385,7 +392,7 @@ export default function CheckoutScreen() {
         })),
         subtotal,
         discountTotal,
-        taxAmount,
+        taxAmount: exclusiveTaxAmount,
         grandTotal,
         paymentMethod,
         cashTendered: tendered,
