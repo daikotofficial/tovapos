@@ -11,12 +11,7 @@ import { InventoryItem, PaymentMethod, SaleTransaction } from '@/lib/pos/types';
 import { loadInventoryByIds, loadInventoryPage, lookupInventoryItem } from '@/lib/pos/local-store';
 import { assertSellable, getDaysUntilExpiry } from '@/lib/pos/stock';
 import { formatMoney } from '@/lib/pos/money';
-import {
-  calculateLineTax,
-  getProductDiscountPercent,
-  money,
-  resolveTaxRate,
-} from '@/lib/pos/sale-calculations';
+import { getProductDiscountPercent, money, resolveTaxRate } from '@/lib/pos/sale-calculations';
 
 export interface CartItem {
   id: string;
@@ -227,7 +222,7 @@ export default function CheckoutScreen() {
         setIsScanning(false);
       }
     },
-    [isHydrated, settings.taxMode, settings.taxRate]
+    [isHydrated, settings.taxRate]
   );
 
   const queueScan = useCallback(

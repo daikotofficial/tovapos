@@ -1423,7 +1423,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         saleInFlightRef.current = false;
       }
     },
-    [customers, hasPermission, isOnline, settings.taxMode, settings.taxRate]
+    [customers, hasPermission, isOnline, settings.taxRate]
   );
 
   const reconcileCreditSale = useCallback(
