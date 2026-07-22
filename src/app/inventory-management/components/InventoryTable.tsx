@@ -343,8 +343,8 @@ export default function InventoryTable({
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/20">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-border bg-muted/20">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           <span className="text-xs text-muted-foreground">
             Showing {totalItems === 0 ? 0 : Math.min((page - 1) * perPage + 1, totalItems)}-
             {Math.min(page * perPage, totalItems)} of {totalItems} products
@@ -355,7 +355,7 @@ export default function InventoryTable({
               value={String(perPage)}
               onChange={(value) => onPerPageChange(parseInt(value, 10))}
               className="w-24"
-              options={[10, 20, 50].map((value) => ({
+              options={[10, 20, 50, 100].map((value) => ({
                 value: String(value),
                 label: String(value),
               }))}
@@ -363,7 +363,7 @@ export default function InventoryTable({
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 scrollbar-thin">
           <button
             onClick={() => onPageChange(1)}
             disabled={page === 1}

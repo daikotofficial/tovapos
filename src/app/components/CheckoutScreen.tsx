@@ -12,6 +12,7 @@ import { loadInventoryByIds, loadInventoryPage, lookupInventoryItem } from '@/li
 import { assertSellable, getDaysUntilExpiry } from '@/lib/pos/stock';
 import { formatMoney } from '@/lib/pos/money';
 import { getProductDiscountPercent, money, resolveTaxRate } from '@/lib/pos/sale-calculations';
+import { loyaltyRedemption } from '@/lib/pos/loyalty';
 
 export interface CartItem {
   id: string;
@@ -27,6 +28,8 @@ export interface CartItem {
   unitPrice: number;
   unitCost: number;
   discount: number;
+  baseDiscount: number;
+  customerDiscountLocked?: boolean;
   taxApplicable: boolean;
   taxRate: number;
   taxMode: 'inclusive' | 'exclusive';
@@ -41,12 +44,20 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function CheckoutScreen() {
-  const { isHydrated, pendingSyncCount, completeSale, settings, currentUser, hasPermission } =
-    usePosStore();
+  const {
+    isHydrated,
+    pendingSyncCount,
+    completeSale,
+    settings,
+    currentUser,
+    hasPermission,
+    customers,
+  } = usePosStore();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [scanInput, setScanInput] = useState('');
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [customerName, setCustomerName] = useState('');
+  const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [cashTendered, setCashTendered] = useState('');
   const [showReceipt, setShowReceipt] = useState(false);
@@ -72,28 +83,57 @@ export default function CheckoutScreen() {
     cart.reduce((sum, item) => sum + item.unitPrice * item.quantity * (item.discount / 100), 0)
   );
   const subtotalAfterLineDiscounts = money(subtotal - itemDiscountTotal);
-  const orderDiscountTotal = money(subtotalAfterLineDiscounts * (globalDiscount / 100));
+  const orderDiscountEligibleSubtotal = money(
+    cart.reduce(
+      (sum, item) =>
+        sum +
+        (item.customerDiscountLocked
+          ? 0
+          : item.unitPrice * item.quantity * (1 - item.discount / 100)),
+      0
+    )
+  );
+  const orderDiscountTotal = money(orderDiscountEligibleSubtotal * (globalDiscount / 100));
   const discountTotal = money(itemDiscountTotal + orderDiscountTotal);
   const discountedSubtotal = money(subtotalAfterLineDiscounts - orderDiscountTotal);
   const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
   const taxLines = cart.map((item) => {
     const gross = money(item.unitPrice * item.quantity);
-    const lineTaxRate = resolveTaxRate(item.taxApplicable, item.taxRate, defaultTaxRate);
-    const taxAmount = money(gross * (lineTaxRate / 100));
+    const lineTaxRate =
+      item.taxMode === 'inclusive'
+        ? resolveTaxRate(item.taxApplicable, item.taxRate, defaultTaxRate)
+        : 0;
+    const combinedDiscount = item.customerDiscountLocked
+      ? item.discount
+      : 100 * (1 - (1 - item.discount / 100) * (1 - globalDiscount / 100));
+    const discountedGross = money(gross * (1 - combinedDiscount / 100));
+    const taxAmount = money(discountedGross * (lineTaxRate / 100));
 
     return {
       lineTaxRate,
-      taxMode: 'exclusive' as const,
+      taxMode: item.taxMode,
       taxAmount,
       exclusiveTaxAmount: taxAmount,
     };
-    return { lineTaxRate, taxMode: item.taxMode, taxAmount, exclusiveTaxAmount };
   });
   const taxAmount = money(taxLines.reduce((sum, line) => sum + line.taxAmount, 0));
   const exclusiveTaxAmount = money(
     taxLines.reduce((sum, line) => sum + line.exclusiveTaxAmount, 0)
   );
   const grandTotal = money(discountedSubtotal + exclusiveTaxAmount);
+  const selectedCustomer = customers.find(
+    (customer) =>
+      customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
+      customer.phone === customerName.trim()
+  );
+  const loyaltyPreview = loyaltyRedemption(
+    selectedCustomer,
+    loyaltyPointsToRedeem,
+    grandTotal,
+    settings,
+    paymentMethod
+  );
+  const amountToPay = money(Math.max(0, grandTotal - loyaltyPreview.credit));
   const appliedTaxRates = Array.from(
     new Set(taxLines.filter((line) => line.lineTaxRate > 0).map((line) => line.lineTaxRate))
   );
@@ -103,6 +143,41 @@ export default function CheckoutScreen() {
       : appliedTaxRates.length === 1
         ? `${appliedTaxRates[0]}%`
         : 'mixed';
+
+  useEffect(() => {
+    const selectedCustomer = customers.find(
+      (customer) =>
+        customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
+        customer.phone === customerName.trim()
+    );
+    setCart((current) =>
+      current.map((item) => {
+        const rule = selectedCustomer?.discountRules?.find(
+          (candidate) => candidate.inventoryItemId === item.inventoryItemId && candidate.active
+        );
+        if (!rule) {
+          return {
+            ...item,
+            discount: item.baseDiscount,
+            customerDiscountLocked: false,
+          };
+        }
+        const customerDiscount =
+          rule.type === 'percentage'
+            ? Math.min(100, Math.max(0, rule.value))
+            : Math.max(0, ((item.unitPrice - rule.value) / item.unitPrice) * 100);
+        return {
+          ...item,
+          discount: customerDiscount,
+          customerDiscountLocked: true,
+        };
+      })
+    );
+  }, [customerName, customers]);
+
+  useEffect(() => {
+    if (!selectedCustomer || paymentMethod === 'credit') setLoyaltyPointsToRedeem(0);
+  }, [paymentMethod, selectedCustomer]);
   const quickProducts = useMemo(() => [], []);
 
   useEffect(() => {
@@ -173,6 +248,19 @@ export default function CheckoutScreen() {
           toast.warning('Controlled item. Manager approval may be required before selling.');
         }
 
+        const selectedCustomer = customers.find(
+          (customer) =>
+            customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
+            customer.phone === customerName.trim()
+        );
+        const rule = selectedCustomer?.discountRules?.find(
+          (candidate) => candidate.inventoryItemId === product.id && candidate.active
+        );
+        const customerDiscount = rule
+          ? rule.type === 'percentage'
+            ? Math.min(100, Math.max(0, rule.value))
+            : Math.max(0, ((product.sellingPrice - rule.value) / product.sellingPrice) * 100)
+          : 0;
         setCart((prev) => {
           const existing = prev.find((item) => item.inventoryItemId === product.id);
           if (existing) {
@@ -198,10 +286,15 @@ export default function CheckoutScreen() {
             quantity: 1,
             unitPrice: product.sellingPrice,
             unitCost: product.unitCost,
-            discount: getProductDiscountPercent(product),
-            taxApplicable: Boolean(product.taxApplicable || Number(product.taxRate) > 0),
+            discount: rule ? customerDiscount : getProductDiscountPercent(product),
+            baseDiscount: getProductDiscountPercent(product),
+            customerDiscountLocked: Boolean(rule),
+            taxApplicable: Boolean(
+              product.taxMode === 'inclusive' &&
+              (product.taxApplicable || Number(product.taxRate) > 0)
+            ),
             taxRate: Number(product.taxRate) || Number(settings.taxRate) || 0,
-            taxMode: 'exclusive',
+            taxMode: product.taxMode ?? settings.taxMode ?? 'exclusive',
             requiresApproval: product.requiresApproval,
             isControlled: product.isControlled,
             category: product.category,
@@ -222,7 +315,7 @@ export default function CheckoutScreen() {
         setIsScanning(false);
       }
     },
-    [isHydrated, settings.taxRate]
+    [customers, customerName, isHydrated, settings.taxMode, settings.taxRate]
   );
 
   const queueScan = useCallback(
@@ -325,6 +418,11 @@ export default function CheckoutScreen() {
   };
 
   const updateItemDiscount = (id: string, discount: number) => {
+    const item = cart.find((cartItem) => cartItem.id === id);
+    if (item?.customerDiscountLocked) {
+      toast.info('This customer has a fixed discount for this product.');
+      return;
+    }
     if (!settings.allowCashierDiscounts && !hasPermission('give-discount')) {
       toast.error('You do not have permission to apply discounts');
       return;
@@ -349,6 +447,7 @@ export default function CheckoutScreen() {
     setGlobalDiscount(0);
     setCashTendered('');
     setCustomerName('');
+    setLoyaltyPointsToRedeem(0);
     setPaymentMethod('cash');
   };
 
@@ -364,9 +463,9 @@ export default function CheckoutScreen() {
     }
 
     const tendered = paymentMethod === 'cash' ? parseFloat(cashTendered) : undefined;
-    if (paymentMethod === 'cash' && (!tendered || tendered < grandTotal)) {
+    if (paymentMethod === 'cash' && (!tendered || tendered < amountToPay)) {
       toast.error(
-        `Cash tendered is less than total (${formatMoney(grandTotal, settings.currency)})`
+        `Cash tendered is less than total (${formatMoney(amountToPay, settings.currency)})`
       );
       return;
     }
@@ -382,17 +481,20 @@ export default function CheckoutScreen() {
         items: cart.map((item) => ({
           inventoryItemId: item.inventoryItemId,
           quantity: item.quantity,
-          discount: 100 * (1 - (1 - item.discount / 100) * (1 - globalDiscount / 100)),
+          discount: item.customerDiscountLocked
+            ? item.discount
+            : 100 * (1 - (1 - item.discount / 100) * (1 - globalDiscount / 100)),
           unitPrice: item.unitPrice,
         })),
         subtotal,
         discountTotal,
-        taxAmount: exclusiveTaxAmount,
+        taxAmount,
         grandTotal,
         paymentMethod,
         cashTendered: tendered,
-        changeGiven: paymentMethod === 'cash' && tendered ? tendered - grandTotal : undefined,
+        changeGiven: paymentMethod === 'cash' && tendered ? tendered - amountToPay : undefined,
         customerName,
+        loyaltyPointsToRedeem: loyaltyPreview.points,
         cashier: currentUser?.name ?? 'Unknown cashier',
       });
 
@@ -446,7 +548,6 @@ export default function CheckoutScreen() {
           subtotal={subtotal}
           discountTotal={discountTotal}
           taxAmount={taxAmount}
-          grandTotal={grandTotal}
           globalDiscount={globalDiscount}
           setGlobalDiscount={updateGlobalDiscount}
           customerName={customerName}
@@ -459,6 +560,10 @@ export default function CheckoutScreen() {
           isProcessing={isProcessing}
           currency={settings.currency}
           taxLabel={taxLabel}
+          loyaltyPointsToRedeem={loyaltyPointsToRedeem}
+          setLoyaltyPointsToRedeem={setLoyaltyPointsToRedeem}
+          loyaltyCreditAmount={loyaltyPreview.credit}
+          amountToPay={amountToPay}
         />
       </div>
 
@@ -469,6 +574,13 @@ export default function CheckoutScreen() {
           sale={completedSale}
           currency={settings.currency}
           businessName={settings.businessName}
+          businessLogo={settings.logoUrl}
+          businessPhone={settings.phone}
+          businessEmail={settings.email}
+          businessAddress={settings.address}
+          showLogo={settings.receiptShowLogo}
+          showBusinessDetails={settings.receiptShowBusinessDetails}
+          showCustomer={settings.receiptShowCustomer}
           receiptFooter={settings.receiptFooter}
           taxLabel={completedTaxLabel}
         />

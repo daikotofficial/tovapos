@@ -24,6 +24,7 @@ export default function NiceSelect<T extends string = string>({
   className = '',
 }: NiceSelectProps<T>) {
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
   const selected = options.find((option) => option.value === value);
 
@@ -39,7 +40,13 @@ export default function NiceSelect<T extends string = string>({
     <div ref={ref} className={`relative min-w-0 ${className}`}>
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (!open && ref.current) {
+            const rect = ref.current.getBoundingClientRect();
+            setDropUp(window.innerHeight - rect.bottom < 280 && rect.top > 280);
+          }
+          setOpen((current) => !current);
+        }}
         className="flex h-10 w-full min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 text-left text-sm font-semibold text-foreground shadow-sm transition-colors hover:border-primary/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -56,7 +63,7 @@ export default function NiceSelect<T extends string = string>({
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-modal"
+          className={`absolute left-0 right-0 z-50 max-h-64 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-modal ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
           {options.map((option) => {
             const active = option.value === value;

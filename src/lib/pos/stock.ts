@@ -67,7 +67,7 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     profitMargin: computeProfitMargin(unitCost, sellingPrice),
     discountType: item.discountType ?? 'none',
     discountValue: Number(item.discountValue) || 0,
-    taxApplicable: Boolean(item.taxApplicable || taxRate > 0),
+    taxApplicable: Boolean(item.taxMode === 'inclusive' && (item.taxApplicable || taxRate > 0)),
     taxRate,
     taxMode: item.taxMode ?? 'exclusive',
     unitOfMeasurement: item.unitOfMeasurement ?? 'unit',

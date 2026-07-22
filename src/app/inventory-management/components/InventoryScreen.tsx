@@ -15,6 +15,7 @@ import {
   type InventoryMetrics,
 } from '@/lib/pos/local-store';
 import { getProductUsage } from '@/lib/pos/subscription';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 
 export default function InventoryScreen() {
   const searchParams = useSearchParams();
@@ -37,7 +38,7 @@ export default function InventoryScreen() {
   const [sortField, setSortField] = useState<keyof InventoryItem>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useRowsPerPage();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showAddModal, setShowAddModal] = useState(false);
   const [editItem, setEditItem] = useState<InventoryItem | null>(null);

@@ -233,7 +233,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { inventory, hasPermission, currentUser, signOut } = usePosStore();
+  const { inventory, hasPermission, currentUser, signOut, settings } = usePosStore();
   const [reportsOpen, setReportsOpen] = useState(pathname === '/reports');
   const activeReport = searchParams.get('view') ?? 'overview';
   const lowStockCount = inventory.filter(
@@ -254,10 +254,12 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
       <div
         className={`flex items-center gap-3 px-4 py-4 border-b border-border ${collapsed ? 'justify-center px-2' : ''}`}
       >
-        <AppLogo size={32} />
+        <AppLogo src={settings.logoUrl || undefined} size={32} />
         {!collapsed && (
           <div className="flex flex-col min-w-0">
-            <span className="font-semibold text-sm text-foreground leading-tight">TOVAPOS</span>
+            <span className="font-semibold text-sm text-foreground leading-tight">
+              {settings.businessName || 'TOVAPOS'}
+            </span>
             <span className="text-xs text-muted-foreground leading-tight">Retail POS</span>
           </div>
         )}

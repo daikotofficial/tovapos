@@ -47,6 +47,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const selectedDiscountType = watch('discountType') ?? 'none';
   const selectedTaxMode = watch('taxMode') ?? 'exclusive';
   const selectedTaxRate = Number(watch('taxRate')) || 0;
+  const selectedTaxId = watch('taxId') ?? '';
+  const taxOptions = settings.taxRates?.filter((tax) => tax.active) ?? [];
   const manufactureDate = watch('manufactureDate') ?? '';
   const expiryDate = watch('expiryDate') ?? '';
   const categoryOptions = useMemo(
@@ -60,7 +62,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   });
   const profitMarginRegistration = register('profitMargin', {
     min: { value: 0, message: 'Cannot be negative' },
-    max: { value: 99, message: 'Must be below 99%' },
+    validate: (value) =>
+      Number.isFinite(Number(value)) ? true : 'Enter a valid profit margin percentage',
   });
   const sellingPriceRegistration = register('sellingPrice', {
     required: 'Selling price is required',
@@ -88,6 +91,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         discountType: editItem.discountType ?? 'none',
         discountValue: editItem.discountValue ?? 0,
         taxApplicable: editItem.taxApplicable ?? false,
+        taxId: editItem.taxId ?? '',
         taxRate: editItem.taxRate ?? settings.taxRate,
         taxMode: editItem.taxMode ?? settings.taxMode ?? 'exclusive',
         expiryDate: editItem.expiryDate,
@@ -117,6 +121,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         discountType: 'none',
         discountValue: 0,
         taxApplicable: settings.taxRate > 0,
+        taxId: '',
         taxRate: settings.taxRate,
         taxMode: settings.taxMode ?? 'exclusive',
         unitOfMeasurement: 'unit',
@@ -171,7 +176,9 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
           : computeProfitMargin(Number(data.unitCost), Number(data.sellingPrice)),
       discountType: data.discountType ?? 'none',
       discountValue: Number(data.discountValue) || 0,
-      taxApplicable: Boolean(data.taxApplicable || Number(data.taxRate) > 0),
+      taxApplicable: Boolean(
+        data.taxMode === 'inclusive' && (data.taxApplicable || Number(data.taxRate) > 0)
+      ),
       taxRate: Number(data.taxRate) || 0,
       taxMode: data.taxMode ?? 'exclusive',
       unitOfMeasurement: data.unitOfMeasurement?.trim() || 'unit',
@@ -621,37 +628,56 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
               />
               {errors.discountValue && <p className={errorClass}>{errors.discountValue.message}</p>}
             </div>
-            <label className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2">
-              <span>
-                <span className="block text-sm font-medium text-foreground">VAT / Tax applies</span>
-                <span className="block text-xs text-muted-foreground">
-                  Included in product pricing reports
-                </span>
-              </span>
-              <input type="checkbox" {...register('taxApplicable')} />
-            </label>
             <div>
-              <label className={labelClass}>VAT / Tax Rate (%)</label>
-              <input
-                type="number"
-                step="0.01"
-                {...register('taxRate', { min: { value: 0, message: 'Cannot be negative' } })}
-                className={`${inputClass} font-tabular`}
-                placeholder="0"
+              <label className={labelClass}>VAT / Tax type</label>
+              <input type="hidden" {...register('taxId')} />
+              <NiceSelect
+                value={selectedTaxId}
+                onChange={(taxId) => {
+                  const tax = taxOptions.find((candidate) => candidate.id === taxId);
+                  setValue('taxId', taxId, { shouldDirty: true });
+                  setValue('taxApplicable', Boolean(tax && tax.mode === 'inclusive'), {
+                    shouldDirty: true,
+                  });
+                  setValue('taxRate', tax?.rate ?? 0, { shouldDirty: true });
+                  setValue('taxMode', tax?.mode ?? settings.taxMode ?? 'exclusive', {
+                    shouldDirty: true,
+                  });
+                }}
+                options={[
+                  { value: '', label: 'No VAT / tax' },
+                  ...taxOptions.map((tax) => ({
+                    value: tax.id,
+                    label: `${tax.name} (${tax.rate}%)`,
+                  })),
+                ]}
               />
-              {errors.taxRate && <p className={errorClass}>{errors.taxRate.message}</p>}
+              {taxOptions.length === 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Add tax types in Settings to use them here.
+                </p>
+              )}
+            </div>
+            <div>
+              <label className={labelClass}>Applied rate</label>
+              <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm font-tabular">
+                {selectedTaxRate}%
+              </p>
             </div>
             <div>
               <label className={labelClass}>VAT Pricing Mode</label>
               <input type="hidden" {...register('taxMode')} />
               <NiceSelect
                 value={selectedTaxMode}
-                onChange={(taxMode) =>
-                  setValue('taxMode', taxMode as FormData['taxMode'], { shouldDirty: true })
-                }
+                onChange={(taxMode) => {
+                  setValue('taxMode', taxMode as FormData['taxMode'], { shouldDirty: true });
+                  setValue('taxApplicable', taxMode === 'inclusive' && selectedTaxRate > 0, {
+                    shouldDirty: true,
+                  });
+                }}
                 options={[
-                  { value: 'exclusive', label: 'VAT exclusive' },
-                  { value: 'inclusive', label: 'VAT inclusive' },
+                  { value: 'exclusive', label: 'VAT exempt (no VAT)' },
+                  { value: 'inclusive', label: 'VAT applies (add separately)' },
                 ]}
               />
             </div>

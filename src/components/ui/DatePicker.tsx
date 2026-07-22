@@ -41,6 +41,7 @@ export default function DatePicker({
   className = '',
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const [cursor, setCursor] = useState(() => parseIsoDate(value));
   const ref = useRef<HTMLDivElement | null>(null);
   const selectedDate = value ? parseIsoDate(value) : null;
@@ -73,11 +74,19 @@ export default function DatePicker({
     setCursor((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
   };
 
+  const toggleOpen = () => {
+    if (!open && ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setDropUp(window.innerHeight - rect.bottom < 340 && rect.top > 340);
+    }
+    setOpen((current) => !current);
+  };
+
   return (
     <div ref={ref} className={`relative ${className}`}>
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggleOpen}
         className="flex h-10 w-full items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 text-left text-sm font-semibold text-foreground shadow-sm transition-colors hover:border-primary/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
       >
         <span className={value ? 'truncate' : 'truncate text-muted-foreground'}>
@@ -87,7 +96,9 @@ export default function DatePicker({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card p-3 shadow-modal">
+        <div
+          className={`absolute left-0 z-50 w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card p-3 shadow-modal ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+        >
           <div className="mb-3 flex items-center justify-between gap-3">
             <button
               type="button"

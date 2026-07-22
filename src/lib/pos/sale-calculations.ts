@@ -65,14 +65,13 @@ export function calculateLineTax(
     return { taxAmount: 0, exclusiveTaxAmount: 0 };
   }
 
-  const taxAmount =
-    taxMode === 'inclusive'
-      ? money(taxBasis - taxBasis / (1 + taxRate / 100))
-      : money(taxBasis * (taxRate / 100));
+  // In TOVAPOS, inclusive means VAT applies and is added as a separate line.
+  // Exclusive means the item is exempt from VAT.
+  const taxAmount = taxMode === 'inclusive' ? money(taxBasis * (taxRate / 100)) : 0;
 
   return {
     taxAmount,
-    exclusiveTaxAmount: taxMode === 'exclusive' ? taxAmount : 0,
+    exclusiveTaxAmount: taxAmount,
   };
 }
 
@@ -86,13 +85,14 @@ export function calculateSaleLine(
   const lineTotal = money(Math.max(0, gross - discountAmount));
   const taxRate = resolveTaxRate(line.taxApplicable, line.taxRate, defaultTaxRate);
   const taxMode = line.taxMode ?? 'exclusive';
-  const tax = calculateLineTax(gross, taxRate, taxMode);
+  // VAT is charged on the consideration actually paid, after line discount.
+  const tax = calculateLineTax(lineTotal, taxRate, taxMode);
 
   return {
     gross,
     discountAmount,
     lineTotal,
-    taxApplicable: taxRate > 0,
+    taxApplicable: taxMode === 'inclusive' && taxRate > 0,
     taxRate,
     taxMode,
     taxAmount: tax.taxAmount,

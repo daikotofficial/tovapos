@@ -160,6 +160,11 @@ export default function DashboardPage() {
       expiredItems,
       cashSales: salesMetrics?.cashSales ?? cashSales,
       nonCashSales: salesMetrics?.nonCashSales ?? nonCashSales,
+      vatCollected:
+        salesMetrics?.vatCollected ??
+        completedSales
+          .filter((sale) => sale.paymentMethod !== 'credit')
+          .reduce((sum, sale) => sum + Number(sale.taxAmount || 0), 0),
       topProducts: metricTopProducts,
       expenseCategories: metricExpenseCategories,
       totalProducts: inventoryMetrics?.totalProducts ?? inventory.length,
@@ -192,7 +197,15 @@ export default function DashboardPage() {
       bg: 'bg-danger/10',
     },
     {
-      label: 'Stock at Cost',
+      label: 'VAT Collected',
+      value: formatMoney(data.vatCollected, settings.currency),
+      helper: 'Paid sales only',
+      icon: Receipt,
+      tone: 'text-primary',
+      bg: 'bg-primary/10',
+    },
+    {
+      label: 'Total Stock Value',
       value: formatMoney(data.stockValue, settings.currency),
       helper: `${data.stockAlerts.length} item${data.stockAlerts.length === 1 ? '' : 's'} need attention`,
       icon: Boxes,
@@ -231,7 +244,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
                     <p className="text-[11px] font-bold uppercase text-white/50">
-                      Potential Margin
+                      Potential Stock Profit
                     </p>
                     <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
                       {formatMoney(data.potentialMargin, settings.currency)}

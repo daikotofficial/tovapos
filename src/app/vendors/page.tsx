@@ -1,12 +1,16 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Plus, Truck } from 'lucide-react';
+import { Plus, Trash2, Truck } from 'lucide-react';
+import { toast } from 'sonner';
+import { confirmAction } from '@/components/ui/confirmAction';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import Modal from '@/components/ui/Modal';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Vendor } from '@/lib/pos/types';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import ListPagination from '@/components/ui/ListPagination';
 
 function emptyVendor(): Vendor {
   return {
@@ -23,10 +27,12 @@ function emptyVendor(): Vendor {
 }
 
 export default function VendorsPage() {
-  const { vendors, upsertVendor } = usePosStore();
+  const { vendors, upsertVendor, deleteVendor } = usePosStore();
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<Vendor | null>(null);
   const [form, setForm] = useState<Vendor>(emptyVendor());
+  const [rowsPerPage] = useRowsPerPage();
+  const [page, setPage] = useState(1);
 
   const filtered = useMemo(
     () =>
@@ -37,11 +43,40 @@ export default function VendorsPage() {
       ),
     [vendors, search]
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
+  const visibleVendors = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  React.useEffect(() => setPage(1), [search, rowsPerPage]);
 
   const save = async () => {
-    if (!form.name.trim()) return;
-    await upsertVendor(form);
-    setEditing(null);
+    if (!form.name.trim()) {
+      toast.error('Vendor name is required.');
+      return;
+    }
+    try {
+      const existing = vendors.some((vendor) => vendor.id === form.id);
+      await upsertVendor({ ...form, name: form.name.trim() });
+      setEditing(null);
+      toast.success(existing ? 'Vendor updated successfully.' : 'Vendor added successfully.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to save vendor.');
+    }
+  };
+
+  const remove = async (vendor: Vendor) => {
+    if (
+      !(await confirmAction({
+        title: `Delete ${vendor.name}?`,
+        description: 'This permanently removes the vendor record.',
+        confirmLabel: 'Delete vendor',
+      }))
+    )
+      return;
+    try {
+      await deleteVendor(vendor.id);
+      toast.success('Vendor deleted successfully.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to delete vendor.');
+    }
   };
 
   return (
@@ -89,7 +124,7 @@ export default function VendorsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filtered.map((vendor) => (
+                  {visibleVendors.map((vendor) => (
                     <tr key={vendor.id} className="hover:bg-muted/30">
                       <td className="px-4 py-3">
                         <p className="font-medium">{vendor.name}</p>
@@ -113,12 +148,24 @@ export default function VendorsPage() {
                         >
                           Edit
                         </button>
+                        <button
+                          onClick={() => void remove(vendor)}
+                          className="ml-3 inline-flex items-center gap-1 text-sm font-semibold text-danger"
+                        >
+                          <Trash2 size={14} /> Delete
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <ListPagination
+              page={Math.min(page, totalPages)}
+              totalItems={filtered.length}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setPage}
+            />
           </div>
         </div>
 
@@ -147,7 +194,7 @@ export default function VendorsPage() {
             </>
           }
         >
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
             {[
               ['name', 'Business Name'],
               ['contactName', 'Contact Person'],

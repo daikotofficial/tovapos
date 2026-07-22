@@ -9,11 +9,15 @@ import PermissionGate from '@/components/PermissionGate';
 import { confirmAction } from '@/components/ui/confirmAction';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { SaleTransaction, SyncQueueItem } from '@/lib/pos/types';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import ListPagination from '@/components/ui/ListPagination';
 
 export default function SyncLogsPage() {
   const { currentUser, isOnline, syncQueue, retrySyncOperation, cancelFailedOfflineSale } =
     usePosStore();
   const [workingId, setWorkingId] = useState('');
+  const [rowsPerPage] = useRowsPerPage();
+  const [page, setPage] = useState(1);
   const isAdmin = currentUser?.role === 'owner' || currentUser?.role === 'super-admin';
   const operations = useMemo(() => {
     const groups = new Map<string, SyncQueueItem[]>();
@@ -50,6 +54,9 @@ export default function SyncLogsPage() {
 
   const failedCount = operations.filter((item) => item.status === 'failed').length;
   const pendingCount = operations.filter((item) => item.status === 'pending').length;
+  const totalPages = Math.max(1, Math.ceil(operations.length / rowsPerPage));
+  const visibleOperations = operations.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  React.useEffect(() => setPage(1), [operations.length, rowsPerPage]);
 
   const run = async (operationId: string, action: () => Promise<void>, success: string) => {
     setWorkingId(operationId);
@@ -97,90 +104,99 @@ export default function SyncLogsPage() {
                   No offline synchronization activity has been recorded on this device.
                 </div>
               ) : (
-                <div className="divide-y divide-border">
-                  {operations.map((operation) => {
-                    const busy = workingId === operation.operationId;
-                    const productId = operation.sale?.items[0]?.inventoryItemId;
-                    return (
-                      <div key={operation.operationId} className="space-y-3 px-4 py-4 sm:px-5">
-                        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Status status={operation.status} />
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {operation.operationId}
-                              </span>
-                            </div>
-                            <p className="mt-2 text-sm font-semibold text-foreground">
-                              {operation.sale
-                                ? `${operation.sale.transactionId} · ${operation.sale.items.length} product line(s)`
-                                : `${operation.items[0].entity} ${operation.items[0].action}`}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {new Date(operation.createdAt).toLocaleString()} ·{' '}
-                              {operation.attempts} attempt{operation.attempts === 1 ? '' : 's'}
-                            </p>
-                            {operation.error && (
-                              <p className="mt-2 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
-                                {operation.error}
+                <>
+                  <div className="divide-y divide-border">
+                    {visibleOperations.map((operation) => {
+                      const busy = workingId === operation.operationId;
+                      const productId = operation.sale?.items[0]?.inventoryItemId;
+                      return (
+                        <div key={operation.operationId} className="space-y-3 px-4 py-4 sm:px-5">
+                          <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Status status={operation.status} />
+                                <span className="font-mono text-xs text-muted-foreground">
+                                  {operation.operationId}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-sm font-semibold text-foreground">
+                                {operation.sale
+                                  ? `${operation.sale.transactionId} · ${operation.sale.items.length} product line(s)`
+                                  : `${operation.items[0].entity} ${operation.items[0].action}`}
                               </p>
-                            )}
-                          </div>
-                          {operation.status === 'failed' && (
-                            <div className="flex flex-wrap gap-2">
-                              {productId && (
-                                <Link
-                                  href={`/inventory-management?product=${encodeURIComponent(productId)}`}
-                                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"
-                                >
-                                  <PackagePlus size={14} /> Correct stock
-                                </Link>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {new Date(operation.createdAt).toLocaleString()} ·{' '}
+                                {operation.attempts} attempt{operation.attempts === 1 ? '' : 's'}
+                              </p>
+                              {operation.error && (
+                                <p className="mt-2 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
+                                  {operation.error}
+                                </p>
                               )}
-                              <button
-                                type="button"
-                                disabled={busy || !isOnline}
-                                onClick={() =>
-                                  void run(
-                                    operation.operationId,
-                                    () => retrySyncOperation(operation.operationId),
-                                    'Update scheduled for another attempt'
-                                  )
-                                }
-                                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                              >
-                                <RefreshCw size={14} className={busy ? 'animate-spin' : ''} /> Retry
-                              </button>
-                              {operation.sale && (
+                            </div>
+                            {operation.status === 'failed' && (
+                              <div className="flex flex-wrap gap-2">
+                                {productId && (
+                                  <Link
+                                    href={`/inventory-management?product=${encodeURIComponent(productId)}`}
+                                    className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"
+                                  >
+                                    <PackagePlus size={14} /> Correct stock
+                                  </Link>
+                                )}
                                 <button
                                   type="button"
                                   disabled={busy || !isOnline}
-                                  onClick={async () => {
-                                    const confirmed = await confirmAction({
-                                      title: 'Cancel rejected sale?',
-                                      description:
-                                        'The sale will be marked void and the stock count on this device will be corrected.',
-                                      confirmLabel: 'Cancel sale',
-                                    });
-                                    if (confirmed) {
-                                      void run(
-                                        operation.operationId,
-                                        () => cancelFailedOfflineSale(operation.operationId),
-                                        'Rejected sale cancelled and stock restored'
-                                      );
-                                    }
-                                  }}
-                                  className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 px-3 py-2 text-xs font-semibold text-danger disabled:opacity-50"
+                                  onClick={() =>
+                                    void run(
+                                      operation.operationId,
+                                      () => retrySyncOperation(operation.operationId),
+                                      'Update scheduled for another attempt'
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                                 >
-                                  <XCircle size={14} /> Cancel sale
+                                  <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />{' '}
+                                  Retry
                                 </button>
-                              )}
-                            </div>
-                          )}
+                                {operation.sale && (
+                                  <button
+                                    type="button"
+                                    disabled={busy || !isOnline}
+                                    onClick={async () => {
+                                      const confirmed = await confirmAction({
+                                        title: 'Cancel rejected sale?',
+                                        description:
+                                          'The sale will be marked void and the stock count on this device will be corrected.',
+                                        confirmLabel: 'Cancel sale',
+                                      });
+                                      if (confirmed) {
+                                        void run(
+                                          operation.operationId,
+                                          () => cancelFailedOfflineSale(operation.operationId),
+                                          'Rejected sale cancelled and stock restored'
+                                        );
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-md border border-danger/30 px-3 py-2 text-xs font-semibold text-danger disabled:opacity-50"
+                                  >
+                                    <XCircle size={14} /> Cancel sale
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                  <ListPagination
+                    page={Math.min(page, totalPages)}
+                    totalItems={operations.length}
+                    rowsPerPage={rowsPerPage}
+                    onPageChange={setPage}
+                  />
+                </>
               )}
             </div>
           </div>

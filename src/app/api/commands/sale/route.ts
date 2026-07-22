@@ -1,7 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import type { Customer, InventoryItem, SaleTransaction, StockMovement } from '@/lib/pos/types';
+import type {
+  BusinessSettings,
+  Customer,
+  InventoryItem,
+  SaleTransaction,
+  StockMovement,
+} from '@/lib/pos/types';
 import { calculateSaleLine, money } from '@/lib/pos/sale-calculations';
+import { loyaltyEarnedForSale, loyaltyRedemption } from '@/lib/pos/loyalty';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
@@ -93,6 +100,7 @@ export async function POST(request: NextRequest) {
     }
     const customerName =
       typeof body.customerName === 'string' ? body.customerName.trim() : 'Walk-in Customer';
+    const loyaltyPointsToRedeem = Math.max(0, Number(body.loyaltyPointsToRedeem ?? 0) || 0);
     const requestHash = commandHash({
       operationId,
       idempotencyKey,
@@ -100,6 +108,7 @@ export async function POST(request: NextRequest) {
       paymentMethod,
       cashTendered,
       customerName,
+      loyaltyPointsToRedeem,
     });
     const client = await getPosPool().connect();
     try {
@@ -195,9 +204,12 @@ export async function POST(request: NextRequest) {
             unitPrice: requested.unitPrice,
             quantity: requested.quantity,
             discount: requested.discount,
-            taxApplicable: Boolean(productData.taxApplicable || Number(productData.taxRate) > 0),
+            taxApplicable: Boolean(
+              productData.taxMode === 'inclusive' &&
+              (productData.taxApplicable || Number(productData.taxRate) > 0)
+            ),
             taxRate: Number(productData.taxRate) || 0,
-            taxMode: 'exclusive' as const,
+            taxMode: productData.taxMode ?? settings.taxMode ?? 'exclusive',
           },
           defaultTaxRate
         );
@@ -238,13 +250,7 @@ export async function POST(request: NextRequest) {
       });
 
       const taxable = money(subtotal - discountTotal);
-      const exclusiveTaxAmount = lineItems
-        .filter((line) => line.taxMode === 'exclusive')
-        .reduce((sum, line) => money(sum + Number(line.taxAmount ?? 0)), 0);
-      const grandTotal = money(taxable + exclusiveTaxAmount);
-      if (paymentMethod === 'cash' && cashTendered < grandTotal) {
-        throw new HttpError(400, 'Cash tendered is less than the sale total', 'VALIDATION_ERROR');
-      }
+      const grandTotal = money(taxable + taxAmount);
       const receipt = await client.query(
         `INSERT INTO pos_receipt_sequences (tenant_id, next_number)
          VALUES ($1, 2)
@@ -256,13 +262,13 @@ export async function POST(request: NextRequest) {
       const receiptPrefix =
         typeof settings.receiptPrefix === 'string' ? settings.receiptPrefix : 'TXN';
       const transactionId = `${receiptPrefix}-${String(receipt.rows[0].receipt_number).padStart(8, '0')}`;
-      const sale: SaleTransaction = {
+      let sale: SaleTransaction = {
         id: `sale-${operationId}`,
         transactionId,
         items: lineItems,
         subtotal,
         discountTotal,
-        taxAmount: exclusiveTaxAmount,
+        taxAmount,
         grandTotal,
         paymentMethod: paymentMethod as SaleTransaction['paymentMethod'],
         paymentStatus: paymentMethod === 'credit' ? 'unpaid' : 'paid',
@@ -313,17 +319,37 @@ export async function POST(request: NextRequest) {
         );
         if (customerResult.rows[0]) {
           const customer = customerResult.rows[0].data as Customer;
+          const loyaltySettings = settings as BusinessSettings;
+          const loyalty = loyaltyRedemption(
+            customer,
+            loyaltyPointsToRedeem,
+            grandTotal,
+            loyaltySettings,
+            paymentMethod
+          );
+          const earned = loyaltyEarnedForSale(grandTotal, loyaltySettings, paymentMethod);
           updatedCustomer = {
             ...customer,
             totalSpend:
               paymentMethod === 'credit'
                 ? customer.totalSpend
                 : money(Number(customer.totalSpend ?? 0) + grandTotal),
-            loyaltyPoints:
-              paymentMethod === 'credit'
-                ? customer.loyaltyPoints
-                : Number(customer.loyaltyPoints ?? 0) + Math.floor(grandTotal / 100),
+            loyaltyPoints: Math.max(
+              0,
+              Number(customer.loyaltyPoints ?? 0) - loyalty.points + earned
+            ),
             updatedAt: now,
+          };
+          sale = {
+            ...sale,
+            amountPaid: paymentMethod === 'credit' ? 0 : money(grandTotal - loyalty.credit),
+            changeGiven:
+              paymentMethod === 'cash'
+                ? Math.max(0, money(cashTendered - grandTotal + loyalty.credit))
+                : 0,
+            loyaltyPointsEarned: earned,
+            loyaltyPointsRedeemed: loyalty.points,
+            loyaltyCreditAmount: loyalty.credit,
           };
           await client.query(
             `UPDATE pos_tenant_records SET data = $3::jsonb,
@@ -331,7 +357,25 @@ export async function POST(request: NextRequest) {
              WHERE tenant_id = $1 AND store_name = 'customers' AND record_id = $2`,
             [auth.tenantId, customerResult.rows[0].record_id, JSON.stringify(updatedCustomer)]
           );
+        } else if (loyaltyPointsToRedeem > 0) {
+          throw new HttpError(
+            400,
+            'A valid customer is required to redeem loyalty points',
+            'LOYALTY_CUSTOMER_REQUIRED'
+          );
         }
+      }
+
+      if (loyaltyPointsToRedeem > 0 && !updatedCustomer) {
+        throw new HttpError(
+          400,
+          'A valid customer is required to redeem loyalty points',
+          'LOYALTY_CUSTOMER_REQUIRED'
+        );
+      }
+
+      if (paymentMethod === 'cash' && cashTendered < Number(sale.amountPaid ?? grandTotal)) {
+        throw new HttpError(400, 'Cash tendered is less than the sale total', 'VALIDATION_ERROR');
       }
 
       for (const updated of updatedInventory) {

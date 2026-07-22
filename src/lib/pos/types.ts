@@ -21,6 +21,7 @@ export interface InventoryItem {
   discountType?: 'none' | 'percentage' | 'fixed';
   discountValue?: number;
   taxApplicable?: boolean;
+  taxId?: string;
   taxRate?: number;
   taxMode?: 'inclusive' | 'exclusive';
   expiryDate: string;
@@ -84,6 +85,9 @@ export interface SaleTransaction {
   discountTotal: number;
   taxAmount: number;
   grandTotal: number;
+  loyaltyPointsEarned?: number;
+  loyaltyPointsRedeemed?: number;
+  loyaltyCreditAmount?: number;
   paymentMethod: PaymentMethod;
   paymentStatus?: 'paid' | 'unpaid' | 'partial';
   amountPaid?: number;
@@ -199,6 +203,7 @@ export interface CompleteSaleInput {
   cashTendered?: number;
   changeGiven?: number;
   customerName?: string;
+  loyaltyPointsToRedeem?: number;
   cashier: string;
 }
 
@@ -287,8 +292,20 @@ export interface Customer {
   loyaltyPoints: number;
   creditLimit: number;
   totalSpend: number;
+  discountRules?: CustomerDiscountRule[];
   createdAt: string;
   updatedAt?: string;
+}
+
+export type CustomerDiscountType = 'percentage' | 'fixed-unit-price';
+
+export interface CustomerDiscountRule {
+  id: string;
+  inventoryItemId: string;
+  type: CustomerDiscountType;
+  value: number;
+  maxQuantity?: number;
+  active: boolean;
 }
 
 export interface Vendor {
@@ -311,9 +328,11 @@ export interface BusinessSettings {
   address?: string;
   phone?: string;
   email?: string;
+  taxName?: string;
   taxNumber?: string;
   currency: string;
   taxRate: number;
+  taxRates?: TaxDefinition[];
   taxMode?: 'inclusive' | 'exclusive';
   receiptFooter: string;
   subscriptionPlanId?: 'starter' | 'pro' | 'delux';
@@ -338,12 +357,26 @@ export interface BusinessSettings {
   themeMode?: 'light' | 'dark';
   fontFamily?: string;
   receiptPrefix?: string;
+  receiptShowLogo?: boolean;
+  receiptShowBusinessDetails?: boolean;
+  receiptShowCustomer?: boolean;
   nextReceiptNumber?: number;
   branches?: string[];
   productCategories?: ProductCategory[];
   expenseCategories?: ExpenseCategory[];
   paymentMethods?: PaymentMethod[];
+  loyaltyEnabled?: boolean;
+  loyaltyEarnPercent?: number;
+  loyaltyRedemptionThreshold?: number;
   updatedAt?: string;
+}
+
+export interface TaxDefinition {
+  id: string;
+  name: string;
+  rate: number;
+  mode: 'inclusive' | 'exclusive';
+  active: boolean;
 }
 
 export interface SupportTicket {

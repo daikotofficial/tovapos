@@ -9,12 +9,18 @@ import Badge from '@/components/ui/Badge';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { AppNotification } from '@/lib/pos/types';
 import { getDaysUntilExpiry } from '@/lib/pos/stock';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import ListPagination from '@/components/ui/ListPagination';
 
 export default function NotificationsPage() {
   const { inventory, syncQueue, settings, isOnline } = usePosStore();
   const router = useRouter();
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
+  const [rowsPerPage] = useRowsPerPage();
+  const [messagePage, setMessagePage] = useState(1);
+  const [alertPage, setAlertPage] = useState(1);
+  const [syncPage, setSyncPage] = useState(1);
   const alerts = useMemo(() => {
     const expiryDays = settings.expiryAlertDays ?? 30;
     return inventory
@@ -52,6 +58,20 @@ export default function NotificationsPage() {
   }, [inventory, settings.expiryAlertDays]);
 
   const pendingSync = syncQueue.filter((item) => item.status !== 'synced');
+  const visibleMessages = appNotifications.slice(
+    (messagePage - 1) * rowsPerPage,
+    messagePage * rowsPerPage
+  );
+  const visibleAlerts = alerts.slice((alertPage - 1) * rowsPerPage, alertPage * rowsPerPage);
+  const visiblePendingSync = pendingSync.slice(
+    (syncPage - 1) * rowsPerPage,
+    syncPage * rowsPerPage
+  );
+  useEffect(() => {
+    setMessagePage(1);
+    setAlertPage(1);
+    setSyncPage(1);
+  }, [rowsPerPage, appNotifications.length, alerts.length, pendingSync.length]);
   const unreadAlerts =
     alerts.filter((alert) => !readIds.has(alert.id)).length +
     appNotifications.filter((notice) => !notice.readAt && !readIds.has(notice.id)).length;
@@ -145,7 +165,7 @@ export default function NotificationsPage() {
                   No platform messages yet.
                 </p>
               ) : (
-                appNotifications.map((notice) => (
+                visibleMessages.map((notice) => (
                   <button
                     key={notice.id}
                     type="button"
@@ -174,6 +194,12 @@ export default function NotificationsPage() {
                 ))
               )}
             </div>
+            <ListPagination
+              page={messagePage}
+              totalItems={appNotifications.length}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setMessagePage}
+            />
           </section>
 
           <section className="rounded-xl border border-border bg-card shadow-card">
@@ -196,7 +222,7 @@ export default function NotificationsPage() {
                   No low-stock or expiry alerts right now.
                 </p>
               ) : (
-                alerts.map((alert) => (
+                visibleAlerts.map((alert) => (
                   <button
                     key={alert.id}
                     type="button"
@@ -218,6 +244,12 @@ export default function NotificationsPage() {
                 ))
               )}
             </div>
+            <ListPagination
+              page={alertPage}
+              totalItems={alerts.length}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setAlertPage}
+            />
           </section>
 
           <section className="rounded-xl border border-border bg-card shadow-card">
@@ -247,7 +279,7 @@ export default function NotificationsPage() {
                       </td>
                     </tr>
                   ) : (
-                    pendingSync.map((item) => (
+                    visiblePendingSync.map((item) => (
                       <tr key={item.id} className="hover:bg-muted/30">
                         <td className="px-4 py-3 text-sm font-medium">{item.entity}</td>
                         <td className="px-4 py-3 text-sm">{item.action}</td>
@@ -264,6 +296,12 @@ export default function NotificationsPage() {
                 </tbody>
               </table>
             </div>
+            <ListPagination
+              page={syncPage}
+              totalItems={pendingSync.length}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setSyncPage}
+            />
           </section>
         </div>
       </PermissionGate>

@@ -27,7 +27,8 @@ import {
   Vendor,
 } from './types';
 import { assertSellable, normalizeInventoryItem } from './stock';
-import { calculateSaleLine, calculateSaleTotals } from './sale-calculations';
+import { calculateSaleLine, calculateSaleTotals, money } from './sale-calculations';
+import { loyaltyEarnedForSale, loyaltyRedemption } from './loyalty';
 import {
   createSyncQueueItem,
   cacheCustomersLocally,
@@ -36,6 +37,8 @@ import {
   cacheStockMovementsLocally,
   cacheSyncQueueLocally,
   deleteUser as deleteStoredUser,
+  deleteCustomer as deleteStoredCustomer,
+  deleteVendor as deleteStoredVendor,
   ensureCleanLocalDatabase,
   loadCustomers,
   loadExpenses,
@@ -102,7 +105,9 @@ interface PosStoreValue {
   upsertUser: (user: TovaUser) => Promise<TovaUser>;
   deleteUser: (userId: string) => Promise<void>;
   upsertCustomer: (customer: Customer) => Promise<Customer>;
+  deleteCustomer: (customerId: string) => Promise<void>;
   upsertVendor: (vendor: Vendor) => Promise<Vendor>;
+  deleteVendor: (vendorId: string) => Promise<void>;
   updateSettings: (settings: BusinessSettings) => Promise<BusinessSettings>;
   completeSale: (input: CompleteSaleInput) => Promise<SaleTransaction>;
   reconcileCreditSale: (
@@ -148,6 +153,25 @@ function createOperationId(prefix: string): string {
 
 function sortInventory(items: InventoryItem[]): InventoryItem[] {
   return [...items].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const API_STORE_NAMES: Record<SyncQueueItem['entity'], string> = {
+  inventory: 'inventory',
+  stockMovement: 'stockMovements',
+  sale: 'sales',
+  user: 'users',
+  customer: 'customers',
+  vendor: 'vendors',
+  settings: 'settings',
+  expense: 'expenses',
+  expenseHead: 'expenses',
+  report: 'reports',
+};
+
+function apiStoreName(entity: SyncQueueItem['entity']): string {
+  const storeName = API_STORE_NAMES[entity];
+  if (!storeName) throw new Error(`Unsupported sync entity: ${entity}`);
+  return storeName;
 }
 
 export function PosStoreProvider({ children }: { children: React.ReactNode }) {
@@ -477,6 +501,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     paymentMethod: payload.sale.paymentMethod,
                     cashTendered: payload.sale.cashTendered,
                     customerName: payload.sale.customerName,
+                    loyaltyPointsToRedeem: payload.sale.loyaltyPointsRedeemed,
                   }),
                 });
                 const result = (await response.json()) as {
@@ -561,6 +586,38 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                 }
               } else {
                 for (const item of group) {
+                  if (item.action === 'delete') {
+                    const response = await fetch(
+                      `/api/pos-store?store=${apiStoreName(item.entity)}`,
+                      {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: item.entityId }),
+                      }
+                    );
+                    const result = (await response.json().catch(() => null)) as {
+                      error?: string;
+                    } | null;
+                    if (!response.ok)
+                      throw new Error(result?.error ?? 'Delete could not be synchronized');
+                    if (item.entity === 'customer') await deleteStoredCustomer(item.entityId);
+                    if (item.entity === 'vendor') await deleteStoredVendor(item.entityId);
+                    if (item.entity === 'user') await deleteStoredUser(item.entityId);
+                    continue;
+                  }
+                  const response = await fetch(
+                    `/api/pos-store?store=${apiStoreName(item.entity)}`,
+                    {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(item.payload),
+                    }
+                  );
+                  const result = (await response.json().catch(() => null)) as {
+                    error?: string;
+                  } | null;
+                  if (!response.ok)
+                    throw new Error(result?.error ?? 'Update could not be synchronized');
                   if (item.entity === 'customer') await saveCustomer(item.payload as Customer);
                   if (item.entity === 'vendor') await saveVendor(item.payload as Vendor);
                   if (item.entity === 'expense') await saveExpense(item.payload as ExpenseRecord);
@@ -724,6 +781,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
+    if (!isHydrated) return;
     if (typeof document === 'undefined') return;
     if (window.location.pathname.startsWith('/admin')) return;
     const root = document.documentElement;
@@ -740,7 +798,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     const themeMode = settings.themeMode ?? 'light';
     root.dataset.theme = themeMode;
     window.localStorage.setItem('tovapos.themeMode', themeMode);
-  }, [settings.fontFamily, settings.themeColor, settings.themeMode]);
+  }, [isHydrated, settings.fontFamily, settings.themeColor, settings.themeMode]);
 
   const setActiveUserId = useCallback(
     (userId: string) => {
@@ -1014,45 +1072,87 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     [activeUserId, users]
   );
 
-  const upsertCustomer = useCallback(async (customer: Customer) => {
-    const saved = { ...customer, updatedAt: new Date().toISOString() };
-    const queueItem = createSyncQueueItem({
-      entity: 'customer',
-      entityId: saved.id,
-      action: 'update',
-      payload: saved,
-    });
+  const upsertCustomer = useCallback(
+    async (customer: Customer) => {
+      const saved = { ...customer, updatedAt: new Date().toISOString() };
+      const queueItem = createSyncQueueItem({
+        entity: 'customer',
+        entityId: saved.id,
+        action: customers.some((existing) => existing.id === saved.id) ? 'update' : 'create',
+        payload: saved,
+      });
 
-    await saveCustomer(saved);
-    await saveSyncQueueItem(queueItem);
-    setCustomers((prev) =>
-      [...prev.filter((existing) => existing.id !== saved.id), saved].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      )
-    );
-    setSyncQueue((prev) => [queueItem, ...prev]);
-    return saved;
-  }, []);
+      await saveCustomer(saved);
+      await saveSyncQueueItem(queueItem);
+      setCustomers((prev) =>
+        [...prev.filter((existing) => existing.id !== saved.id), saved].sort((a, b) =>
+          a.name.localeCompare(b.name)
+        )
+      );
+      setSyncQueue((prev) => [queueItem, ...prev]);
+      return saved;
+    },
+    [customers]
+  );
 
-  const upsertVendor = useCallback(async (vendor: Vendor) => {
-    const saved = { ...vendor, updatedAt: new Date().toISOString() };
-    const queueItem = createSyncQueueItem({
-      entity: 'vendor',
-      entityId: saved.id,
-      action: 'update',
-      payload: saved,
-    });
+  const deleteCustomer = useCallback(
+    async (customerId: string) => {
+      const target = customers.find((customer) => customer.id === customerId);
+      if (!target) return;
+      const queueItem = createSyncQueueItem({
+        entity: 'customer',
+        entityId: customerId,
+        action: 'delete',
+        payload: { id: customerId },
+      });
+      await deleteStoredCustomer(customerId);
+      await saveSyncQueueItem(queueItem);
+      setCustomers((prev) => prev.filter((customer) => customer.id !== customerId));
+      setSyncQueue((prev) => [queueItem, ...prev]);
+    },
+    [customers]
+  );
 
-    await saveVendor(saved);
-    await saveSyncQueueItem(queueItem);
-    setVendors((prev) =>
-      [...prev.filter((existing) => existing.id !== saved.id), saved].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      )
-    );
-    setSyncQueue((prev) => [queueItem, ...prev]);
-    return saved;
-  }, []);
+  const upsertVendor = useCallback(
+    async (vendor: Vendor) => {
+      const saved = { ...vendor, updatedAt: new Date().toISOString() };
+      const queueItem = createSyncQueueItem({
+        entity: 'vendor',
+        entityId: saved.id,
+        action: vendors.some((existing) => existing.id === saved.id) ? 'update' : 'create',
+        payload: saved,
+      });
+
+      await saveVendor(saved);
+      await saveSyncQueueItem(queueItem);
+      setVendors((prev) =>
+        [...prev.filter((existing) => existing.id !== saved.id), saved].sort((a, b) =>
+          a.name.localeCompare(b.name)
+        )
+      );
+      setSyncQueue((prev) => [queueItem, ...prev]);
+      return saved;
+    },
+    [vendors]
+  );
+
+  const deleteVendor = useCallback(
+    async (vendorId: string) => {
+      const target = vendors.find((vendor) => vendor.id === vendorId);
+      if (!target) return;
+      const queueItem = createSyncQueueItem({
+        entity: 'vendor',
+        entityId: vendorId,
+        action: 'delete',
+        payload: { id: vendorId },
+      });
+      await deleteStoredVendor(vendorId);
+      await saveSyncQueueItem(queueItem);
+      setVendors((prev) => prev.filter((vendor) => vendor.id !== vendorId));
+      setSyncQueue((prev) => [queueItem, ...prev]);
+    },
+    [vendors]
+  );
 
   const updateSettings = useCallback(
     async (nextSettings: BusinessSettings) => {
@@ -1139,6 +1239,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                 paymentMethod: input.paymentMethod,
                 cashTendered: input.cashTendered,
                 customerName: input.customerName,
+                loyaltyPointsToRedeem: input.loyaltyPointsToRedeem,
               }),
             });
           } catch (error) {
@@ -1206,9 +1307,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               unitPrice: line.unitPrice,
               quantity: line.quantity,
               discount: line.discount,
-              taxApplicable: Boolean(item?.taxApplicable || Number(item?.taxRate) > 0),
+              taxApplicable: Boolean(
+                item?.taxMode === 'inclusive' && (item?.taxApplicable || Number(item?.taxRate) > 0)
+              ),
               taxRate: Number(item?.taxRate) || 0,
-              taxMode: 'exclusive' as const,
+              taxMode: item?.taxMode ?? settings.taxMode ?? 'exclusive',
             };
           }),
           defaultTaxRate
@@ -1231,9 +1334,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               unitPrice: line.unitPrice,
               quantity: line.quantity,
               discount: line.discount,
-              taxApplicable: Boolean(item.taxApplicable || Number(item.taxRate) > 0),
+              taxApplicable: Boolean(
+                item.taxMode === 'inclusive' && (item.taxApplicable || Number(item.taxRate) > 0)
+              ),
               taxRate: Number(item.taxRate) || 0,
-              taxMode: 'exclusive' as const,
+              taxMode: item.taxMode ?? settings.taxMode ?? 'exclusive',
             },
             defaultTaxRate
           );
@@ -1264,7 +1369,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           };
         });
 
-        const sale: SaleTransaction = {
+        let sale: SaleTransaction = {
           id: `sale-${operationId}`,
           transactionId: createTransactionId(),
           items: lineItems,
@@ -1324,6 +1429,16 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                 customer.phone === input.customerName?.trim()
             )
           : null;
+        const loyalty = loyaltyRedemption(
+          matchedCustomer,
+          input.loyaltyPointsToRedeem ?? 0,
+          sale.grandTotal,
+          settings,
+          sale.paymentMethod
+        );
+        if ((input.loyaltyPointsToRedeem ?? 0) > 0 && !matchedCustomer) {
+          throw new Error('A valid customer is required to redeem loyalty points.');
+        }
         const updatedCustomer = matchedCustomer
           ? {
               ...matchedCustomer,
@@ -1331,13 +1446,35 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                 sale.paymentMethod === 'credit'
                   ? matchedCustomer.totalSpend
                   : matchedCustomer.totalSpend + sale.grandTotal,
-              loyaltyPoints:
-                sale.paymentMethod === 'credit'
-                  ? matchedCustomer.loyaltyPoints
-                  : matchedCustomer.loyaltyPoints + Math.floor(sale.grandTotal / 100),
+              loyaltyPoints: Math.max(
+                0,
+                matchedCustomer.loyaltyPoints -
+                  loyalty.points +
+                  loyaltyEarnedForSale(sale.grandTotal, settings, sale.paymentMethod)
+              ),
               updatedAt: now,
             }
           : null;
+        sale = {
+          ...sale,
+          amountPaid: sale.paymentMethod === 'credit' ? 0 : money(sale.grandTotal - loyalty.credit),
+          changeGiven:
+            sale.paymentMethod === 'cash' && input.cashTendered !== undefined
+              ? Math.max(
+                  0,
+                  Number((input.cashTendered - (sale.grandTotal - loyalty.credit)).toFixed(2))
+                )
+              : input.changeGiven,
+          loyaltyPointsEarned: loyaltyEarnedForSale(sale.grandTotal, settings, sale.paymentMethod),
+          loyaltyPointsRedeemed: loyalty.points,
+          loyaltyCreditAmount: loyalty.credit,
+        };
+        if (
+          sale.paymentMethod === 'cash' &&
+          Number(input.cashTendered ?? 0) < Number(sale.amountPaid ?? sale.grandTotal)
+        ) {
+          throw new Error('Cash tendered is less than the sale total.');
+        }
 
         const queueItem = {
           ...createSyncQueueItem({
@@ -1361,7 +1498,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     customerId: updatedCustomer.id,
                     spendDelta: sale.paymentMethod === 'credit' ? 0 : sale.grandTotal,
                     loyaltyDelta:
-                      sale.paymentMethod === 'credit' ? 0 : Math.floor(sale.grandTotal / 100),
+                      (updatedCustomer?.loyaltyPoints ?? 0) - (matchedCustomer?.loyaltyPoints ?? 0),
                     creditDelta: sale.paymentMethod === 'credit' ? sale.grandTotal : 0,
                   }
                 : undefined,
@@ -1423,7 +1560,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         saleInFlightRef.current = false;
       }
     },
-    [customers, hasPermission, isOnline, settings.taxRate]
+    [customers, hasPermission, isOnline, settings]
   );
 
   const reconcileCreditSale = useCallback(
@@ -1708,7 +1845,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       upsertUser,
       deleteUser,
       upsertCustomer,
+      deleteCustomer,
       upsertVendor,
+      deleteVendor,
       updateSettings,
       completeSale,
       reconcileCreditSale,
@@ -1745,7 +1884,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       upsertUser,
       deleteUser,
       upsertCustomer,
+      deleteCustomer,
       upsertVendor,
+      deleteVendor,
       updateSettings,
       completeSale,
       reconcileCreditSale,

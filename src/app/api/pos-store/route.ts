@@ -32,6 +32,15 @@ const STORE_NAMES = new Set([
   'settings',
 ]);
 
+const STORE_ALIASES: Record<string, string> = {
+  stockMovement: 'stockMovements',
+  sale: 'sales',
+  user: 'users',
+  customer: 'customers',
+  vendor: 'vendors',
+  expense: 'expenses',
+};
+
 type PosRecord = Record<string, unknown> & { id?: unknown };
 type InventoryCursor = { name: string; id: string };
 
@@ -56,9 +65,14 @@ const WRITE_PERMISSIONS: Partial<Record<string, Permission>> = {
 };
 
 function getStoreName(request: NextRequest): string {
-  const storeName = request.nextUrl.searchParams.get('store') ?? '';
+  const requestedName = request.nextUrl.searchParams.get('store') ?? '';
+  const storeName = STORE_ALIASES[requestedName] ?? requestedName;
   if (!STORE_NAMES.has(storeName)) {
-    throw new HttpError(400, 'Unknown POS store', 'UNKNOWN_STORE');
+    throw new HttpError(
+      400,
+      `Unknown POS store: ${requestedName || 'missing store name'}`,
+      'UNKNOWN_STORE'
+    );
   }
   return storeName;
 }
@@ -347,6 +361,7 @@ async function getSalesMetrics(request: NextRequest, auth: AuthContext) {
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed'), 0)::float8 AS revenue,
       coalesce(sum(gross_profit) FILTER (WHERE status = 'completed'), 0)::float8 AS gross_profit,
       coalesce(sum(amount_due) FILTER (WHERE status = 'completed'), 0)::float8 AS receivables,
+      coalesce(sum(tax_amount) FILTER (WHERE status = 'completed' AND payment_method <> 'credit'), 0)::float8 AS vat_collected,
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed' AND payment_method = 'cash'), 0)::float8 AS cash_sales,
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed' AND payment_method <> 'cash'), 0)::float8 AS non_cash_sales
     FROM pos_tenant_sales
@@ -421,6 +436,7 @@ async function getSalesMetrics(request: NextRequest, auth: AuthContext) {
     receivables: Number(sales.receivables ?? 0),
     cashSales: Number(sales.cash_sales ?? 0),
     nonCashSales: Number(sales.non_cash_sales ?? 0),
+    vatCollected: Number(sales.vat_collected ?? 0),
     topProducts: topProductsResult.rows.map((row) => ({
       ...row,
       profit: canViewProfit ? Number(row.profit ?? 0) : 0,
@@ -745,20 +761,21 @@ export async function PUT(request: NextRequest) {
         }
         const email = typeof record.email === 'string' ? record.email.trim().toLowerCase() : '';
         const name = typeof record.name === 'string' ? record.name.trim() : '';
-        if (!email || !name)
-          throw new HttpError(400, 'User name and email are required', 'VALIDATION_ERROR');
+        if (!name) throw new HttpError(400, 'User name is required', 'VALIDATION_ERROR');
         const existing = await getPosPool().query(
           `SELECT * FROM pos_app_users WHERE tenant_id = $1 AND id = $2`,
           [auth.tenantId, record.id]
         );
         const current = existing.rows[0];
-        const emailConflict = await getPosPool().query(
-          `SELECT 1 FROM pos_app_users
+        const emailConflict = email
+          ? await getPosPool().query(
+              `SELECT 1 FROM pos_app_users
            WHERE lower(email) = $1
              AND NOT (tenant_id = $2 AND id = $3)
            LIMIT 1`,
-          [email, auth.tenantId, record.id]
-        );
+              [email, auth.tenantId, record.id]
+            )
+          : { rowCount: 0 };
         if (emailConflict.rowCount) {
           throw new HttpError(409, 'An account already uses this email address', 'DUPLICATE_EMAIL');
         }
@@ -843,7 +860,7 @@ export async function PUT(request: NextRequest) {
             auth.tenantId,
             record.id,
             name,
-            email,
+            email || null,
             typeof record.phone === 'string' ? record.phone.trim() : '',
             requestedRole,
             JSON.stringify(requestedPermissions),

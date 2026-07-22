@@ -230,7 +230,7 @@ export default function CartPanel({
                       </span>
                       {item.taxApplicable && item.taxRate > 0 && (
                         <span className="text-[10px] font-medium text-primary">
-                          VAT {item.taxRate}% {item.taxMode}
+                          VAT {item.taxRate}%
                         </span>
                       )}
                       <span
@@ -256,7 +256,7 @@ export default function CartPanel({
                 </div>
 
                 {/* Qty + Price Row */}
-                <div className="mt-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3">
                   {/* Quantity Controls */}
                   <div className="flex flex-wrap items-center gap-1.5">
                     <button
@@ -293,9 +293,11 @@ export default function CartPanel({
                   </div>
 
                   {/* Discount + Subtotal */}
-                  <div className="flex items-center justify-between gap-2 sm:justify-end">
+                  <div className="flex min-w-[8.5rem] shrink-0 items-center justify-between gap-2">
                     <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-muted-foreground">Disc:</span>
+                      <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+                        {item.customerDiscountLocked ? 'Customer:' : 'Disc:'}
+                      </span>
                       <div className="relative">
                         <input
                           type="number"
@@ -303,7 +305,8 @@ export default function CartPanel({
                           onChange={(e) =>
                             onUpdateDiscount(item.id, parseFloat(e.target.value) || 0)
                           }
-                          className="w-12 text-center text-xs font-medium bg-secondary border border-border rounded py-0.5 pr-3 focus:outline-none focus:ring-1 focus:ring-primary/30 font-tabular"
+                          disabled={item.customerDiscountLocked}
+                          className="w-14 text-center text-xs font-medium bg-secondary border border-border rounded py-0.5 pr-3 focus:outline-none focus:ring-1 focus:ring-primary/30 font-tabular disabled:cursor-not-allowed disabled:opacity-70"
                           min={0}
                           max={100}
                         />

@@ -69,6 +69,7 @@ export interface SalesMetrics {
   receivables: number;
   cashSales: number;
   nonCashSales: number;
+  vatCollected: number;
   topProducts: {
     inventoryItemId: string;
     name: string;
@@ -112,7 +113,7 @@ function cleanForBrowserStorage<T extends { id: string }>(item: T, storeName?: S
     delete cleanItem.passwordHash;
     delete cleanItem.passwordSalt;
     delete cleanItem.newPassword;
-    cleanItem.pin = '';
+    delete cleanItem.pin;
   }
   return cleanItem as T;
 }
@@ -321,7 +322,7 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 async function getAll<T>(storeName: StoreName): Promise<T[]> {
-  if (shouldUsePostgresStore()) {
+  if (shouldUsePostgresStore() && storeName !== 'syncQueue') {
     try {
       const records = await apiRequest<T[]>(storeName);
       void putManyInBrowser(
@@ -343,7 +344,7 @@ async function getAll<T>(storeName: StoreName): Promise<T[]> {
 }
 
 async function putOne<T extends { id: string }>(storeName: StoreName, item: T): Promise<void> {
-  if (shouldUsePostgresStore()) {
+  if (shouldUsePostgresStore() && storeName !== 'syncQueue') {
     try {
       await apiRequest<{ ok: true }>(storeName, {
         method: 'PUT',
@@ -368,7 +369,7 @@ async function putOne<T extends { id: string }>(storeName: StoreName, item: T): 
 }
 
 async function putMany<T extends { id: string }>(storeName: StoreName, items: T[]): Promise<void> {
-  if (shouldUsePostgresStore()) {
+  if (shouldUsePostgresStore() && storeName !== 'syncQueue') {
     try {
       await apiRequest<{ ok: true }>(storeName, {
         method: 'PUT',
@@ -394,7 +395,7 @@ async function putMany<T extends { id: string }>(storeName: StoreName, items: T[
 }
 
 async function deleteOne(storeName: StoreName, id: string): Promise<void> {
-  if (shouldUsePostgresStore()) {
+  if (shouldUsePostgresStore() && storeName !== 'syncQueue') {
     await apiRequest<{ ok: true }>(storeName, {
       method: 'DELETE',
       body: JSON.stringify({ id }),
@@ -617,6 +618,7 @@ export async function loadSalesMetrics(
     nonCashSales: completed
       .filter((sale) => sale.paymentMethod !== 'cash')
       .reduce((sum, sale) => sum + sale.grandTotal, 0),
+    vatCollected: completed.reduce((sum, sale) => sum + Number(sale.taxAmount || 0), 0),
     topProducts: [...topProducts.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 10),
     expenseCategories: [...expenseCategories.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10),
   };
@@ -722,6 +724,10 @@ export async function saveCustomer(customer: Customer): Promise<void> {
   await putOne('customers', customer);
 }
 
+export async function deleteCustomer(customerId: string): Promise<void> {
+  await deleteOne('customers', customerId);
+}
+
 export async function loadVendors(seed: Vendor[]): Promise<Vendor[]> {
   const existing = await getAll<Vendor>('vendors');
   if (existing.length > 0) return existing;
@@ -731,6 +737,10 @@ export async function loadVendors(seed: Vendor[]): Promise<Vendor[]> {
 
 export async function saveVendor(vendor: Vendor): Promise<void> {
   await putOne('vendors', vendor);
+}
+
+export async function deleteVendor(vendorId: string): Promise<void> {
+  await deleteOne('vendors', vendorId);
 }
 
 export async function loadSettings(seed: BusinessSettings): Promise<BusinessSettings> {
@@ -745,6 +755,20 @@ export async function saveSettings(settings: BusinessSettings): Promise<void> {
 }
 
 function normalizeSettings(settings: BusinessSettings, seed: BusinessSettings): BusinessSettings {
+  const configuredTaxRates = settings.taxRates ?? seed.taxRates ?? [];
+  const taxRates = configuredTaxRates.length
+    ? configuredTaxRates
+    : Number(settings.taxRate) > 0
+      ? [
+          {
+            id: 'default-vat',
+            name: 'VAT',
+            rate: Number(settings.taxRate),
+            mode: settings.taxMode ?? 'exclusive',
+            active: true,
+          },
+        ]
+      : [];
   return {
     ...seed,
     ...settings,
@@ -762,6 +786,7 @@ function normalizeSettings(settings: BusinessSettings, seed: BusinessSettings): 
       ? settings.expenseCategories
       : seed.expenseCategories,
     paymentMethods: settings.paymentMethods?.length ? settings.paymentMethods : seed.paymentMethods,
+    taxRates,
     subscriptionPlanId: settings.subscriptionPlanId ?? seed.subscriptionPlanId ?? 'starter',
     subscriptionStatus: settings.subscriptionStatus ?? seed.subscriptionStatus ?? 'active',
     subscriptionRenewsAt: settings.subscriptionRenewsAt ?? seed.subscriptionRenewsAt,

@@ -5,6 +5,7 @@ import Modal from '@/components/ui/Modal';
 import { Printer, Download, Share2, CheckCircle2 } from 'lucide-react';
 import { SaleTransaction } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
+import AppImage from '@/components/ui/AppImage';
 
 interface ReceiptModalProps {
   open: boolean;
@@ -12,6 +13,13 @@ interface ReceiptModalProps {
   sale: SaleTransaction;
   currency: string;
   businessName: string;
+  businessLogo?: string;
+  businessPhone?: string;
+  businessEmail?: string;
+  businessAddress?: string;
+  showLogo?: boolean;
+  showBusinessDetails?: boolean;
+  showCustomer?: boolean;
   receiptFooter: string;
   taxLabel: string;
 }
@@ -22,6 +30,13 @@ export default function ReceiptModal({
   sale,
   currency,
   businessName,
+  businessLogo,
+  businessPhone,
+  businessEmail,
+  businessAddress,
+  showLogo = true,
+  showBusinessDetails = true,
+  showCustomer = true,
   receiptFooter,
   taxLabel,
 }: ReceiptModalProps) {
@@ -73,8 +88,22 @@ export default function ReceiptModal({
         <div className="bg-white border border-border rounded-xl overflow-hidden">
           {/* Header */}
           <div className="text-center px-6 py-4 border-b border-dashed border-border bg-muted/20">
+            {showLogo && businessLogo && (
+              <AppImage
+                src={businessLogo}
+                alt={`${businessName} logo`}
+                width={56}
+                height={56}
+                className="mx-auto mb-2 h-14 w-14 object-contain"
+                unoptimized
+              />
+            )}
             <p className="text-base font-bold text-foreground">{businessName}</p>
-            <p className="text-xs text-muted-foreground">Retail Point-of-Sale</p>
+            {showBusinessDetails && (businessAddress || businessPhone || businessEmail) && (
+              <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+                {[businessAddress, businessPhone, businessEmail].filter(Boolean).join(' · ')}
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">Offline receipt copy</p>
             <p className="text-xs font-mono text-muted-foreground mt-1">{sale.transactionId}</p>
           </div>
@@ -86,8 +115,14 @@ export default function ReceiptModal({
               <span className="font-medium text-foreground text-right">{sale.timestamp}</span>
               <span className="text-muted-foreground">Cashier:</span>
               <span className="font-medium text-foreground text-right">{sale.cashier}</span>
-              <span className="text-muted-foreground">Customer:</span>
-              <span className="font-medium text-foreground text-right">{sale.customerName}</span>
+              {showCustomer && (
+                <>
+                  <span className="text-muted-foreground">Customer:</span>
+                  <span className="font-medium text-foreground text-right">
+                    {sale.customerName || 'Walk-in Customer'}
+                  </span>
+                </>
+              )}
               <span className="text-muted-foreground">Payment:</span>
               <span className="font-medium text-foreground text-right uppercase">
                 {sale.paymentMethod}
@@ -173,10 +208,25 @@ export default function ReceiptModal({
                   {formatMoney(sale.taxAmount, currency)}
                 </span>
               </div>
+              {Number(sale.loyaltyCreditAmount ?? 0) > 0 && (
+                <div className="flex justify-between text-success">
+                  <span>Loyalty credit</span>
+                  <span className="font-tabular font-medium">
+                    -{formatMoney(Number(sale.loyaltyCreditAmount), currency)}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between text-sm font-bold pt-1 border-t border-border mt-1">
-                <span>TOTAL</span>
-                <span className="font-tabular">{formatMoney(sale.grandTotal, currency)}</span>
+                <span>AMOUNT PAID</span>
+                <span className="font-tabular">
+                  {formatMoney(Number(sale.amountPaid ?? sale.grandTotal), currency)}
+                </span>
               </div>
+              {Number(sale.loyaltyPointsEarned ?? 0) > 0 && (
+                <p className="pt-1 text-[11px] text-success">
+                  Loyalty credit earned: {formatMoney(Number(sale.loyaltyPointsEarned), currency)}
+                </p>
+              )}
               {sale.paymentMethod === 'cash' && sale.cashTendered !== undefined && (
                 <>
                   <div className="flex justify-between">

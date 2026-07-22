@@ -44,6 +44,8 @@ export async function ensureSecuritySchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS pos_app_users_email_idx
           ON pos_app_users (lower(email));
 
+        ALTER TABLE pos_app_users ALTER COLUMN email DROP NOT NULL;
+
         CREATE OR REPLACE FUNCTION enforce_pos_app_users_global_email_unique()
         RETURNS trigger
         LANGUAGE plpgsql

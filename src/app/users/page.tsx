@@ -10,6 +10,8 @@ import NiceSelect from '@/components/ui/NiceSelect';
 import { confirmAction } from '@/components/ui/confirmAction';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission, TovaUser, UserRole } from '@/lib/pos/types';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import ListPagination from '@/components/ui/ListPagination';
 
 const permissions: Permission[] = [
   'dashboard',
@@ -184,12 +186,17 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<TovaUser | null>(null);
   const [form, setForm] = useState<TovaUser>(emptyUser());
   const [loginPassword, setLoginPassword] = useState('');
+  const [rowsPerPage] = useRowsPerPage();
+  const [page, setPage] = useState(1);
   const canDeleteUsers = currentUser?.role === 'owner' || currentUser?.role === 'super-admin';
 
   const activeUsers = useMemo(
     () => users.filter((user) => user.status === 'active').length,
     [users]
   );
+  const totalPages = Math.max(1, Math.ceil(users.length / rowsPerPage));
+  const visibleUsers = users.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  React.useEffect(() => setPage(1), [rowsPerPage]);
 
   const openCreate = () => {
     const user = emptyUser();
@@ -205,17 +212,28 @@ export default function UsersPage() {
   };
 
   const save = async () => {
-    if (!form.name.trim() || !form.email.trim()) return;
+    if (!form.name.trim()) {
+      toast.error('Full name is required.');
+      return;
+    }
     const isExisting = users.some((user) => user.id === form.id);
-    if (!isExisting && (loginPassword.length < 10 || !form.pin.trim())) return;
+    if (!isExisting && loginPassword.length < 10) {
+      toast.error('A login password of at least 10 characters is required.');
+      return;
+    }
 
-    await upsertUser({
-      ...form,
-      email: form.email.trim().toLowerCase(),
-      newPassword: loginPassword || undefined,
-    });
-    setEditing(null);
-    setLoginPassword('');
+    try {
+      await upsertUser({
+        ...form,
+        email: form.email.trim().toLowerCase(),
+        newPassword: loginPassword || undefined,
+      });
+      setEditing(null);
+      setLoginPassword('');
+      toast.success(isExisting ? 'User updated successfully.' : 'User added successfully.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to save user.');
+    }
   };
 
   const removeUser = async (user: TovaUser) => {
@@ -287,7 +305,7 @@ export default function UsersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {users.map((user) => (
+                  {visibleUsers.map((user) => (
                     <tr key={user.id} className="hover:bg-muted/30">
                       <td className="px-4 py-3 font-medium">{user.name}</td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{user.email}</td>
@@ -336,6 +354,12 @@ export default function UsersPage() {
                 </tbody>
               </table>
             </div>
+            <ListPagination
+              page={Math.min(page, totalPages)}
+              totalItems={users.length}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setPage}
+            />
           </div>
         </div>
 
@@ -361,7 +385,7 @@ export default function UsersPage() {
             </>
           }
         >
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="space-y-1">
               <span className="text-xs text-muted-foreground">Full Name</span>
               <input
@@ -406,15 +430,6 @@ export default function UsersPage() {
                   value: branch,
                   label: branch,
                 }))}
-              />
-            </label>
-            <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Login PIN</span>
-              <input
-                value={form.pin}
-                onChange={(e) => setForm({ ...form, pin: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                placeholder="4-6 digit PIN"
               />
             </label>
             <label className="space-y-1">

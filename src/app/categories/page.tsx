@@ -6,12 +6,19 @@ import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import Modal from '@/components/ui/Modal';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import ListPagination from '@/components/ui/ListPagination';
 
 export default function CategoriesPage() {
   const { settings, updateSettings, inventory } = usePosStore();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [rowsPerPage] = useRowsPerPage();
+  const [page, setPage] = useState(1);
   const categories = settings.productCategories ?? [];
+  const totalPages = Math.max(1, Math.ceil(categories.length / rowsPerPage));
+  const visibleCategories = categories.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  React.useEffect(() => setPage(1), [categories.length, rowsPerPage]);
 
   const addCategory = async () => {
     const category = name.trim();
@@ -56,7 +63,7 @@ export default function CategoriesPage() {
                   No categories yet. Add your first product category.
                 </div>
               ) : (
-                categories.map((category) => {
+                visibleCategories.map((category) => {
                   const count = inventory.filter((item) => item.category === category).length;
                   const inUse = count > 0;
                   return (
@@ -85,6 +92,12 @@ export default function CategoriesPage() {
                 })
               )}
             </div>
+            <ListPagination
+              page={Math.min(page, totalPages)}
+              totalItems={categories.length}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setPage}
+            />
           </section>
         </div>
 

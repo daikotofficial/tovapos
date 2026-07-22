@@ -14,10 +14,10 @@ interface ModalProps {
 }
 
 const sizeMap = {
-  sm: 'max-w-sm',
-  md: 'max-w-lg',
-  lg: 'max-w-2xl',
-  xl: 'max-w-4xl',
+  sm: 'max-w-[calc(100vw-1rem)] sm:max-w-sm',
+  md: 'max-w-[calc(100vw-1rem)] sm:max-w-lg',
+  lg: 'max-w-[calc(100vw-1rem)] sm:max-w-2xl',
+  xl: 'max-w-[calc(100vw-1rem)] sm:max-w-4xl',
 };
 
 export default function Modal({
@@ -41,14 +41,14 @@ export default function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-2 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
     >
       <div className="absolute inset-0 bg-foreground/40 backdrop-blur-sm" onClick={onClose} />
       <div
-        className={`relative flex max-h-[90vh] w-full ${sizeMap[size]} flex-col rounded-xl border border-border bg-card shadow-modal slide-up`}
+        className={`relative flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] min-w-0 ${sizeMap[size]} flex-col overflow-hidden rounded-xl border border-border bg-card shadow-modal slide-up sm:max-h-[90vh] sm:w-full`}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-6">
           <div className="min-w-0">
@@ -65,7 +65,9 @@ export default function Modal({
             <X size={16} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 scrollbar-thin sm:px-6">{children}</div>
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-4 scrollbar-thin sm:px-6">
+          {children}
+        </div>
         {footer && (
           <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6 [&>button]:w-full sm:[&>button]:w-auto">
             {footer}

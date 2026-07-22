@@ -24,7 +24,6 @@ interface PaymentPanelProps {
   subtotal: number;
   discountTotal: number;
   taxAmount: number;
-  grandTotal: number;
   globalDiscount: number;
   setGlobalDiscount: (v: number) => void;
   customerName: string;
@@ -37,6 +36,10 @@ interface PaymentPanelProps {
   isProcessing: boolean;
   currency: string;
   taxLabel: string;
+  loyaltyPointsToRedeem: number;
+  setLoyaltyPointsToRedeem: (value: number) => void;
+  loyaltyCreditAmount: number;
+  amountToPay: number;
 }
 
 const QUICK_AMOUNTS_BY_CURRENCY: Record<string, number[]> = {
@@ -51,7 +54,6 @@ export default function PaymentPanel({
   subtotal,
   discountTotal,
   taxAmount,
-  grandTotal,
   globalDiscount,
   setGlobalDiscount,
   customerName,
@@ -64,16 +66,31 @@ export default function PaymentPanel({
   isProcessing,
   currency,
   taxLabel,
+  loyaltyPointsToRedeem,
+  setLoyaltyPointsToRedeem,
+  loyaltyCreditAmount,
+  amountToPay,
 }: PaymentPanelProps) {
-  const { customers, hasPermission } = usePosStore();
+  const { customers, hasPermission, settings } = usePosStore();
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const quickAmounts = QUICK_AMOUNTS_BY_CURRENCY[currency] ?? QUICK_AMOUNTS_BY_CURRENCY.NGN;
   const currencyPrefix = getCurrencyInputPrefix(currency);
   const tenderedAmount = Number(cashTendered);
   const change =
-    paymentMethod === 'cash' && Number.isFinite(tenderedAmount) ? tenderedAmount - grandTotal : 0;
+    paymentMethod === 'cash' && Number.isFinite(tenderedAmount) ? tenderedAmount - amountToPay : 0;
   const isChangeReady =
-    paymentMethod === 'cash' && Number.isFinite(tenderedAmount) && tenderedAmount >= grandTotal;
+    paymentMethod === 'cash' && Number.isFinite(tenderedAmount) && tenderedAmount >= amountToPay;
+  const selectedCustomer = customers.find(
+    (customer) =>
+      customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
+      customer.phone === customerName.trim()
+  );
+  const loyaltyEligible = Boolean(
+    settings.loyaltyEnabled &&
+    selectedCustomer &&
+    selectedCustomer.loyaltyPoints >= Number(settings.loyaltyRedemptionThreshold ?? 0) &&
+    paymentMethod !== 'credit'
+  );
 
   return (
     <div className="flex h-auto flex-col overflow-visible border-t border-border lg:h-full lg:overflow-hidden lg:border-l lg:border-t-0">
@@ -110,7 +127,7 @@ export default function PaymentPanel({
             />
             {showCustomerDropdown && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-modal z-20 overflow-hidden fade-in">
-                <div className="py-1">
+                <div className="max-h-64 overflow-y-auto overscroll-contain py-1 scrollbar-thin">
                   <div
                     className="px-3 py-2 hover:bg-muted cursor-pointer"
                     onMouseDown={() => {
@@ -118,13 +135,12 @@ export default function PaymentPanel({
                     }}
                   >
                     <p className="text-sm text-foreground">Walk-in Customer</p>
-                    <p className="text-[10px] text-muted-foreground">No loyalty points</p>
+                    <p className="text-[10px] text-muted-foreground">No loyalty credit</p>
                   </div>
                   {customers
                     .filter((customer) =>
                       customer.name.toLowerCase().includes(customerName.toLowerCase())
                     )
-                    .slice(0, 6)
                     .map((c) => (
                       <div
                         key={c.id}
@@ -134,7 +150,7 @@ export default function PaymentPanel({
                         <div className="flex items-center justify-between">
                           <p className="text-sm text-foreground">{c.name}</p>
                           <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
-                            {c.loyaltyPoints.toLocaleString()} pts
+                            {formatMoney(c.loyaltyPoints, currency)} credit
                           </span>
                         </div>
                         <p className="text-[10px] text-muted-foreground">
@@ -147,6 +163,55 @@ export default function PaymentPanel({
             )}
           </div>
         </div>
+
+        {selectedCustomer && settings.loyaltyEnabled && (
+          <div className="border-b border-border px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-foreground">Loyalty credit</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {formatMoney(selectedCustomer.loyaltyPoints, currency)} available
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={!loyaltyEligible}
+                onClick={() =>
+                  setLoyaltyPointsToRedeem(
+                    loyaltyPointsToRedeem > 0 ? 0 : selectedCustomer.loyaltyPoints
+                  )
+                }
+                className="rounded-md border border-primary/30 px-2 py-1 text-xs font-semibold text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loyaltyPointsToRedeem > 0 ? 'Remove' : 'Use credit'}
+              </button>
+            </div>
+            {!loyaltyEligible && (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Available after{' '}
+                {formatMoney(Number(settings.loyaltyRedemptionThreshold ?? 0), currency)} credit.
+              </p>
+            )}
+            {loyaltyEligible && loyaltyPointsToRedeem > 0 && (
+              <input
+                type="number"
+                min="0"
+                max={selectedCustomer.loyaltyPoints}
+                value={loyaltyPointsToRedeem}
+                onChange={(event) =>
+                  setLoyaltyPointsToRedeem(Math.max(0, Number(event.target.value) || 0))
+                }
+                className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                aria-label="Loyalty credit to use"
+              />
+            )}
+            {loyaltyCreditAmount > 0 && (
+              <p className="mt-1 text-xs font-semibold text-success">
+                Credit applied: -{formatMoney(loyaltyCreditAmount, currency)}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Order Discount */}
         <div className="px-4 py-3 border-b border-border">
@@ -223,7 +288,7 @@ export default function PaymentPanel({
             <div className="flex justify-between text-base font-bold pt-2 border-t border-border mt-2">
               <span className="text-foreground">Total</span>
               <span className="font-tabular text-primary text-lg">
-                {formatMoney(grandTotal, currency)}
+                {formatMoney(amountToPay, currency)}
               </span>
             </div>
           </div>
@@ -295,7 +360,7 @@ export default function PaymentPanel({
                 </button>
               ))}
               <button
-                onClick={() => setCashTendered(grandTotal.toFixed(2))}
+                onClick={() => setCashTendered(amountToPay.toFixed(2))}
                 className="min-h-9 flex-1 rounded-md bg-primary/10 px-2 py-1.5 text-xs font-semibold text-primary transition-colors duration-100 hover:bg-primary/20 active:scale-95 sm:col-span-1"
               >
                 Exact
@@ -356,7 +421,7 @@ export default function PaymentPanel({
               <p className="text-xs text-muted-foreground/70">
                 Amount:{' '}
                 <span className="font-tabular font-semibold text-primary">
-                  {formatMoney(grandTotal, currency)}
+                  {formatMoney(amountToPay, currency)}
                 </span>
               </p>
             </div>
@@ -383,7 +448,7 @@ export default function PaymentPanel({
           ) : (
             <>
               <CheckCircle2 size={18} />
-              <span>Charge {formatMoney(grandTotal, currency)}</span>
+              <span>Charge {formatMoney(amountToPay, currency)}</span>
             </>
           )}
         </button>

@@ -8,6 +8,8 @@ import PermissionGate from '@/components/PermissionGate';
 import { formatMoney } from '@/lib/pos/money';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { CreditPaymentMethod, SaleTransaction } from '@/lib/pos/types';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import ListPagination from '@/components/ui/ListPagination';
 
 const paymentMethods: { id: CreditPaymentMethod; label: string; icon: React.ElementType }[] = [
   { id: 'cash', label: 'Cash', icon: Wallet },
@@ -44,6 +46,8 @@ export default function CreditSalesPage() {
   const [method, setMethod] = useState<CreditPaymentMethod>('cash');
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [rowsPerPage] = useRowsPerPage();
+  const [page, setPage] = useState(1);
 
   const creditSales = useMemo(
     () =>
@@ -69,6 +73,9 @@ export default function CreditSalesPage() {
       `${sale.transactionId} ${sale.customerName ?? ''} ${sale.cashier}`.toLowerCase();
     return matchesStatus && haystack.includes(query.trim().toLowerCase());
   });
+  const totalPages = Math.max(1, Math.ceil(filteredSales.length / rowsPerPage));
+  const visibleSales = filteredSales.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  React.useEffect(() => setPage(1), [query, rowsPerPage, statusFilter, filteredSales.length]);
 
   const fillFullAmount = () => {
     if (!selectedSale) return;
@@ -190,7 +197,7 @@ export default function CreditSalesPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredSales.map((sale) => {
+                      visibleSales.map((sale) => {
                         const active = selectedSale?.id === sale.id;
                         return (
                           <tr
@@ -232,6 +239,12 @@ export default function CreditSalesPage() {
                   </tbody>
                 </table>
               </div>
+              <ListPagination
+                page={Math.min(page, totalPages)}
+                totalItems={filteredSales.length}
+                rowsPerPage={rowsPerPage}
+                onPageChange={setPage}
+              />
             </div>
 
             <aside className="rounded-xl border border-border bg-white p-4 shadow-card">

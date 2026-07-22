@@ -6,12 +6,19 @@ import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import Modal from '@/components/ui/Modal';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import ListPagination from '@/components/ui/ListPagination';
 
 export default function ExpenseHeadsPage() {
   const { settings, updateSettings, expenses } = usePosStore();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [rowsPerPage] = useRowsPerPage();
+  const [page, setPage] = useState(1);
   const expenseHeads = settings.expenseCategories ?? [];
+  const totalPages = Math.max(1, Math.ceil(expenseHeads.length / rowsPerPage));
+  const visibleExpenseHeads = expenseHeads.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  React.useEffect(() => setPage(1), [expenseHeads.length, rowsPerPage]);
 
   const addExpenseHead = async () => {
     const expenseHead = name.trim();
@@ -56,7 +63,7 @@ export default function ExpenseHeadsPage() {
                   No expense heads yet. Add your first expense head.
                 </div>
               ) : (
-                expenseHeads.map((expenseHead) => {
+                visibleExpenseHeads.map((expenseHead) => {
                   const count = expenses.filter(
                     (expense) => expense.category === expenseHead
                   ).length;
@@ -87,6 +94,12 @@ export default function ExpenseHeadsPage() {
                 })
               )}
             </div>
+            <ListPagination
+              page={Math.min(page, totalPages)}
+              totalItems={expenseHeads.length}
+              rowsPerPage={rowsPerPage}
+              onPageChange={setPage}
+            />
           </section>
         </div>
 

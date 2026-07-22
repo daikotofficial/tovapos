@@ -14,12 +14,16 @@ import {
   Settings,
   ShieldCheck,
   Wifi,
+  Trash2,
+  Plus,
 } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { BusinessSettings } from '@/lib/pos/types';
+import AppImage from '@/components/ui/AppImage';
+import { toast } from 'sonner';
 import {
   getProductUsage,
   subscriptionPlans,
@@ -27,7 +31,7 @@ import {
 } from '@/lib/pos/subscription';
 
 export default function SettingsPage() {
-  const { settings, updateSettings, pendingSyncCount, inventory } = usePosStore();
+  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated } = usePosStore();
   const [form, setForm] = useState<BusinessSettings>(settings);
   const [saved, setSaved] = useState(false);
   const productUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
@@ -38,13 +42,9 @@ export default function SettingsPage() {
   }, [settings]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
-    const previousTheme = root.dataset.theme;
-    const previousPrimary = root.style.getPropertyValue('--primary');
-    const previousRing = root.style.getPropertyValue('--ring');
-    const previousFont = root.style.getPropertyValue('--font-sans');
-
     const nextTheme = form.themeMode ?? 'light';
     root.dataset.theme = nextTheme;
     window.localStorage.setItem('tovapos.themeMode', nextTheme);
@@ -58,22 +58,17 @@ export default function SettingsPage() {
         `${form.fontFamily}, ui-sans-serif, system-ui, sans-serif`
       );
     }
-
-    return () => {
-      root.dataset.theme = previousTheme ?? settings.themeMode ?? 'light';
-      if (previousPrimary) root.style.setProperty('--primary', previousPrimary);
-      else root.style.removeProperty('--primary');
-      if (previousRing) root.style.setProperty('--ring', previousRing);
-      else root.style.removeProperty('--ring');
-      if (previousFont) root.style.setProperty('--font-sans', previousFont);
-      else root.style.removeProperty('--font-sans');
-    };
-  }, [form.fontFamily, form.themeColor, form.themeMode, settings.themeMode]);
+  }, [form.fontFamily, form.themeColor, form.themeMode, isHydrated]);
 
   const save = async () => {
-    await updateSettings(form);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1800);
+    try {
+      await updateSettings(form);
+      setSaved(true);
+      toast.success('Settings saved successfully.');
+      window.setTimeout(() => setSaved(false), 1800);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to save settings.');
+    }
   };
 
   const changePlan = async (subscriptionPlanId: SubscriptionPlanId) => {
@@ -83,8 +78,13 @@ export default function SettingsPage() {
       subscriptionStatus: 'active',
     };
     setForm(nextSettings);
-    await updateSettings(nextSettings);
-    setSaved(true);
+    try {
+      await updateSettings(nextSettings);
+      setSaved(true);
+      toast.success('Plan updated successfully.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update plan.');
+    }
     window.setTimeout(() => setSaved(false), 1800);
   };
 
@@ -96,7 +96,31 @@ export default function SettingsPage() {
       <AccountSecurityCard />
       <PermissionGate permission="settings">
         <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
-          <div className="bg-card border border-border rounded-xl shadow-card">
+          <nav className="sticky top-0 z-10 flex gap-2 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 shadow-card backdrop-blur scrollbar-thin">
+            {[
+              ['subscription', 'Plan'],
+              ['loyalty', 'Loyalty'],
+              ['business-profile', 'Business'],
+              ['tax-receipts', 'Tax & Receipts'],
+              ['tax-types', 'Tax Types'],
+              ['alerts', 'Alerts'],
+              ['pos-rules', 'POS Rules'],
+              ['branches', 'Branches'],
+              ['appearance', 'Appearance'],
+            ].map(([id, label]) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                className="whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+              >
+                {label}
+              </a>
+            ))}
+          </nav>
+          <div
+            id="subscription"
+            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+          >
             <div className="px-4 py-3 border-b border-border flex items-center gap-2">
               <CreditCard size={16} className="text-primary" />
               <span className="text-sm font-semibold">Subscription & Plan</span>
@@ -168,7 +192,78 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="bg-card border border-border rounded-xl shadow-card">
+          <div
+            id="loyalty"
+            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+          >
+            <div className="px-4 py-3 border-b border-border">
+              <span className="text-sm font-semibold">Customer Loyalty</span>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Configure monetary loyalty credit earned from paid purchases and when it can be
+                used.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
+              <label className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-3 md:col-span-2">
+                <span>
+                  <span className="block text-sm font-medium">Enable customer loyalty</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Credit sales do not earn or redeem loyalty credit.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={form.loyaltyEnabled ?? false}
+                  onChange={(event) => setForm({ ...form, loyaltyEnabled: event.target.checked })}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">Loyalty credit earned (%)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.loyaltyEarnPercent ?? 1}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      loyaltyEarnPercent: Math.max(0, Number(event.target.value) || 0),
+                    })
+                  }
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  Example: 1% of NGN 100,000 adds NGN 1,000 to the customer&apos;s loyalty credit.
+                </span>
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">
+                  Minimum loyalty credit before use
+                </span>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={form.loyaltyRedemptionThreshold ?? 100}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      loyaltyRedemptionThreshold: Math.max(0, Number(event.target.value) || 0),
+                    })
+                  }
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  The credit stays on the customer account until it reaches this amount.
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div
+            id="business-profile"
+            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+          >
             <div className="px-4 py-3 border-b border-border flex items-center gap-2">
               <Building2 size={16} className="text-primary" />
               <span className="text-sm font-semibold">Business Profile</span>
@@ -183,13 +278,33 @@ export default function SettingsPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Logo URL</span>
+                <span className="text-xs text-muted-foreground">Company logo</span>
                 <input
-                  value={form.logoUrl ?? ''}
-                  onChange={(e) => setForm({ ...form, logoUrl: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                  placeholder="https://..."
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (file.size > 2 * 1024 * 1024) {
+                      toast.error('Logo must be 2 MB or smaller.');
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = () => setForm({ ...form, logoUrl: String(reader.result) });
+                    reader.readAsDataURL(file);
+                  }}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                 />
+                {form.logoUrl && (
+                  <AppImage
+                    src={form.logoUrl}
+                    alt="Company logo preview"
+                    width={72}
+                    height={72}
+                    className="mt-2 h-16 w-16 rounded object-contain"
+                    unoptimized
+                  />
+                )}
               </label>
               <label className="space-y-1">
                 <span className="text-xs text-muted-foreground">Phone</span>
@@ -218,7 +333,10 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="bg-card border border-border rounded-xl shadow-card">
+          <div
+            id="tax-receipts"
+            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+          >
             <div className="px-4 py-3 border-b border-border flex items-center gap-2">
               <Receipt size={16} className="text-primary" />
               <span className="text-sm font-semibold">Tax, Receipts & Payments</span>
@@ -254,16 +372,16 @@ export default function SettingsPage() {
                     setForm({ ...form, taxMode: taxMode as BusinessSettings['taxMode'] })
                   }
                   options={[
-                    { value: 'exclusive', label: 'VAT exclusive' },
-                    { value: 'inclusive', label: 'VAT inclusive' },
+                    { value: 'exclusive', label: 'VAT exempt (no VAT)' },
+                    { value: 'inclusive', label: 'VAT applies (add separately)' },
                   ]}
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Tax / VAT Number</span>
+                <span className="text-xs text-muted-foreground">Tax Name</span>
                 <input
-                  value={form.taxNumber ?? ''}
-                  onChange={(e) => setForm({ ...form, taxNumber: e.target.value })}
+                  value={form.taxName ?? form.taxNumber ?? ''}
+                  onChange={(e) => setForm({ ...form, taxName: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-border bg-background"
                 />
               </label>
@@ -283,11 +401,132 @@ export default function SettingsPage() {
                   className="w-full px-3 py-2 rounded-lg border border-border bg-background min-h-24"
                 />
               </label>
+              <div className="grid gap-3 border-t border-border pt-4 md:col-span-2 md:grid-cols-3">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.receiptShowLogo ?? true}
+                    onChange={(e) => setForm({ ...form, receiptShowLogo: e.target.checked })}
+                  />
+                  Show logo on receipt
+                </label>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.receiptShowBusinessDetails ?? true}
+                    onChange={(e) =>
+                      setForm({ ...form, receiptShowBusinessDetails: e.target.checked })
+                    }
+                  />
+                  Show business contact
+                </label>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.receiptShowCustomer ?? true}
+                    onChange={(e) => setForm({ ...form, receiptShowCustomer: e.target.checked })}
+                  />
+                  Show customer details
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div
+            id="tax-types"
+            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+          >
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <span className="text-sm font-semibold">VAT / Tax types</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    taxRates: [
+                      ...(form.taxRates ?? []),
+                      {
+                        id: `tax-${Date.now()}`,
+                        name: 'New tax',
+                        rate: 0,
+                        mode: 'exclusive',
+                        active: true,
+                      },
+                    ],
+                  })
+                }
+                className="inline-flex items-center gap-1 rounded-lg bg-secondary px-3 py-2 text-xs font-semibold"
+              >
+                <Plus size={13} /> Add tax
+              </button>
+            </div>
+            <div className="space-y-2 p-5">
+              {(form.taxRates ?? []).map((tax, index) => (
+                <div
+                  key={tax.id}
+                  className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_120px_160px_auto]"
+                >
+                  <input
+                    value={tax.name}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        taxRates: form.taxRates!.map((item, i) =>
+                          i === index ? { ...item, name: e.target.value } : item
+                        ),
+                      })
+                    }
+                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    placeholder="VAT"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={tax.rate}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        taxRates: form.taxRates!.map((item, i) =>
+                          i === index ? { ...item, rate: Number(e.target.value) } : item
+                        ),
+                      })
+                    }
+                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                  <NiceSelect
+                    value={tax.mode}
+                    onChange={(mode) =>
+                      setForm({
+                        ...form,
+                        taxRates: form.taxRates!.map((item, i) =>
+                          i === index ? { ...item, mode: mode as 'inclusive' | 'exclusive' } : item
+                        ),
+                      })
+                    }
+                    options={[
+                      { value: 'exclusive', label: 'VAT exempt (no VAT)' },
+                      { value: 'inclusive', label: 'VAT applies (add separately)' },
+                    ]}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm({ ...form, taxRates: form.taxRates!.filter((_, i) => i !== index) })
+                    }
+                    className="text-danger"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div className="bg-card border border-border rounded-xl shadow-card">
+            <div
+              id="alerts"
+              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+            >
               <div className="px-4 py-3 border-b border-border flex items-center gap-2">
                 <Bell size={16} className="text-primary" />
                 <span className="text-sm font-semibold">Alerts & Notifications</span>
@@ -374,7 +613,10 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-xl shadow-card">
+            <div
+              id="pos-rules"
+              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+            >
               <div className="px-4 py-3 border-b border-border flex items-center gap-2">
                 <ShieldCheck size={16} className="text-primary" />
                 <span className="text-sm font-semibold">POS Rules</span>
@@ -452,7 +694,10 @@ export default function SettingsPage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div className="bg-card border border-border rounded-xl shadow-card">
+            <div
+              id="branches"
+              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+            >
               <div className="px-4 py-3 border-b border-border flex items-center gap-2">
                 <Settings size={16} className="text-primary" />
                 <span className="text-sm font-semibold">Branches</span>
@@ -469,7 +714,10 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-xl shadow-card">
+            <div
+              id="appearance"
+              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+            >
               <div className="px-4 py-3 border-b border-border flex items-center gap-2">
                 <Palette size={16} className="text-primary" />
                 <span className="text-sm font-semibold">Appearance & Connection Recovery</span>
@@ -560,12 +808,33 @@ export default function SettingsPage() {
 }
 
 function AccountSecurityCard() {
+  const { currentUser, upsertUser } = usePosStore();
+  const [profileName, setProfileName] = useState(currentUser?.name ?? '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    setProfileName(currentUser?.name ?? '');
+  }, [currentUser?.name]);
+
+  const saveProfile = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const name = profileName.trim();
+    if (!currentUser || !name) {
+      toast.error('Your display name is required.');
+      return;
+    }
+    try {
+      await upsertUser({ ...currentUser, name });
+      toast.success('Profile updated successfully.');
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'Unable to update profile.');
+    }
+  };
 
   const changePassword = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -606,6 +875,31 @@ function AccountSecurityCard() {
           <span className="text-sm font-semibold">Account & Security</span>
         </div>
         <div className="p-5">
+          <form onSubmit={saveProfile} className="mb-6 space-y-3 border-b border-border pb-6">
+            <div>
+              <p className="text-sm font-semibold">Profile</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Update the name shown beside Logout and throughout the app.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <label className="min-w-0 flex-1 space-y-1">
+                <span className="text-xs text-muted-foreground">Your display name</span>
+                <input
+                  value={profileName}
+                  onChange={(event) => setProfileName(event.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                  autoComplete="name"
+                />
+              </label>
+              <button
+                type="submit"
+                className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-white"
+              >
+                Save Profile
+              </button>
+            </div>
+          </form>
           <form onSubmit={changePassword} className="space-y-3">
             <div>
               <p className="text-sm font-semibold">Change Password</p>

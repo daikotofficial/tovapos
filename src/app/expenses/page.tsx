@@ -10,6 +10,8 @@ import NiceSelect from '@/components/ui/NiceSelect';
 import { formatMoney } from '@/lib/pos/money';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { ExpenseCategory, ExpensePaymentMethod, RecordExpenseInput } from '@/lib/pos/types';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import ListPagination from '@/components/ui/ListPagination';
 
 const paymentMethods: ExpensePaymentMethod[] = ['cash', 'card', 'bank-transfer', 'mobile'];
 
@@ -48,6 +50,8 @@ export default function ExpensesPage() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<ExpenseCategory | 'all'>('all');
   const [saving, setSaving] = useState(false);
+  const [rowsPerPage] = useRowsPerPage();
+  const [page, setPage] = useState(1);
 
   const activeExpenses = expenses.filter((expense) => expense.status === 'recorded');
   const filtered = useMemo(
@@ -61,6 +65,9 @@ export default function ExpensesPage() {
       }),
     [activeExpenses, categoryFilter, search]
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
+  const visibleExpenses = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  React.useEffect(() => setPage(1), [categoryFilter, rowsPerPage, search, filtered.length]);
 
   const totals = useMemo(() => {
     const total = activeExpenses.reduce((sum, expense) => sum + expense.amount, 0);
@@ -197,7 +204,7 @@ export default function ExpensesPage() {
                         </td>
                       </tr>
                     ) : (
-                      filtered.map((expense) => (
+                      visibleExpenses.map((expense) => (
                         <tr key={expense.id}>
                           <td className="px-4 py-3">
                             <p className="font-medium">{expense.title}</p>
@@ -220,6 +227,12 @@ export default function ExpensesPage() {
                   </tbody>
                 </table>
               </div>
+              <ListPagination
+                page={Math.min(page, totalPages)}
+                totalItems={filtered.length}
+                rowsPerPage={rowsPerPage}
+                onPageChange={setPage}
+              />
             </div>
 
             <div className="rounded-xl border border-border bg-card p-4 shadow-card">

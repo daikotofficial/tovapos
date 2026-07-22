@@ -29,7 +29,10 @@ import {
   type SalesMetrics,
 } from '@/lib/pos/local-store';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import RowsPerPageSelect from '@/components/ui/RowsPerPageSelect';
 import type { Permission, SaleTransaction } from '@/lib/pos/types';
+import { toast } from 'sonner';
 
 type ReportView = string;
 
@@ -475,9 +478,14 @@ function ReportsContent() {
       ? requestedView!
       : 'overview';
   const [range, setRange] = useState<ReportRange>(() => createRange('1m'));
+  const [draftRange, setDraftRange] = useState<ReportRange>(() => createRange('1m'));
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
   const [serverReportRows, setServerReportRows] = useState<Record<string, unknown[]>>({});
+
+  useEffect(() => {
+    setDraftRange(range);
+  }, [range]);
 
   useEffect(() => {
     let cancelled = false;
@@ -800,6 +808,22 @@ function ReportsContent() {
   const maxExpense = Math.max(...data.expensesByCategory.map((item) => item[1]), 1);
   const rangeLabel =
     range.preset === 'all' ? 'All time' : `${range.from || 'Start'} to ${range.to || 'Today'}`;
+  const draftHasChanges =
+    draftRange.from !== range.from ||
+    draftRange.to !== range.to ||
+    draftRange.preset !== range.preset;
+  const applyCustomRange = () => {
+    if (!draftRange.from || !draftRange.to) {
+      toast.error('Select both a start date and an end date.');
+      return;
+    }
+    if (draftRange.from > draftRange.to) {
+      toast.error('Start date cannot be after the end date.');
+      return;
+    }
+    setRange({ ...draftRange, preset: 'custom' });
+    toast.success(`Date range applied: ${draftRange.from} to ${draftRange.to}`);
+  };
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
 
   const exportTable = useMemo(() => {
@@ -1169,7 +1193,11 @@ function ReportsContent() {
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => setRange(createRange(preset.id))}
+                    onClick={() => {
+                      const nextRange = createRange(preset.id);
+                      setDraftRange(nextRange);
+                      setRange(nextRange);
+                    }}
                     className={`h-9 rounded-md border px-3 text-sm font-semibold transition-colors ${
                       range.preset === preset.id
                         ? 'border-primary bg-primary/10 text-primary'
@@ -1182,15 +1210,15 @@ function ReportsContent() {
               </div>
 
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                   <label className="space-y-1">
                     <span className="text-[10px] font-bold uppercase text-muted-foreground">
                       From
                     </span>
                     <DatePicker
-                      value={range.from}
+                      value={draftRange.from}
                       onChange={(from) =>
-                        setRange((current) => ({
+                        setDraftRange((current) => ({
                           ...current,
                           from,
                           preset: 'custom',
@@ -1203,9 +1231,9 @@ function ReportsContent() {
                       To
                     </span>
                     <DatePicker
-                      value={range.to}
+                      value={draftRange.to}
                       onChange={(to) =>
-                        setRange((current) => ({
+                        setDraftRange((current) => ({
                           ...current,
                           to,
                           preset: 'custom',
@@ -1213,6 +1241,17 @@ function ReportsContent() {
                       }
                     />
                   </label>
+                </div>
+
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
+                  <button
+                    type="button"
+                    onClick={applyCustomRange}
+                    disabled={!draftRange.from || !draftRange.to || !draftHasChanges}
+                    className="h-10 rounded-md bg-primary px-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Apply range
+                  </button>
                 </div>
 
                 {hasPermission('export-reports') && (
@@ -1254,8 +1293,10 @@ function ReportsContent() {
               </div>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Showing {rangeLabel}. Sales, profit, expenses, and stock ledger use this period;
-              inventory and customer balances show their current state.
+              Active date range: <span className="font-semibold text-foreground">{rangeLabel}</span>
+              .{draftHasChanges ? ' Select Apply range to update the reports.' : ' '}
+              Sales, profit, expenses, and stock ledger use this period; inventory and customer
+              balances show their current state.
             </p>
           </section>
 
@@ -1881,6 +1922,12 @@ function ReportTable({
   rows: string[][];
   empty: string;
 }) {
+  const [rowsPerPage] = useRowsPerPage();
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
+  useEffect(() => setPage(1), [rows.length, rowsPerPage]);
+  const visibleRows = rows.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-white shadow-card">
       <div className="border-b border-border px-4 py-3">
@@ -1909,7 +1956,7 @@ function ReportTable({
                 </td>
               </tr>
             ) : (
-              rows.map((row, index) => (
+              visibleRows.map((row, index) => (
                 <tr key={`${row[0]}-${index}`} className="hover:bg-muted/30">
                   {row.map((cell, cellIndex) => (
                     <td
@@ -1924,6 +1971,38 @@ function ReportTable({
             )}
           </tbody>
         </table>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-muted/20 px-4 py-2">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <RowsPerPageSelect />
+          <span>
+            Showing {rows.length === 0 ? 0 : (page - 1) * rowsPerPage + 1}-
+            {Math.min(page * rowsPerPage, rows.length)} of {rows.length}
+          </span>
+        </div>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={page === 1}
+              className="rounded px-2 py-1 text-xs disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <span className="px-2 text-xs text-muted-foreground">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              disabled={page === totalPages}
+              className="rounded px-2 py-1 text-xs disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
     </section>
   );

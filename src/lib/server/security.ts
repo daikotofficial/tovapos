@@ -30,7 +30,7 @@ export function publicUser(row: Record<string, unknown>): TovaUser {
   return {
     id: String(row.id),
     name: String(row.name),
-    email: String(row.email),
+    email: row.email ? String(row.email) : '',
     phone: row.phone ? String(row.phone) : undefined,
     role: row.role as UserRole,
     permissions: Array.isArray(row.permissions) ? (row.permissions as Permission[]) : [],
