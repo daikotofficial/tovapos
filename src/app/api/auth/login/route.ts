@@ -61,11 +61,7 @@ export async function POST(request: NextRequest) {
     }
     const candidate = result.rows[0];
     if (!candidate) {
-      throw new HttpError(
-        404,
-        'No TOVAPOS user was found with this email. Check the email address or register a new business.',
-        'ACCOUNT_NOT_FOUND'
-      );
+      throw new HttpError(401, 'The email or password is incorrect.', 'INVALID_CREDENTIALS');
     }
     if (candidate.status !== 'active') {
       throw new HttpError(

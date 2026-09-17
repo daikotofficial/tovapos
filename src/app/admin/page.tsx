@@ -987,7 +987,9 @@ export default function AdminPage() {
                               <div>
                                 <p className="text-sm font-semibold">{ticket.subject}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">
-                                  {ticket.tenantName} · {ticket.createdBy} · {ticket.priority}
+                                  {ticket.tenantName} ·{' '}
+                                  {ticket.businessMode === 'hospitality' ? 'Hospitality' : 'Retail'}{' '}
+                                  · {ticket.createdBy} · {ticket.priority}
                                 </p>
                               </div>
                               <span className={statusBadge}>{ticket.status}</span>
@@ -1003,7 +1005,9 @@ export default function AdminPage() {
                       <p className="text-sm font-semibold">Support Response</p>
                       {selectedTicket && (
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Replying to {selectedTicket.tenantName} · {selectedTicket.createdByEmail}
+                          Replying to {selectedTicket.tenantName} (
+                          {selectedTicket.businessMode === 'hospitality' ? 'Hospitality' : 'Retail'}
+                          ) · {selectedTicket.createdByEmail}
                         </p>
                       )}
                       <textarea

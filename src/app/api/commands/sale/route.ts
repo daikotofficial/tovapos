@@ -54,7 +54,8 @@ function parseItems(value: unknown): SaleCommandItem[] {
       discount < 0 ||
       discount > 100 ||
       !Number.isFinite(unitPrice) ||
-      unitPrice < 0
+      unitPrice < 0 ||
+      Math.abs(unitPrice * 100 - Math.round(unitPrice * 100)) > 1e-8
     ) {
       throw new HttpError(
         400,
@@ -90,7 +91,8 @@ export async function POST(request: NextRequest) {
     if (
       !['cash', 'card', 'mobile', 'bank-transfer', 'split', 'credit'].includes(paymentMethod) ||
       !Number.isFinite(cashTendered) ||
-      cashTendered < 0
+      cashTendered < 0 ||
+      Math.abs(cashTendered * 100 - Math.round(cashTendered * 100)) > 1e-8
     ) {
       throw new HttpError(400, 'Payment method or tendered amount is invalid', 'VALIDATION_ERROR');
     }

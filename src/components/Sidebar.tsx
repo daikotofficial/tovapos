@@ -24,6 +24,9 @@ import {
   Tags,
   History,
   LifeBuoy,
+  BedDouble,
+  CalendarCheck,
+  ReceiptText,
 } from 'lucide-react';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission } from '@/lib/pos/types';
@@ -79,6 +82,24 @@ const navItems: NavItem[] = [
     order: 2,
   },
   {
+    id: 'nav-reservations',
+    label: 'Reservations',
+    href: '/reservations',
+    icon: CalendarCheck,
+    group: 'Operations',
+    permission: 'dashboard',
+    order: 4,
+  },
+  {
+    id: 'nav-rooms-services',
+    label: 'Rooms & Services',
+    href: '/rooms-services',
+    icon: BedDouble,
+    group: 'Operations',
+    permission: 'dashboard',
+    order: 5,
+  },
+  {
     id: 'nav-categories',
     label: 'Categories',
     href: '/categories',
@@ -104,6 +125,15 @@ const navItems: NavItem[] = [
     group: 'Money',
     permission: 'expenses',
     order: 1,
+  },
+  {
+    id: 'nav-input-vat',
+    label: 'Input VAT Register',
+    href: '/input-vat',
+    icon: ReceiptText,
+    group: 'Money',
+    permission: 'manage-tax',
+    order: 4,
   },
   {
     id: 'nav-expense-heads',
@@ -233,7 +263,24 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { inventory, hasPermission, currentUser, signOut, settings } = usePosStore();
+  const { inventory, hasPermission, currentUser, signOut, settings, activeBusinessMode } =
+    usePosStore();
+  const canUseHospitality = activeBusinessMode === 'hospitality';
+  const visibleNavItems = navItems.filter((item) => {
+    if (['nav-reservations', 'nav-rooms-services'].includes(item.id)) {
+      return canUseHospitality;
+    }
+    if (activeBusinessMode === 'hospitality') {
+      return ![
+        'nav-sales',
+        'nav-inventory',
+        'nav-categories',
+        'nav-vendors',
+        'nav-input-vat',
+      ].includes(item.id);
+    }
+    return true;
+  });
   const [reportsOpen, setReportsOpen] = useState(pathname === '/reports');
   const activeReport = searchParams.get('view') ?? 'overview';
   const lowStockCount = inventory.filter(
@@ -260,13 +307,15 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
             <span className="font-semibold text-sm text-foreground leading-tight">
               {settings.businessName || 'TOVAPOS'}
             </span>
-            <span className="text-xs text-muted-foreground leading-tight">Retail POS</span>
+            <span className="text-xs text-muted-foreground leading-tight">
+              {activeBusinessMode === 'hospitality' ? 'Hospitality' : 'Retail POS'}
+            </span>
           </div>
         )}
       </div>
 
       {/* Alerts Banner */}
-      {!collapsed && (
+      {!collapsed && activeBusinessMode !== 'hospitality' && (
         <div className="mx-3 mt-3 mb-1 flex items-center gap-2 bg-warning/10 border border-warning/20 rounded-md px-3 py-2">
           <AlertTriangle size={13} className="text-warning shrink-0" />
           <span className="text-xs text-warning font-medium">
@@ -278,7 +327,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
       {/* Nav */}
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin py-2 pb-4">
         {groups.map((group) => {
-          const items = navItems
+          const items = visibleNavItems
             .filter(
               (n) =>
                 n.group === group &&
@@ -288,8 +337,15 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
                   currentUser?.role === 'super-admin')
             )
             .sort((a, b) => a.order - b.order);
-          const showReports = group === 'Insights' && hasPermission('reports');
-          if (items.length === 0 && !showReports) return null;
+          const showReports =
+            group === 'Insights' &&
+            activeBusinessMode !== 'hospitality' &&
+            hasPermission('reports');
+          const showHospitalityReports =
+            group === 'Insights' &&
+            activeBusinessMode === 'hospitality' &&
+            hasPermission('reports');
+          if (items.length === 0 && !showReports && !showHospitalityReports) return null;
           return (
             <div key={`group-${group}`} className="mb-1">
               {!collapsed && (
@@ -350,16 +406,42 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
                   )}
                 </div>
               )}
+              {showHospitalityReports && (
+                <Link
+                  href="/hospitality-reports"
+                  onClick={onNavigate}
+                  className={`mx-2 flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition-colors ${pathname === '/hospitality-reports' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'} ${collapsed ? 'justify-center px-2' : ''}`}
+                >
+                  <TrendingUp size={18} className="shrink-0" />
+                  {!collapsed && <span className="truncate">Reports</span>}
+                </Link>
+              )}
 
               {items.map((item) => {
                 const Icon = item.icon;
-                const isActive = pathname === item.href;
+                const destination =
+                  activeBusinessMode === 'hospitality' && item.id === 'nav-customers'
+                    ? '/guests'
+                    : item.href;
+                const isActive = pathname === destination;
+                const displayLabel =
+                  activeBusinessMode === 'hospitality'
+                    ? item.id === 'nav-customers'
+                      ? 'Guests'
+                      : item.id === 'nav-credit-sales'
+                        ? 'Unpaid Bookings'
+                        : item.id === 'nav-expenses'
+                          ? 'Hospitality Expenses'
+                          : item.id === 'nav-expense-heads'
+                            ? 'Hospitality Expense Heads'
+                            : item.label
+                    : item.label;
                 const badge = item.id === 'nav-inventory' ? lowStockCount : (item.badge ?? 0);
                 const badgeColor = item.badgeColor ?? 'bg-warning text-white';
                 return (
                   <div key={item.id} className="relative group px-2">
                     <Link
-                      href={item.href}
+                      href={destination}
                       onClick={onNavigate}
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-all duration-150 ${
                         isActive
@@ -368,7 +450,9 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
                       } ${collapsed ? 'justify-center px-2' : ''}`}
                     >
                       <Icon size={18} className="shrink-0" />
-                      {!collapsed && <span className="text-sm flex-1 truncate">{item.label}</span>}
+                      {!collapsed && (
+                        <span className="text-sm flex-1 truncate">{displayLabel}</span>
+                      )}
                       {!collapsed && badge > 0 && (
                         <span
                           className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${badgeColor}`}
@@ -381,7 +465,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
                     {collapsed && (
                       <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                         <div className="bg-foreground text-background text-xs font-medium px-2 py-1.5 rounded-md whitespace-nowrap shadow-modal flex items-center gap-2">
-                          {item.label}
+                          {displayLabel}
                           {badge > 0 && (
                             <span
                               className={`text-[9px] font-semibold px-1 py-0.5 rounded-full ${badgeColor}`}

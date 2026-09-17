@@ -25,6 +25,8 @@ export async function POST(request: NextRequest) {
     if (!Number.isFinite(quantityDelta)) {
       throw new HttpError(400, 'Stock quantity change is invalid', 'VALIDATION_ERROR');
     }
+    const expectedUpdatedAt =
+      typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined;
     const operationId =
       typeof body.operationId === 'string' && /^[A-Za-z0-9:_-]{8,160}$/.test(body.operationId)
         ? body.operationId
@@ -76,6 +78,17 @@ export async function POST(request: NextRequest) {
       );
       const existing = existingResult.rows[0];
       if (!existing) assertPermission(auth, 'add-product');
+      if (
+        existing &&
+        expectedUpdatedAt &&
+        String(existing.data?.updatedAt ?? '') !== expectedUpdatedAt
+      ) {
+        throw new HttpError(
+          409,
+          'This product changed before the stock update was received. Reload it and try again.',
+          'STALE_INVENTORY_UPDATE'
+        );
+      }
       const before = existing ? Number(existing.current_qty) : 0;
       const after = before + quantityDelta;
       if (after < 0) {
@@ -88,7 +101,7 @@ export async function POST(request: NextRequest) {
       const now = new Date().toISOString();
       const saved: InventoryItem = {
         ...(existing ? (existing.data as InventoryItem) : product),
-        ...product,
+        ...(existing && !expectedUpdatedAt ? {} : product),
         currentQty: after,
         stockStatus: after === 0 ? 'out' : product.stockStatus,
         updatedAt: now,

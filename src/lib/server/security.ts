@@ -183,6 +183,7 @@ export async function assertTenantPlanPermission(
   tenantId: string,
   permission: Permission
 ): Promise<void> {
+  if (process.env.DEPLOYMENT_MODE === 'onprem') return;
   const result = await getPosPool().query(
     `SELECT data->>'subscriptionPlanId' AS plan_id
      FROM pos_tenant_records
@@ -252,9 +253,47 @@ export function errorResponse(error: unknown): NextResponse {
       { status: 409 }
     );
   }
+  if (isDatabaseUnavailableError(error)) {
+    return NextResponse.json(
+      {
+        error: 'The registration service is temporarily unavailable. Please try again in a moment.',
+        code: 'SERVICE_UNAVAILABLE',
+      },
+      { status: 503 }
+    );
+  }
   console.error('Secure API request failed', error);
   return NextResponse.json(
     { error: 'The request could not be completed', code: 'INTERNAL_ERROR' },
     { status: 500 }
+  );
+}
+
+function isDatabaseUnavailableError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === 'string' ? candidate.code : '';
+  if (
+    [
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'ETIMEDOUT',
+      '57P01',
+      '57P02',
+      '57P03',
+      '08000',
+      '08001',
+      '08003',
+      '08004',
+      '08006',
+    ].includes(code)
+  ) {
+    return true;
+  }
+  const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : '';
+  return (
+    message.includes('timeout exceeded when trying to connect') ||
+    message.includes('connect econnrefused') ||
+    message.includes('could not connect to server')
   );
 }

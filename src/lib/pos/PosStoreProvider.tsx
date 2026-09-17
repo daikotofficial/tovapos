@@ -65,7 +65,8 @@ import {
   warmInventoryCache,
 } from './local-store';
 import { defaultCustomers, defaultSettings, defaultUsers, defaultVendors } from './seeds';
-import { getProductUsage, planAllowsPermission } from './subscription';
+import { getProductUsage, isOnPremiseDeployment, planAllowsPermission } from './subscription';
+import { normalizeCustomerPhone } from './customer';
 
 interface PosStoreValue {
   tenant: { id: string; slug: string; name: string; status?: 'active' | 'suspended' } | null;
@@ -77,6 +78,7 @@ interface PosStoreValue {
   customers: Customer[];
   vendors: Vendor[];
   settings: BusinessSettings;
+  activeBusinessMode: 'retail' | 'hospitality';
   syncQueue: SyncQueueItem[];
   isHydrated: boolean;
   isOnline: boolean;
@@ -125,10 +127,14 @@ type VersionedInventoryItem = InventoryItem & {
 };
 
 const OFFLINE_SESSION_KEY = 'tovapos.offlineSession';
+const TAB_TENANT_KEY = 'tovapos.tabTenant';
+const OFFLINE_SINCE_KEY = 'tovapos.offlineSince';
+const OFFLINE_SALE_MAX_MS = 24 * 60 * 60 * 1000;
 
 type CachedSession = {
   user: TovaUser;
   tenant: { id: string; slug: string; name: string; status?: 'active' | 'suspended' };
+  cachedAt?: string;
 };
 
 function createTransactionId(): string {
@@ -164,8 +170,12 @@ const API_STORE_NAMES: Record<SyncQueueItem['entity'], string> = {
   vendor: 'vendors',
   settings: 'settings',
   expense: 'expenses',
+  inputVat: 'inputVat',
   expenseHead: 'expenses',
   report: 'reports',
+  hospitalityService: 'hospitalityServices',
+  hospitalityReservation: 'hospitalityReservations',
+  hospitalityGuest: 'hospitalityGuests',
 };
 
 function apiStoreName(entity: SyncQueueItem['entity']): string {
@@ -198,6 +208,24 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     failed: 0,
   });
   const [activeUserId, setActiveUserIdState] = useState('');
+
+  const activeBusinessMode: 'retail' | 'hospitality' =
+    settings.businessMode === 'hospitality'
+      ? 'hospitality'
+      : settings.businessMode === 'retail-hospitality'
+        ? (settings.activeBusinessMode ?? 'retail')
+        : 'retail';
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    void loadExpenses()
+      .then((records) =>
+        setExpenses(
+          records.filter((expense) => (expense.businessArea ?? 'retail') === activeBusinessMode)
+        )
+      )
+      .catch((error) => console.warn('Unable to refresh business-line expenses', error));
+  }, [activeBusinessMode, isHydrated]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [tenant, setTenant] = useState<{
     id: string;
@@ -221,6 +249,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
     const checkHealth = async () => {
       if (!navigator.onLine) {
+        if (!window.localStorage.getItem(OFFLINE_SINCE_KEY)) {
+          window.localStorage.setItem(OFFLINE_SINCE_KEY, new Date().toISOString());
+        }
         healthFailuresRef.current = 2;
         setIsOnline(false);
         setConnectivity((current) => ({
@@ -243,6 +274,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         if (!response.ok) throw new Error(`Health check returned ${response.status}`);
         if (cancelled) return;
         healthFailuresRef.current = 0;
+        window.localStorage.removeItem(OFFLINE_SINCE_KEY);
         setIsOnline(true);
         setConnectivity({
           status: 'online',
@@ -251,6 +283,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         });
       } catch {
         if (cancelled) return;
+        if (!window.localStorage.getItem(OFFLINE_SINCE_KEY)) {
+          window.localStorage.setItem(OFFLINE_SINCE_KEY, new Date().toISOString());
+        }
         healthFailuresRef.current += 1;
         const status = healthFailuresRef.current >= 2 ? 'offline' : 'degraded';
         setIsOnline(false);
@@ -323,8 +358,20 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
       if (sessionResponse?.ok) {
         session = (await sessionResponse.json()) as CachedSession;
-        window.localStorage.setItem(OFFLINE_SESSION_KEY, JSON.stringify(session));
+        window.localStorage.setItem(
+          OFFLINE_SESSION_KEY,
+          JSON.stringify({ ...session, cachedAt: new Date().toISOString() })
+        );
       } else if (sessionResponse && !sessionResponse.ok) {
+        window.localStorage.removeItem(OFFLINE_SESSION_KEY);
+      }
+
+      if (
+        !sessionResponse?.ok &&
+        session?.cachedAt &&
+        Date.now() - Date.parse(session.cachedAt) >= OFFLINE_SALE_MAX_MS
+      ) {
+        session = null;
         window.localStorage.removeItem(OFFLINE_SESSION_KEY);
       }
 
@@ -335,6 +382,22 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         setIsHydrated(true);
         return;
       }
+
+      const tabTenant = window.sessionStorage.getItem(TAB_TENANT_KEY);
+      if (tabTenant && tabTenant !== session.tenant.id) {
+        window.sessionStorage.removeItem(TAB_TENANT_KEY);
+        window.localStorage.removeItem(OFFLINE_SESSION_KEY);
+        if (cancelled) return;
+        setTenant(null);
+        setActiveUserIdState('');
+        setIsAuthenticated(false);
+        setIsHydrated(true);
+        console.warn(
+          'The sign-in session changed in another browser tab; tenant data was not loaded.'
+        );
+        return;
+      }
+      window.sessionStorage.setItem(TAB_TENANT_KEY, session.tenant.id);
 
       if (sessionResponse?.ok && navigator.onLine) {
         void warmInventoryCache().catch((error) =>
@@ -432,7 +495,17 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       setInventory(sortInventory(storedInventory));
       setSales(reconciledSales);
       setStockMovements(reconciledStockMovements);
-      setExpenses(storedExpenses);
+      const activeBusinessArea =
+        storedSettings.businessMode === 'hospitality' ||
+        (storedSettings.businessMode === 'retail-hospitality' &&
+          storedSettings.activeBusinessMode === 'hospitality')
+          ? 'hospitality'
+          : 'retail';
+      setExpenses(
+        storedExpenses.filter(
+          (expense) => (expense.businessArea ?? 'retail') === activeBusinessArea
+        )
+      );
       const sessionUser = session.user;
       setUsers(
         storedUsers.some((user) => user.id === sessionUser.id)
@@ -558,6 +631,8 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     operationId,
                     idempotencyKey: inventoryQueueItem.idempotencyKey,
                     product: inventoryQueueItem.payload,
+                    expectedUpdatedAt: (inventoryQueueItem.payload as VersionedInventoryItem)
+                      ._expectedUpdatedAt,
                     quantityDelta: movement?.quantityDelta ?? 0,
                     reason: movement?.reason,
                   }),
@@ -824,7 +899,19 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     if (!response.ok || !payload?.user) {
       throw new Error(payload?.error ?? 'Unable to sign in');
     }
+    setInventory([]);
+    setStockMovements([]);
+    setSales([]);
+    setExpenses([]);
+    setCustomers([]);
+    setVendors([]);
+    setSyncQueue([]);
+    setSettings(defaultSettings);
     setUsers([payload.user]);
+    if (payload.tenant) {
+      setLocalTenant(payload.tenant.id);
+      window.sessionStorage.setItem(TAB_TENANT_KEY, payload.tenant.id);
+    }
     setActiveUserIdState(payload.user.id);
     setIsAuthenticated(true);
     if (payload.tenant) setTenant(payload.tenant);
@@ -843,17 +930,38 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       throw new Error(payload?.error ?? 'Sign out could not be completed. Please try again.');
     }
     setLocalTenant('anonymous');
+    window.localStorage.removeItem(OFFLINE_SINCE_KEY);
+    window.sessionStorage.removeItem(TAB_TENANT_KEY);
+    setInventory([]);
+    setStockMovements([]);
+    setSales([]);
+    setExpenses([]);
+    setCustomers([]);
+    setVendors([]);
+    setSyncQueue([]);
+    setSettings(defaultSettings);
+    setUsers([]);
     setActiveUserIdState('');
     setIsAuthenticated(false);
     setTenant(null);
   }, [pendingSyncCount]);
 
   const registerBusiness = useCallback(async (input: RegisterBusinessInput) => {
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-    });
+    let response: Response;
+    try {
+      response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new Error(
+          'Unable to reach the registration service. Check your connection and try again.'
+        );
+      }
+      throw error;
+    }
     const payload = (await response.json().catch(() => null)) as {
       message?: string;
       developmentVerificationUrl?: string;
@@ -861,7 +969,12 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       error?: string;
     } | null;
     if (!response.ok || !payload?.message) {
-      throw new Error(payload?.error ?? 'Unable to register business');
+      throw new Error(
+        payload?.error ??
+          (response.status >= 500
+            ? 'Registration could not be completed right now. Please try again in a moment.'
+            : 'Unable to register business')
+      );
     }
     return {
       message: payload.message,
@@ -919,7 +1032,10 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           entity: 'inventory',
           entityId: normalized.id,
           action,
-          payload: normalized,
+          payload: {
+            ...normalized,
+            _expectedUpdatedAt: existingItem?.updatedAt,
+          },
         }),
         idempotencyKey: `stock:${operationId}`,
       };
@@ -979,6 +1095,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               idempotencyKey: `stock:${operationId}`,
               product: normalized,
               quantityDelta,
+              expectedUpdatedAt: existingItem?.updatedAt,
               reason: movement?.reason,
             }),
           });
@@ -1075,6 +1192,13 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   const upsertCustomer = useCallback(
     async (customer: Customer) => {
       const saved = { ...customer, updatedAt: new Date().toISOString() };
+      const phone = normalizeCustomerPhone(saved.phone);
+      if (!phone) throw new Error('Customer phone number is required.');
+      const duplicate = customers.find(
+        (existing) => existing.id !== saved.id && normalizeCustomerPhone(existing.phone) === phone
+      );
+      if (duplicate) throw new Error(`This phone number already belongs to ${duplicate.name}.`);
+      saved.phone = phone;
       const queueItem = createSyncQueueItem({
         entity: 'customer',
         entityId: saved.id,
@@ -1192,6 +1316,18 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           }
           await saveSettings(saved);
           setSettings(saved);
+          const refreshedExpenses = await loadExpenses();
+          const refreshedArea =
+            saved.businessMode === 'hospitality' ||
+            (saved.businessMode === 'retail-hospitality' &&
+              saved.activeBusinessMode === 'hospitality')
+              ? 'hospitality'
+              : 'retail';
+          setExpenses(
+            refreshedExpenses.filter(
+              (expense) => (expense.businessArea ?? 'retail') === refreshedArea
+            )
+          );
           return saved;
         }
       }
@@ -1199,6 +1335,15 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       await saveSettings(saved);
       await saveSyncQueueItem(queueItem);
       setSettings(saved);
+      const refreshedExpenses = await loadExpenses();
+      const refreshedArea =
+        saved.businessMode === 'hospitality' ||
+        (saved.businessMode === 'retail-hospitality' && saved.activeBusinessMode === 'hospitality')
+          ? 'hospitality'
+          : 'retail';
+      setExpenses(
+        refreshedExpenses.filter((expense) => (expense.businessArea ?? 'retail') === refreshedArea)
+      );
       setSyncQueue((prev) => [queueItem, ...prev]);
       return saved;
     },
@@ -1215,6 +1360,18 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       }
       if (saleInFlightRef.current) {
         throw new Error('A sale is already being completed. Please wait for it to finish.');
+      }
+      if (!isOnline && !settings.allowOfflineSales) {
+        throw new Error('Offline sales are disabled for this business.');
+      }
+      if (!isOnline) {
+        const offlineSince = window.localStorage.getItem(OFFLINE_SINCE_KEY);
+        const offlineSinceMs = offlineSince ? Date.parse(offlineSince) : NaN;
+        if (Number.isFinite(offlineSinceMs) && Date.now() - offlineSinceMs >= OFFLINE_SALE_MAX_MS) {
+          throw new Error(
+            'Offline sales are paused after 24 hours without a confirmed server connection. Reconnect before recording more sales.'
+          );
+        }
       }
 
       saleInFlightRef.current = true;
@@ -1779,40 +1936,44 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     [currentUser?.name, hasPermission, inventory, isOnline, sales]
   );
 
-  const recordExpense = useCallback(async (input: RecordExpenseInput) => {
-    const now = new Date().toISOString();
-    const expense: ExpenseRecord = {
-      id: `expense-${Date.now()}`,
-      expenseId: createExpenseId(),
-      title: input.title.trim(),
-      category: input.category,
-      amount: Number(input.amount) || 0,
-      paymentMethod: input.paymentMethod,
-      vendorName: input.vendorName?.trim() || undefined,
-      notes: input.notes?.trim() || undefined,
-      incurredAt: input.incurredAt,
-      recordedBy: input.recordedBy,
-      status: 'recorded',
-      syncStatus: 'pending',
-      createdAt: now,
-      updatedAt: now,
-    };
+  const recordExpense = useCallback(
+    async (input: RecordExpenseInput) => {
+      const now = new Date().toISOString();
+      const expense: ExpenseRecord = {
+        id: `expense-${Date.now()}`,
+        expenseId: createExpenseId(),
+        title: input.title.trim(),
+        category: input.category,
+        amount: Number(input.amount) || 0,
+        paymentMethod: input.paymentMethod,
+        vendorName: input.vendorName?.trim() || undefined,
+        notes: input.notes?.trim() || undefined,
+        incurredAt: input.incurredAt,
+        recordedBy: input.recordedBy,
+        status: 'recorded',
+        syncStatus: 'pending',
+        createdAt: now,
+        updatedAt: now,
+        businessArea: activeBusinessMode,
+      };
 
-    const queueItem = createSyncQueueItem({
-      entity: 'expense',
-      entityId: expense.id,
-      action: 'create',
-      payload: expense,
-    });
+      const queueItem = createSyncQueueItem({
+        entity: 'expense',
+        entityId: expense.id,
+        action: 'create',
+        payload: expense,
+      });
 
-    await saveExpense(expense);
-    await saveSyncQueueItem(queueItem);
-    setExpenses((prev) =>
-      [expense, ...prev].sort((a, b) => b.incurredAt.localeCompare(a.incurredAt))
-    );
-    setSyncQueue((prev) => [queueItem, ...prev]);
-    return expense;
-  }, []);
+      await saveExpense(expense);
+      await saveSyncQueueItem(queueItem);
+      setExpenses((prev) =>
+        [expense, ...prev].sort((a, b) => b.incurredAt.localeCompare(a.incurredAt))
+      );
+      setSyncQueue((prev) => [queueItem, ...prev]);
+      return expense;
+    },
+    [activeBusinessMode]
+  );
 
   const value = useMemo<PosStoreValue>(
     () => ({
@@ -1825,6 +1986,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       customers,
       vendors,
       settings,
+      activeBusinessMode,
       syncQueue,
       isHydrated,
       isOnline,
@@ -1864,6 +2026,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       customers,
       vendors,
       settings,
+      activeBusinessMode,
       syncQueue,
       isHydrated,
       isOnline,

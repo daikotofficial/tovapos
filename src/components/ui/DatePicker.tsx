@@ -97,7 +97,7 @@ export default function DatePicker({
 
       {open && (
         <div
-          className={`absolute left-0 z-50 w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card p-3 shadow-modal ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+          className={`absolute right-0 z-50 w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card p-3 shadow-modal sm:left-0 sm:right-auto ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <button

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { CartItem } from './CheckoutScreen';
 import { formatMoney, getCurrencyInputPrefix } from '@/lib/pos/money';
+import { normalizeCustomerPhone } from '@/lib/pos/customer';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { PaymentMethod } from '@/lib/pos/types';
 
@@ -83,7 +84,7 @@ export default function PaymentPanel({
   const selectedCustomer = customers.find(
     (customer) =>
       customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
-      customer.phone === customerName.trim()
+      normalizeCustomerPhone(customer.phone) === normalizeCustomerPhone(customerName)
   );
   const loyaltyEligible = Boolean(
     settings.loyaltyEnabled &&
@@ -139,7 +140,9 @@ export default function PaymentPanel({
                   </div>
                   {customers
                     .filter((customer) =>
-                      customer.name.toLowerCase().includes(customerName.toLowerCase())
+                      `${customer.name} ${customer.phone} ${customer.email ?? ''}`
+                        .toLowerCase()
+                        .includes(customerName.toLowerCase())
                     )
                     .map((c) => (
                       <div

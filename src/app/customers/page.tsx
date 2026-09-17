@@ -11,6 +11,7 @@ import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Customer, CustomerDiscountRule } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
+import { normalizeCustomerPhone } from '@/lib/pos/customer';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import ListPagination from '@/components/ui/ListPagination';
 
@@ -60,9 +61,21 @@ export default function CustomersPage() {
       toast.error('Customer name is required.');
       return;
     }
+    const phone = normalizeCustomerPhone(form.phone);
+    if (!phone) {
+      toast.error('Customer phone number is required.');
+      return;
+    }
+    const duplicatePhone = customers.find(
+      (customer) => customer.id !== form.id && normalizeCustomerPhone(customer.phone) === phone
+    );
+    if (duplicatePhone) {
+      toast.error(`This phone number already belongs to ${duplicatePhone.name}.`);
+      return;
+    }
     try {
       const existing = customers.some((customer) => customer.id === form.id);
-      await upsertCustomer({ ...form, name: form.name.trim(), phone: form.phone.trim() });
+      await upsertCustomer({ ...form, name: form.name.trim(), phone });
       setEditing(null);
       toast.success(existing ? 'Customer updated successfully.' : 'Customer added successfully.');
     } catch (error) {
@@ -240,6 +253,7 @@ export default function CustomersPage() {
               <label key={key} className="space-y-1">
                 <span className="text-xs text-muted-foreground">{label}</span>
                 <input
+                  required={key === 'phone'}
                   value={String(form[key as keyof Customer] ?? '')}
                   onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-border bg-background"

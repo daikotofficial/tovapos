@@ -28,4 +28,8 @@ export const OWNER_PERMISSIONS: Permission[] = [
   'sync-logs',
   'categories',
   'expense-heads',
+  'hospitality-reservations',
+  'hospitality-rooms',
+  'hospitality-guests',
+  'hospitality-payments',
 ];

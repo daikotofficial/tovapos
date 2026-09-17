@@ -34,6 +34,9 @@ Thumbs.db
 # Optional: if using testing tools
 coverage/
 jest-test-results.json
+onprem-dist/
+installer/windows/payload/
+installer-output/
 
 # Optional: if using IDEs
 .vscode/

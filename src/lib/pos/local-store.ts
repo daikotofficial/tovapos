@@ -2,18 +2,23 @@ import {
   BusinessSettings,
   Customer,
   ExpenseRecord,
+  InputVatRecord,
   InventoryItem,
   SaleTransaction,
   StockMovement,
   SyncQueueItem,
   TovaUser,
   Vendor,
+  HospitalityService,
+  HospitalityReservation,
+  HospitalityGuest,
 } from './types';
 import { normalizeInventoryItem } from './stock';
 import { defaultSettings } from './seeds';
 
 const DB_NAME = 'tovapos-local-first';
-const DB_VERSION = 4;
+// Increment whenever a new object store is added so existing browsers create it.
+const DB_VERSION = 7;
 let activeTenantId = 'anonymous';
 
 type StoreName =
@@ -25,7 +30,11 @@ type StoreName =
   | 'customers'
   | 'vendors'
   | 'expenses'
-  | 'settings';
+  | 'inputVat'
+  | 'settings'
+  | 'hospitalityServices'
+  | 'hospitalityReservations'
+  | 'hospitalityGuests';
 
 const STORE_NAMES: StoreName[] = [
   'inventory',
@@ -36,7 +45,11 @@ const STORE_NAMES: StoreName[] = [
   'customers',
   'vendors',
   'expenses',
+  'inputVat',
   'settings',
+  'hospitalityServices',
+  'hospitalityReservations',
+  'hospitalityGuests',
 ];
 
 export interface InventoryPageResult {
@@ -218,6 +231,26 @@ async function putManyInBrowser<T extends { id: string }>(
   await done;
 }
 
+async function replaceBrowserStore<T extends { id: string }>(
+  storeName: StoreName,
+  items: T[]
+): Promise<void> {
+  if (!canUseIndexedDb()) {
+    window.localStorage.setItem(
+      storageKey(storeName),
+      JSON.stringify(items.map((item) => cleanForBrowserStorage(item, storeName)))
+    );
+    return;
+  }
+  const db = await openDb();
+  const transaction = db.transaction(storeName, 'readwrite');
+  const done = transactionDone(transaction);
+  const store = transaction.objectStore(storeName);
+  store.clear();
+  items.forEach((item) => store.put(cleanForBrowserStorage(item, storeName)));
+  await done;
+}
+
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(
@@ -325,7 +358,7 @@ async function getAll<T>(storeName: StoreName): Promise<T[]> {
   if (shouldUsePostgresStore() && storeName !== 'syncQueue') {
     try {
       const records = await apiRequest<T[]>(storeName);
-      void putManyInBrowser(
+      void replaceBrowserStore(
         storeName,
         records.filter(
           (record): record is T & { id: string } =>
@@ -336,7 +369,8 @@ async function getAll<T>(storeName: StoreName): Promise<T[]> {
       ).catch((error) => console.warn(`Unable to cache ${storeName} in this browser`, error));
       return records;
     } catch (error) {
-      console.error(`Failed to load ${storeName} from Postgres store`, error);
+      if (!isNetworkFailure(error)) throw error;
+      console.warn(`Postgres unavailable while loading ${storeName}; using tenant cache`, error);
     }
   }
 
@@ -352,6 +386,31 @@ async function putOne<T extends { id: string }>(storeName: StoreName, item: T): 
       });
     } catch (error) {
       if (!isNetworkFailure(error)) throw error;
+      if (
+        storeName === 'hospitalityServices' ||
+        storeName === 'hospitalityReservations' ||
+        storeName === 'hospitalityGuests'
+      ) {
+        const entity =
+          storeName === 'hospitalityServices'
+            ? 'hospitalityService'
+            : storeName === 'hospitalityReservations'
+              ? 'hospitalityReservation'
+              : 'hospitalityGuest';
+        await saveSyncQueueItem({
+          id: `sync-${entity}-${item.id}`,
+          operationId: `offline-${entity}-${item.id}`,
+          idempotencyKey: `offline-${entity}-${item.id}`,
+          entity,
+          entityId: item.id,
+          action: 'update',
+          payload: item,
+          createdAt: new Date().toISOString(),
+          createdOffline: true,
+          attempts: 0,
+          status: 'pending',
+        });
+      }
     }
     await putOneInBrowser(storeName, item);
     return;
@@ -754,6 +813,32 @@ export async function saveSettings(settings: BusinessSettings): Promise<void> {
   await putOne('settings', normalizeSettings(settings, defaultSettings));
 }
 
+export async function loadHospitalityServices(): Promise<HospitalityService[]> {
+  return getAll<HospitalityService>('hospitalityServices');
+}
+
+export async function saveHospitalityService(service: HospitalityService): Promise<void> {
+  await putOne('hospitalityServices', service);
+}
+
+export async function loadHospitalityReservations(): Promise<HospitalityReservation[]> {
+  return getAll<HospitalityReservation>('hospitalityReservations');
+}
+
+export async function saveHospitalityReservation(
+  reservation: HospitalityReservation
+): Promise<void> {
+  await putOne('hospitalityReservations', reservation);
+}
+
+export async function loadHospitalityGuests(): Promise<HospitalityGuest[]> {
+  return getAll<HospitalityGuest>('hospitalityGuests');
+}
+
+export async function saveHospitalityGuest(guest: HospitalityGuest): Promise<void> {
+  await putOne('hospitalityGuests', guest);
+}
+
 function normalizeSettings(settings: BusinessSettings, seed: BusinessSettings): BusinessSettings {
   const configuredTaxRates = settings.taxRates ?? seed.taxRates ?? [];
   const taxRates = configuredTaxRates.length
@@ -850,6 +935,24 @@ export async function loadExpenses(): Promise<ExpenseRecord[]> {
 
 export async function saveExpense(expense: ExpenseRecord): Promise<void> {
   await putOne('expenses', expense);
+}
+
+export async function loadInputVatRecords(): Promise<InputVatRecord[]> {
+  if (shouldUsePostgresStore()) {
+    try {
+      const records = await apiRequest<InputVatRecord[]>('inputVat', undefined, { limit: 500 });
+      void putManyInBrowser('inputVat', records).catch(() => undefined);
+      return records.sort((a, b) => b.date.localeCompare(a.date));
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
+  }
+  const records = await getAll<InputVatRecord>('inputVat');
+  return records.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export async function saveInputVatRecord(record: InputVatRecord): Promise<void> {
+  await putOne('inputVat', record);
 }
 
 export async function loadSyncQueue(): Promise<SyncQueueItem[]> {

@@ -31,7 +31,7 @@ import {
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import RowsPerPageSelect from '@/components/ui/RowsPerPageSelect';
-import type { Permission, SaleTransaction } from '@/lib/pos/types';
+import type { InputVatRecord, Permission, SaleTransaction } from '@/lib/pos/types';
 import { toast } from 'sonner';
 
 type ReportView = string;
@@ -461,8 +461,10 @@ function ReportsContent() {
     vendors,
     syncQueue,
     settings,
+    activeBusinessMode,
     hasPermission,
   } = usePosStore();
+  const hospitalityOnly = activeBusinessMode === 'hospitality';
   const requestedView = searchParams.get('view') as ReportView | null;
   const requiredPermission: Partial<Record<ReportView, Permission>> = {
     'credit-sales': 'credit-sales',
@@ -470,6 +472,7 @@ function ReportsContent() {
     expenses: 'expenses',
     suppliers: 'vendors',
     refunds: 'refunds',
+    vat: 'manage-tax',
   };
   const requestedPermission = requestedView ? requiredPermission[requestedView] : undefined;
   const activeView: ReportView =
@@ -526,6 +529,8 @@ function ReportsContent() {
           'payment-methods',
           'refunds',
           'voided',
+          'audit',
+          'input-vat',
         ];
         const results = await Promise.all(
           rowReports.map(async (report) => [
@@ -728,6 +733,7 @@ function ReportsContent() {
   }[];
   const serverRefundRows = (serverReportRows.refunds ?? []) as SaleTransaction[];
   const serverVoidedRows = (serverReportRows.voided ?? []) as SaleTransaction[];
+  const serverInputVatRows = (serverReportRows['input-vat'] ?? []) as InputVatRecord[];
 
   const displaySalesRows = serverSalesRows.length > 0 ? serverSalesRows : data.completedSales;
   const displayCreditSalesRows =
@@ -1151,732 +1157,776 @@ function ReportsContent() {
 
   return (
     <AppLayout title="Reports" subtitle="Sales, profit, expenses, inventory, customers">
-      <PermissionGate permission="reports">
-        <div className="mx-auto max-w-screen-2xl space-y-5 p-4 sm:p-6">
-          <section className="rounded-xl border border-border bg-white p-4 shadow-card sm:p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase text-primary">Reports</p>
-                <h2 className="mt-1 text-2xl font-bold">Business reports</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{activeReportInfo.description}</p>
-              </div>
-              <div className="w-full lg:w-[360px]">
-                <label className="text-[10px] font-bold uppercase text-muted-foreground">
-                  Select report
-                </label>
-                <NiceSelect
-                  value={activeView}
-                  onChange={(value) => router.push(`/reports?view=${value}`)}
-                  className="mt-1"
-                  options={reports
-                    .filter((report) => {
-                      const permission = requiredPermission[report.id];
-                      return !permission || hasPermission(permission);
-                    })
-                    .map((report) => ({
-                      value: report.id,
-                      label: report.label,
-                    }))}
-                />
-              </div>
+      {hospitalityOnly ? (
+        <PermissionGate permission="reports">
+          <div className="mx-auto max-w-3xl p-4 sm:p-6">
+            <div className="rounded-xl border border-border bg-white p-6 text-center shadow-card">
+              <h2 className="text-xl font-bold">Retail reports are not enabled</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Hospitality businesses use Reservations and Rooms &amp; Services. Retail product,
+                inventory, stock, and sales reports are available only to retail businesses.
+              </p>
             </div>
-          </section>
-
-          <section className="rounded-xl border border-border bg-white p-4 shadow-card">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex h-9 items-center gap-2 rounded-md bg-muted px-3 text-xs font-bold uppercase text-muted-foreground">
-                  <Calendar size={14} />
-                  Period
-                </div>
-                {rangePresets.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => {
-                      const nextRange = createRange(preset.id);
-                      setDraftRange(nextRange);
-                      setRange(nextRange);
-                    }}
-                    className={`h-9 rounded-md border px-3 text-sm font-semibold transition-colors ${
-                      range.preset === preset.id
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-white text-muted-foreground hover:bg-muted hover:text-foreground'
-                    }`}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-                  <label className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase text-muted-foreground">
-                      From
-                    </span>
-                    <DatePicker
-                      value={draftRange.from}
-                      onChange={(from) =>
-                        setDraftRange((current) => ({
-                          ...current,
-                          from,
-                          preset: 'custom',
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase text-muted-foreground">
-                      To
-                    </span>
-                    <DatePicker
-                      value={draftRange.to}
-                      onChange={(to) =>
-                        setDraftRange((current) => ({
-                          ...current,
-                          to,
-                          preset: 'custom',
-                        }))
-                      }
-                    />
-                  </label>
-                </div>
-
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
-                  <button
-                    type="button"
-                    onClick={applyCustomRange}
-                    disabled={!draftRange.from || !draftRange.to || !draftHasChanges}
-                    className="h-10 rounded-md bg-primary px-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Apply range
-                  </button>
-                </div>
-
-                {hasPermission('export-reports') && (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => exportReport('csv')}
-                      className="flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary/90"
-                    >
-                      <Download size={14} />
-                      CSV
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => exportReport('excel')}
-                      className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <Download size={14} />
-                      Excel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => exportReport('pdf')}
-                      className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <Download size={14} />
-                      PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => exportReport('json')}
-                      className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <Download size={14} />
-                      JSON
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Active date range: <span className="font-semibold text-foreground">{rangeLabel}</span>
-              .{draftHasChanges ? ' Select Apply range to update the reports.' : ' '}
-              Sales, profit, expenses, and stock ledger use this period; inventory and customer
-              balances show their current state.
-            </p>
-          </section>
-
-          <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
-            {summaryCards.map((card) => {
-              const Icon = card.icon;
-              return (
-                <article
-                  key={card.label}
-                  className="rounded-xl border border-border bg-white p-4 shadow-card"
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold uppercase text-muted-foreground">
-                      {card.label}
-                    </p>
-                    <Icon size={17} className={card.tone} />
-                  </div>
-                  <p className={`mt-2 text-2xl font-bold font-tabular ${card.tone}`}>
-                    {card.value}
+          </div>
+        </PermissionGate>
+      ) : (
+        <PermissionGate permission="reports">
+          <div className="mx-auto max-w-screen-2xl space-y-5 p-4 sm:p-6">
+            <section className="rounded-xl border border-border bg-white p-4 shadow-card sm:p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase text-primary">Reports</p>
+                  <h2 className="mt-1 text-2xl font-bold">Business reports</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {activeReportInfo.description}
                   </p>
-                </article>
-              );
-            })}
-          </section>
+                </div>
+                <div className="w-full lg:w-[360px]">
+                  <label className="text-[10px] font-bold uppercase text-muted-foreground">
+                    Select report
+                  </label>
+                  <NiceSelect
+                    value={activeView}
+                    onChange={(value) => router.push(`/reports?view=${value}`)}
+                    className="mt-1"
+                    options={reports
+                      .filter((report) => {
+                        const permission = requiredPermission[report.id];
+                        return !permission || hasPermission(permission);
+                      })
+                      .map((report) => ({
+                        value: report.id,
+                        label: report.label,
+                      }))}
+                  />
+                </div>
+              </div>
+            </section>
 
-          {activeView === 'overview' && (
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
-              <ReportTable
-                title="Recent sales movement"
-                subtitle={`${data.pendingSync} update${data.pendingSync === 1 ? '' : 's'} waiting to be sent`}
-                headers={['Receipt', 'Customer', 'Payment', 'Status', 'Collected', 'Credit Due']}
-                empty="No sales recorded yet."
-                rows={displaySalesRows
-                  .slice(0, 12)
-                  .map((sale) => [
-                    sale.transactionId,
-                    sale.customerName ?? 'Walk-in Customer',
-                    paymentMethodLabel(sale.paymentMethod),
-                    salePaymentStatus(sale),
-                    isCreditSale(sale)
-                      ? formatMoney(0, settings.currency)
-                      : formatMoney(sale.grandTotal, settings.currency),
-                    isCreditSale(sale)
-                      ? formatMoney(Number(sale.amountDue ?? sale.grandTotal), settings.currency)
-                      : formatMoney(0, settings.currency),
-                  ])}
-              />
-              <ReportPanel title="Payment mix">
-                <div className="space-y-4">
-                  {data.paymentTotals.map((item) => (
-                    <MetricBar
-                      key={item.method}
-                      label={`${paymentMethodLabel(item.method)} (${item.count})`}
-                      value={
-                        item.receivable > 0
-                          ? `${formatMoney(item.receivable, settings.currency)} due`
-                          : formatMoney(item.collected + item.creditCollected, settings.currency)
-                      }
-                      percent={((item.total + item.creditCollected) / maxPayment) * 100}
-                    />
+            <section className="rounded-xl border border-border bg-white p-4 shadow-card">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex h-9 items-center gap-2 rounded-md bg-muted px-3 text-xs font-bold uppercase text-muted-foreground">
+                    <Calendar size={14} />
+                    Period
+                  </div>
+                  {rangePresets.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => {
+                        const nextRange = createRange(preset.id);
+                        setDraftRange(nextRange);
+                        setRange(nextRange);
+                      }}
+                      className={`h-9 rounded-md border px-3 text-sm font-semibold transition-colors ${
+                        range.preset === preset.id
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-white text-muted-foreground hover:bg-muted hover:text-foreground'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
                   ))}
                 </div>
-              </ReportPanel>
-            </div>
-          )}
 
-          {activeView === 'sales' && (
-            <ReportTable
-              title="Sales report"
-              subtitle="Completed transactions split into collected sales and customer credit"
-              headers={[
-                'Receipt',
-                'Date',
-                'Customer',
-                'Cashier',
-                'Items',
-                'Payment',
-                'Status',
-                'Subtotal',
-                'Discount',
-                'Tax',
-                'Total',
-                'Collected',
-                'Credit Due',
-                'Sync',
-              ]}
-              empty="No sales recorded yet."
-              rows={displaySalesRows.map((sale) => [
-                sale.transactionId,
-                new Date(sale.timestamp).toLocaleString(),
-                sale.customerName ?? 'Walk-in Customer',
-                sale.cashier,
-                sale.items.reduce((sum, item) => sum + item.quantity, 0).toString(),
-                paymentMethodLabel(sale.paymentMethod),
-                salePaymentStatus(sale),
-                formatMoney(sale.subtotal, settings.currency),
-                formatMoney(sale.discountTotal, settings.currency),
-                formatMoney(sale.taxAmount, settings.currency),
-                formatMoney(sale.grandTotal, settings.currency),
-                isCreditSale(sale)
-                  ? formatMoney(0, settings.currency)
-                  : formatMoney(sale.grandTotal, settings.currency),
-                isCreditSale(sale)
-                  ? formatMoney(Number(sale.amountDue ?? sale.grandTotal), settings.currency)
-                  : formatMoney(0, settings.currency),
-                sale.syncStatus,
-              ])}
-            />
-          )}
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                        From
+                      </span>
+                      <DatePicker
+                        value={draftRange.from}
+                        onChange={(from) =>
+                          setDraftRange((current) => ({
+                            ...current,
+                            from,
+                            preset: 'custom',
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-bold uppercase text-muted-foreground">
+                        To
+                      </span>
+                      <DatePicker
+                        value={draftRange.to}
+                        onChange={(to) =>
+                          setDraftRange((current) => ({
+                            ...current,
+                            to,
+                            preset: 'custom',
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
 
-          {activeView === 'credit-sales' && (
-            <ReportTable
-              title="Credit sales"
-              subtitle="Unpaid customer credit for the selected period"
-              headers={[
-                'Receipt',
-                'Date',
-                'Customer',
-                'Items',
-                'Total',
-                'Paid',
-                'Amount Due',
-                'Status',
-                'Cashier',
-                'Sync',
-              ]}
-              empty="No credit sales recorded for this period."
-              rows={displayCreditSalesRows.map((sale) => [
-                sale.transactionId,
-                new Date(sale.timestamp).toLocaleString(),
-                sale.customerName ?? 'Walk-in Customer',
-                sale.items.reduce((sum, item) => sum + item.quantity, 0).toString(),
-                formatMoney(sale.grandTotal, settings.currency),
-                formatMoney(Number(sale.amountPaid ?? 0), settings.currency),
-                formatMoney(Number(sale.amountDue ?? sale.grandTotal), settings.currency),
-                salePaymentStatus(sale),
-                sale.cashier,
-                sale.syncStatus,
-              ])}
-            />
-          )}
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
+                    <button
+                      type="button"
+                      onClick={applyCustomRange}
+                      disabled={!draftRange.from || !draftRange.to || !draftHasChanges}
+                      className="h-10 rounded-md bg-primary px-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Apply range
+                    </button>
+                  </div>
 
-          {activeView === 'profit' && (
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[380px_1fr]">
-              <ReportPanel title="Profit bridge">
-                <div className="space-y-3">
-                  <SummaryLine
-                    label="Sales collected"
-                    value={formatMoney(data.revenue, settings.currency)}
-                  />
-                  <SummaryLine
-                    label="Credit due"
-                    value={formatMoney(data.receivables, settings.currency)}
-                  />
-                  <SummaryLine
-                    label="Cost of goods"
-                    value={`-${formatMoney(data.cogs, settings.currency)}`}
-                  />
-                  <SummaryLine
-                    label="Gross profit"
-                    value={formatMoney(data.grossProfit, settings.currency)}
-                    strong
-                  />
-                  <SummaryLine
-                    label="Expenses"
-                    value={`-${formatMoney(data.expenseTotal, settings.currency)}`}
-                  />
-                  <SummaryLine
-                    label="Net profit"
-                    value={formatMoney(data.netProfit, settings.currency)}
-                    strong
-                  />
+                  {hasPermission('export-reports') && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => exportReport('csv')}
+                        className="flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary/90"
+                      >
+                        <Download size={14} />
+                        CSV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportReport('excel')}
+                        className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Download size={14} />
+                        Excel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportReport('pdf')}
+                        className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Download size={14} />
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportReport('json')}
+                        className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Download size={14} />
+                        JSON
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </ReportPanel>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Active date range:{' '}
+                <span className="font-semibold text-foreground">{rangeLabel}</span>.
+                {draftHasChanges ? ' Select Apply range to update the reports.' : ' '}
+                Sales, profit, expenses, and stock ledger use this period; inventory and customer
+                balances show their current state.
+              </p>
+            </section>
+
+            <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+              {summaryCards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <article
+                    key={card.label}
+                    className="rounded-xl border border-border bg-white p-4 shadow-card"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold uppercase text-muted-foreground">
+                        {card.label}
+                      </p>
+                      <Icon size={17} className={card.tone} />
+                    </div>
+                    <p className={`mt-2 text-2xl font-bold font-tabular ${card.tone}`}>
+                      {card.value}
+                    </p>
+                  </article>
+                );
+              })}
+            </section>
+
+            {activeView === 'overview' && (
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
+                <ReportTable
+                  title="Recent sales movement"
+                  subtitle={`${data.pendingSync} update${data.pendingSync === 1 ? '' : 's'} waiting to be sent`}
+                  headers={['Receipt', 'Customer', 'Payment', 'Status', 'Collected', 'Credit Due']}
+                  empty="No sales recorded yet."
+                  rows={displaySalesRows
+                    .slice(0, 12)
+                    .map((sale) => [
+                      sale.transactionId,
+                      sale.customerName ?? 'Walk-in Customer',
+                      paymentMethodLabel(sale.paymentMethod),
+                      salePaymentStatus(sale),
+                      isCreditSale(sale)
+                        ? formatMoney(0, settings.currency)
+                        : formatMoney(sale.grandTotal, settings.currency),
+                      isCreditSale(sale)
+                        ? formatMoney(Number(sale.amountDue ?? sale.grandTotal), settings.currency)
+                        : formatMoney(0, settings.currency),
+                    ])}
+                />
+                <ReportPanel title="Payment mix">
+                  <div className="space-y-4">
+                    {data.paymentTotals.map((item) => (
+                      <MetricBar
+                        key={item.method}
+                        label={`${paymentMethodLabel(item.method)} (${item.count})`}
+                        value={
+                          item.receivable > 0
+                            ? `${formatMoney(item.receivable, settings.currency)} due`
+                            : formatMoney(item.collected + item.creditCollected, settings.currency)
+                        }
+                        percent={((item.total + item.creditCollected) / maxPayment) * 100}
+                      />
+                    ))}
+                  </div>
+                </ReportPanel>
+              </div>
+            )}
+
+            {activeView === 'sales' && (
               <ReportTable
-                title="Product profit"
-                subtitle="Profit contribution by sold product"
-                headers={['Product', 'Units', 'Revenue', 'Profit', 'Margin']}
-                empty="No product profit yet."
+                title="Sales report"
+                subtitle="Completed transactions split into collected sales and customer credit"
+                headers={[
+                  'Receipt',
+                  'Date',
+                  'Customer',
+                  'Cashier',
+                  'Items',
+                  'Payment',
+                  'Status',
+                  'Subtotal',
+                  'Discount',
+                  'Tax',
+                  'Total',
+                  'Collected',
+                  'Credit Due',
+                  'Sync',
+                ]}
+                empty="No sales recorded yet."
+                rows={displaySalesRows.map((sale) => [
+                  sale.transactionId,
+                  new Date(sale.timestamp).toLocaleString(),
+                  sale.customerName ?? 'Walk-in Customer',
+                  sale.cashier,
+                  sale.items.reduce((sum, item) => sum + item.quantity, 0).toString(),
+                  paymentMethodLabel(sale.paymentMethod),
+                  salePaymentStatus(sale),
+                  formatMoney(sale.subtotal, settings.currency),
+                  formatMoney(sale.discountTotal, settings.currency),
+                  formatMoney(sale.taxAmount, settings.currency),
+                  formatMoney(sale.grandTotal, settings.currency),
+                  isCreditSale(sale)
+                    ? formatMoney(0, settings.currency)
+                    : formatMoney(sale.grandTotal, settings.currency),
+                  isCreditSale(sale)
+                    ? formatMoney(Number(sale.amountDue ?? sale.grandTotal), settings.currency)
+                    : formatMoney(0, settings.currency),
+                  sale.syncStatus,
+                ])}
+              />
+            )}
+
+            {activeView === 'credit-sales' && (
+              <ReportTable
+                title="Credit sales"
+                subtitle="Unpaid customer credit for the selected period"
+                headers={[
+                  'Receipt',
+                  'Date',
+                  'Customer',
+                  'Items',
+                  'Total',
+                  'Paid',
+                  'Amount Due',
+                  'Status',
+                  'Cashier',
+                  'Sync',
+                ]}
+                empty="No credit sales recorded for this period."
+                rows={displayCreditSalesRows.map((sale) => [
+                  sale.transactionId,
+                  new Date(sale.timestamp).toLocaleString(),
+                  sale.customerName ?? 'Walk-in Customer',
+                  sale.items.reduce((sum, item) => sum + item.quantity, 0).toString(),
+                  formatMoney(sale.grandTotal, settings.currency),
+                  formatMoney(Number(sale.amountPaid ?? 0), settings.currency),
+                  formatMoney(Number(sale.amountDue ?? sale.grandTotal), settings.currency),
+                  salePaymentStatus(sale),
+                  sale.cashier,
+                  sale.syncStatus,
+                ])}
+              />
+            )}
+
+            {activeView === 'profit' && (
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-[380px_1fr]">
+                <ReportPanel title="Profit bridge">
+                  <div className="space-y-3">
+                    <SummaryLine
+                      label="Sales collected"
+                      value={formatMoney(data.revenue, settings.currency)}
+                    />
+                    <SummaryLine
+                      label="Credit due"
+                      value={formatMoney(data.receivables, settings.currency)}
+                    />
+                    <SummaryLine
+                      label="Cost of goods"
+                      value={`-${formatMoney(data.cogs, settings.currency)}`}
+                    />
+                    <SummaryLine
+                      label="Gross profit"
+                      value={formatMoney(data.grossProfit, settings.currency)}
+                      strong
+                    />
+                    <SummaryLine
+                      label="Expenses"
+                      value={`-${formatMoney(data.expenseTotal, settings.currency)}`}
+                    />
+                    <SummaryLine
+                      label="Net profit"
+                      value={formatMoney(data.netProfit, settings.currency)}
+                      strong
+                    />
+                  </div>
+                </ReportPanel>
+                <ReportTable
+                  title="Product profit"
+                  subtitle="Profit contribution by sold product"
+                  headers={['Product', 'Units', 'Revenue', 'Profit', 'Margin']}
+                  empty="No product profit yet."
+                  rows={displayProductRows.map((product) => [
+                    product.name,
+                    product.qty.toString(),
+                    formatMoney(product.revenue, settings.currency),
+                    formatMoney(product.profit, settings.currency),
+                    product.revenue > 0
+                      ? `${Math.round((product.profit / product.revenue) * 100)}%`
+                      : '0%',
+                  ])}
+                />
+              </div>
+            )}
+
+            {activeView === 'expenses' && (
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-[380px_1fr]">
+                <ReportPanel title="Expense categories">
+                  <div className="space-y-4">
+                    {data.expensesByCategory.length === 0 ? (
+                      <p className="py-6 text-center text-sm text-muted-foreground">
+                        No expenses recorded yet.
+                      </p>
+                    ) : (
+                      data.expensesByCategory.map(([category, amount]) => (
+                        <MetricBar
+                          key={category}
+                          label={category}
+                          value={formatMoney(amount, settings.currency)}
+                          percent={(amount / maxExpense) * 100}
+                          color="bg-danger"
+                        />
+                      ))
+                    )}
+                  </div>
+                </ReportPanel>
+                <ReportTable
+                  title="Expense ledger"
+                  subtitle="Recorded operating costs"
+                  headers={['Expense', 'Category', 'Date', 'Method', 'Recorded By', 'Amount']}
+                  empty="No expenses recorded yet."
+                  rows={displayExpenseRows.map((expense) => [
+                    expense.title,
+                    expense.category,
+                    expense.incurredAt,
+                    expense.paymentMethod.replace('-', ' '),
+                    expense.recordedBy,
+                    formatMoney(expense.amount, settings.currency),
+                  ])}
+                />
+              </div>
+            )}
+
+            {activeView === 'inventory' && (
+              <ReportTable
+                title="Inventory report"
+                subtitle={`${formatMoney(data.stockCostValue, settings.currency)} cost value · ${formatMoney(data.stockRetailValue, settings.currency)} retail value`}
+                headers={[
+                  'Product',
+                  'Brand',
+                  'SKU',
+                  'Category',
+                  'Batch',
+                  'Supplier',
+                  'Qty',
+                  'Reorder',
+                  'Cost',
+                  'Price',
+                  'Cost Value',
+                  'Retail Value',
+                  'Expiry',
+                  'Status',
+                ]}
+                empty="No inventory records."
+                rows={inventory.map((item) => [
+                  item.name,
+                  item.genericName,
+                  item.sku,
+                  item.category,
+                  item.batchLot,
+                  item.supplier,
+                  item.currentQty.toString(),
+                  item.reorderLevel.toString(),
+                  formatMoney(item.unitCost, settings.currency),
+                  formatMoney(item.sellingPrice, settings.currency),
+                  formatMoney(item.currentQty * item.unitCost, settings.currency),
+                  formatMoney(item.currentQty * item.sellingPrice, settings.currency),
+                  item.expiryDate,
+                  item.stockStatus,
+                ])}
+              />
+            )}
+
+            {activeView === 'stock-ledger' && (
+              <ReportTable
+                title="Stock movement ledger"
+                subtitle="Every local stock deduction is recorded as a delta for safer offline sync"
+                headers={[
+                  'Date',
+                  'Product',
+                  'SKU',
+                  'Batch',
+                  'Type',
+                  'Ref',
+                  'Before',
+                  'Delta',
+                  'After',
+                  'Reason',
+                  'By',
+                  'Sync',
+                ]}
+                empty="No stock movement records yet."
+                rows={data.stockMovements.map((movement) => [
+                  new Date(movement.createdAt).toLocaleString(),
+                  movement.productName,
+                  movement.sku,
+                  movement.batchLot,
+                  movement.type,
+                  movement.referenceLabel,
+                  movement.quantityBefore.toString(),
+                  movement.quantityDelta.toString(),
+                  movement.quantityAfter.toString(),
+                  movement.reason,
+                  movement.createdBy,
+                  movement.syncStatus,
+                ])}
+              />
+            )}
+
+            {activeView === 'customers' && (
+              <ReportTable
+                title="Customer report"
+                subtitle="Customer spend, loyalty points, and credit exposure"
+                headers={[
+                  'Customer',
+                  'Phone',
+                  'Email',
+                  'Address',
+                  'Loyalty',
+                  'Credit Limit',
+                  'Credit Due',
+                  'Total Spend',
+                ]}
+                empty="No customer records."
+                rows={data.customerValue.map((customer) => [
+                  customer.name,
+                  customer.phone || '-',
+                  customer.email || '-',
+                  customer.address || '-',
+                  customer.loyaltyPoints.toString(),
+                  formatMoney(customer.creditLimit, settings.currency),
+                  formatMoney(
+                    data.creditDueByCustomer.get(customer.name.trim().toLowerCase()) ?? 0,
+                    settings.currency
+                  ),
+                  formatMoney(customer.totalSpend, settings.currency),
+                ])}
+              />
+            )}
+
+            {activeView === 'sales-by-cashier' && (
+              <ReportTable
+                title="Sales by cashier"
+                subtitle="Cashier totals for the selected period"
+                headers={['Cashier', 'Transactions', 'Revenue', 'Profit']}
+                empty="No cashier sales recorded yet."
+                rows={Object.entries(
+                  data.paidSales.reduce(
+                    (map, sale) => {
+                      const current = map[sale.cashier] ?? { count: 0, revenue: 0, profit: 0 };
+                      current.count += 1;
+                      current.revenue += sale.grandTotal;
+                      current.profit += profitForSale(sale);
+                      map[sale.cashier] = current;
+                      return map;
+                    },
+                    {} as Record<string, { count: number; revenue: number; profit: number }>
+                  )
+                ).map(([cashier, row]) => [
+                  cashier,
+                  row.count.toString(),
+                  formatMoney(row.revenue, settings.currency),
+                  formatMoney(row.profit, settings.currency),
+                ])}
+              />
+            )}
+
+            {activeView === 'sales-by-product' && (
+              <ReportTable
+                title="Sales by product"
+                subtitle="Product units, revenue, and profit"
+                headers={['Product', 'Units', 'Revenue', 'Profit']}
+                empty="No product sales recorded yet."
                 rows={displayProductRows.map((product) => [
                   product.name,
                   product.qty.toString(),
                   formatMoney(product.revenue, settings.currency),
                   formatMoney(product.profit, settings.currency),
-                  product.revenue > 0
-                    ? `${Math.round((product.profit / product.revenue) * 100)}%`
-                    : '0%',
                 ])}
               />
-            </div>
-          )}
+            )}
 
-          {activeView === 'expenses' && (
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[380px_1fr]">
-              <ReportPanel title="Expense categories">
-                <div className="space-y-4">
-                  {data.expensesByCategory.length === 0 ? (
-                    <p className="py-6 text-center text-sm text-muted-foreground">
-                      No expenses recorded yet.
-                    </p>
-                  ) : (
-                    data.expensesByCategory.map(([category, amount]) => (
-                      <MetricBar
-                        key={category}
-                        label={category}
-                        value={formatMoney(amount, settings.currency)}
-                        percent={(amount / maxExpense) * 100}
-                        color="bg-danger"
-                      />
-                    ))
-                  )}
-                </div>
-              </ReportPanel>
+            {activeView === 'sales-by-category' && (
               <ReportTable
-                title="Expense ledger"
-                subtitle="Recorded operating costs"
-                headers={['Expense', 'Category', 'Date', 'Method', 'Recorded By', 'Amount']}
-                empty="No expenses recorded yet."
-                rows={displayExpenseRows.map((expense) => [
-                  expense.title,
-                  expense.category,
-                  expense.incurredAt,
-                  expense.paymentMethod.replace('-', ' '),
-                  expense.recordedBy,
-                  formatMoney(expense.amount, settings.currency),
+                title="Sales by category"
+                subtitle="Category sales performance"
+                headers={['Category', 'Units', 'Revenue']}
+                empty="No category sales recorded yet."
+                rows={displayCategoryRows.map((row) => [
+                  row.category,
+                  row.qty.toString(),
+                  formatMoney(row.revenue, settings.currency),
                 ])}
               />
-            </div>
-          )}
+            )}
 
-          {activeView === 'inventory' && (
-            <ReportTable
-              title="Inventory report"
-              subtitle={`${formatMoney(data.stockCostValue, settings.currency)} cost value · ${formatMoney(data.stockRetailValue, settings.currency)} retail value`}
-              headers={[
-                'Product',
-                'Brand',
-                'SKU',
-                'Category',
-                'Batch',
-                'Supplier',
-                'Qty',
-                'Reorder',
-                'Cost',
-                'Price',
-                'Cost Value',
-                'Retail Value',
-                'Expiry',
-                'Status',
-              ]}
-              empty="No inventory records."
-              rows={inventory.map((item) => [
-                item.name,
-                item.genericName,
-                item.sku,
-                item.category,
-                item.batchLot,
-                item.supplier,
-                item.currentQty.toString(),
-                item.reorderLevel.toString(),
-                formatMoney(item.unitCost, settings.currency),
-                formatMoney(item.sellingPrice, settings.currency),
-                formatMoney(item.currentQty * item.unitCost, settings.currency),
-                formatMoney(item.currentQty * item.sellingPrice, settings.currency),
-                item.expiryDate,
-                item.stockStatus,
-              ])}
-            />
-          )}
-
-          {activeView === 'stock-ledger' && (
-            <ReportTable
-              title="Stock movement ledger"
-              subtitle="Every local stock deduction is recorded as a delta for safer offline sync"
-              headers={[
-                'Date',
-                'Product',
-                'SKU',
-                'Batch',
-                'Type',
-                'Ref',
-                'Before',
-                'Delta',
-                'After',
-                'Reason',
-                'By',
-                'Sync',
-              ]}
-              empty="No stock movement records yet."
-              rows={data.stockMovements.map((movement) => [
-                new Date(movement.createdAt).toLocaleString(),
-                movement.productName,
-                movement.sku,
-                movement.batchLot,
-                movement.type,
-                movement.referenceLabel,
-                movement.quantityBefore.toString(),
-                movement.quantityDelta.toString(),
-                movement.quantityAfter.toString(),
-                movement.reason,
-                movement.createdBy,
-                movement.syncStatus,
-              ])}
-            />
-          )}
-
-          {activeView === 'customers' && (
-            <ReportTable
-              title="Customer report"
-              subtitle="Customer spend, loyalty points, and credit exposure"
-              headers={[
-                'Customer',
-                'Phone',
-                'Email',
-                'Address',
-                'Loyalty',
-                'Credit Limit',
-                'Credit Due',
-                'Total Spend',
-              ]}
-              empty="No customer records."
-              rows={data.customerValue.map((customer) => [
-                customer.name,
-                customer.phone || '-',
-                customer.email || '-',
-                customer.address || '-',
-                customer.loyaltyPoints.toString(),
-                formatMoney(customer.creditLimit, settings.currency),
-                formatMoney(
-                  data.creditDueByCustomer.get(customer.name.trim().toLowerCase()) ?? 0,
-                  settings.currency
-                ),
-                formatMoney(customer.totalSpend, settings.currency),
-              ])}
-            />
-          )}
-
-          {activeView === 'sales-by-cashier' && (
-            <ReportTable
-              title="Sales by cashier"
-              subtitle="Cashier totals for the selected period"
-              headers={['Cashier', 'Transactions', 'Revenue', 'Profit']}
-              empty="No cashier sales recorded yet."
-              rows={Object.entries(
-                data.paidSales.reduce(
-                  (map, sale) => {
-                    const current = map[sale.cashier] ?? { count: 0, revenue: 0, profit: 0 };
-                    current.count += 1;
-                    current.revenue += sale.grandTotal;
-                    current.profit += profitForSale(sale);
-                    map[sale.cashier] = current;
-                    return map;
-                  },
-                  {} as Record<string, { count: number; revenue: number; profit: number }>
-                )
-              ).map(([cashier, row]) => [
-                cashier,
-                row.count.toString(),
-                formatMoney(row.revenue, settings.currency),
-                formatMoney(row.profit, settings.currency),
-              ])}
-            />
-          )}
-
-          {activeView === 'sales-by-product' && (
-            <ReportTable
-              title="Sales by product"
-              subtitle="Product units, revenue, and profit"
-              headers={['Product', 'Units', 'Revenue', 'Profit']}
-              empty="No product sales recorded yet."
-              rows={displayProductRows.map((product) => [
-                product.name,
-                product.qty.toString(),
-                formatMoney(product.revenue, settings.currency),
-                formatMoney(product.profit, settings.currency),
-              ])}
-            />
-          )}
-
-          {activeView === 'sales-by-category' && (
-            <ReportTable
-              title="Sales by category"
-              subtitle="Category sales performance"
-              headers={['Category', 'Units', 'Revenue']}
-              empty="No category sales recorded yet."
-              rows={displayCategoryRows.map((row) => [
-                row.category,
-                row.qty.toString(),
-                formatMoney(row.revenue, settings.currency),
-              ])}
-            />
-          )}
-
-          {activeView === 'payment-methods' && (
-            <ReportTable
-              title="Payment methods"
-              subtitle="Tender totals by payment method, with customer credit separated as receivable"
-              headers={['Method', 'Transactions', 'Collected', 'Credit Due', 'Total']}
-              empty="No payments recorded yet."
-              rows={displayPaymentRows.map((item) => [
-                paymentMethodLabel(item.method),
-                item.count.toString(),
-                formatMoney(
-                  item.collected + ('creditCollected' in item ? Number(item.creditCollected) : 0),
-                  settings.currency
-                ),
-                formatMoney(item.receivable, settings.currency),
-                formatMoney(item.total, settings.currency),
-              ])}
-            />
-          )}
-
-          {activeView === 'low-stock' && (
-            <ReportTable
-              title="Low stock report"
-              subtitle="Products at or below reorder level"
-              headers={['Product', 'SKU', 'Qty', 'Reorder', 'Status']}
-              empty="No low-stock products."
-              rows={inventory
-                .filter((item) => item.currentQty <= item.reorderLevel)
-                .map((item) => [
-                  item.name,
-                  item.sku,
-                  item.currentQty.toString(),
-                  item.reorderLevel.toString(),
-                  item.stockStatus,
+            {activeView === 'payment-methods' && (
+              <ReportTable
+                title="Payment methods"
+                subtitle="Tender totals by payment method, with customer credit separated as receivable"
+                headers={['Method', 'Transactions', 'Collected', 'Credit Due', 'Total']}
+                empty="No payments recorded yet."
+                rows={displayPaymentRows.map((item) => [
+                  paymentMethodLabel(item.method),
+                  item.count.toString(),
+                  formatMoney(
+                    item.collected + ('creditCollected' in item ? Number(item.creditCollected) : 0),
+                    settings.currency
+                  ),
+                  formatMoney(item.receivable, settings.currency),
+                  formatMoney(item.total, settings.currency),
                 ])}
-            />
-          )}
+              />
+            )}
 
-          {activeView === 'expiring' && (
-            <ReportTable
-              title="Expiring products"
-              subtitle="Products marked as expiring soon"
-              headers={['Product', 'SKU', 'Batch', 'Expiry', 'Qty']}
-              empty="No expiring products."
-              rows={inventory
-                .filter((item) => item.stockStatus === 'expiring-soon')
-                .map((item) => [
-                  item.name,
-                  item.sku,
-                  item.batchLot,
-                  item.expiryDate,
-                  item.currentQty.toString(),
+            {activeView === 'low-stock' && (
+              <ReportTable
+                title="Low stock report"
+                subtitle="Products at or below reorder level"
+                headers={['Product', 'SKU', 'Qty', 'Reorder', 'Status']}
+                empty="No low-stock products."
+                rows={inventory
+                  .filter((item) => item.currentQty <= item.reorderLevel)
+                  .map((item) => [
+                    item.name,
+                    item.sku,
+                    item.currentQty.toString(),
+                    item.reorderLevel.toString(),
+                    item.stockStatus,
+                  ])}
+              />
+            )}
+
+            {activeView === 'expiring' && (
+              <ReportTable
+                title="Expiring products"
+                subtitle="Products marked as expiring soon"
+                headers={['Product', 'SKU', 'Batch', 'Expiry', 'Qty']}
+                empty="No expiring products."
+                rows={inventory
+                  .filter((item) => item.stockStatus === 'expiring-soon')
+                  .map((item) => [
+                    item.name,
+                    item.sku,
+                    item.batchLot,
+                    item.expiryDate,
+                    item.currentQty.toString(),
+                  ])}
+              />
+            )}
+
+            {activeView === 'expired' && (
+              <ReportTable
+                title="Expired products"
+                subtitle="Products blocked from sale because expiry date has passed"
+                headers={['Product', 'SKU', 'Batch', 'Expiry', 'Qty']}
+                empty="No expired products."
+                rows={inventory
+                  .filter((item) => item.stockStatus === 'expired')
+                  .map((item) => [
+                    item.name,
+                    item.sku,
+                    item.batchLot,
+                    item.expiryDate,
+                    item.currentQty.toString(),
+                  ])}
+              />
+            )}
+
+            {activeView === 'suppliers' && (
+              <ReportTable
+                title="Supplier report"
+                subtitle="Supplier records and balances"
+                headers={['Supplier', 'Contact', 'Phone', 'Terms', 'Balance']}
+                empty="No suppliers recorded yet."
+                rows={vendors.map((vendor) => [
+                  vendor.name,
+                  vendor.contactName,
+                  vendor.phone,
+                  vendor.paymentTerms,
+                  formatMoney(vendor.outstandingBalance, settings.currency),
                 ])}
-            />
-          )}
+              />
+            )}
 
-          {activeView === 'expired' && (
-            <ReportTable
-              title="Expired products"
-              subtitle="Products blocked from sale because expiry date has passed"
-              headers={['Product', 'SKU', 'Batch', 'Expiry', 'Qty']}
-              empty="No expired products."
-              rows={inventory
-                .filter((item) => item.stockStatus === 'expired')
-                .map((item) => [
-                  item.name,
-                  item.sku,
-                  item.batchLot,
-                  item.expiryDate,
-                  item.currentQty.toString(),
-                ])}
-            />
-          )}
+            {activeView === 'vat' && (
+              <ReportTable
+                title="VAT / Tax report"
+                subtitle={`Output VAT from sales and input VAT paid to vendors. No net-off is calculated.`}
+                headers={['Type', 'Reference', 'Date', 'VAT Amount', 'Base / Total']}
+                empty="No VAT records yet."
+                rows={[
+                  ...data.completedSales.map((sale) => [
+                    'Output VAT',
+                    sale.transactionId,
+                    new Date(sale.timestamp).toLocaleString(),
+                    formatMoney(sale.taxAmount, settings.currency),
+                    formatMoney(sale.grandTotal, settings.currency),
+                  ]),
+                  ...serverInputVatRows.map((record) => [
+                    'Input VAT',
+                    record.invoiceNumber ?? record.recordNumber,
+                    record.date,
+                    formatMoney(record.inputVatAmount, settings.currency),
+                    formatMoney(record.goodsAmount, settings.currency),
+                  ]),
+                ]}
+              />
+            )}
 
-          {activeView === 'suppliers' && (
-            <ReportTable
-              title="Supplier report"
-              subtitle="Supplier records and balances"
-              headers={['Supplier', 'Contact', 'Phone', 'Terms', 'Balance']}
-              empty="No suppliers recorded yet."
-              rows={vendors.map((vendor) => [
-                vendor.name,
-                vendor.contactName,
-                vendor.phone,
-                vendor.paymentTerms,
-                formatMoney(vendor.outstandingBalance, settings.currency),
-              ])}
-            />
-          )}
+            {activeView === 'discounts' && (
+              <ReportTable
+                title="Discount report"
+                subtitle="Discounts applied to completed sales"
+                headers={['Receipt', 'Customer', 'Discount', 'Total']}
+                empty="No discounts recorded yet."
+                rows={data.completedSales
+                  .filter((sale) => sale.discountTotal > 0)
+                  .map((sale) => [
+                    sale.transactionId,
+                    sale.customerName ?? 'Walk-in Customer',
+                    formatMoney(sale.discountTotal, settings.currency),
+                    formatMoney(sale.grandTotal, settings.currency),
+                  ])}
+              />
+            )}
 
-          {activeView === 'vat' && (
-            <ReportTable
-              title="VAT / Tax report"
-              subtitle={`Default VAT is ${settings.taxRate}% (${settings.taxMode ?? 'exclusive'})`}
-              headers={['Receipt', 'Date', 'Tax Amount', 'Total']}
-              empty="No tax records yet."
-              rows={data.completedSales.map((sale) => [
-                sale.transactionId,
-                new Date(sale.timestamp).toLocaleString(),
-                formatMoney(sale.taxAmount, settings.currency),
-                formatMoney(sale.grandTotal, settings.currency),
-              ])}
-            />
-          )}
-
-          {activeView === 'discounts' && (
-            <ReportTable
-              title="Discount report"
-              subtitle="Discounts applied to completed sales"
-              headers={['Receipt', 'Customer', 'Discount', 'Total']}
-              empty="No discounts recorded yet."
-              rows={data.completedSales
-                .filter((sale) => sale.discountTotal > 0)
-                .map((sale) => [
+            {activeView === 'refunds' && (
+              <ReportTable
+                title="Refund report"
+                subtitle="Refunded sales"
+                headers={['Receipt', 'Customer', 'Date', 'Total']}
+                empty="No refunds recorded yet."
+                rows={displayRefundRows.map((sale) => [
                   sale.transactionId,
                   sale.customerName ?? 'Walk-in Customer',
-                  formatMoney(sale.discountTotal, settings.currency),
+                  new Date(sale.timestamp).toLocaleString(),
                   formatMoney(sale.grandTotal, settings.currency),
                 ])}
-            />
-          )}
+              />
+            )}
 
-          {activeView === 'refunds' && (
-            <ReportTable
-              title="Refund report"
-              subtitle="Refunded sales"
-              headers={['Receipt', 'Customer', 'Date', 'Total']}
-              empty="No refunds recorded yet."
-              rows={displayRefundRows.map((sale) => [
-                sale.transactionId,
-                sale.customerName ?? 'Walk-in Customer',
-                new Date(sale.timestamp).toLocaleString(),
-                formatMoney(sale.grandTotal, settings.currency),
-              ])}
-            />
-          )}
+            {activeView === 'voided' && (
+              <ReportTable
+                title="Voided sales report"
+                subtitle="Voided transactions"
+                headers={['Receipt', 'Customer', 'Date', 'Total']}
+                empty="No voided sales recorded yet."
+                rows={displayVoidedRows.map((sale) => [
+                  sale.transactionId,
+                  sale.customerName ?? 'Walk-in Customer',
+                  new Date(sale.timestamp).toLocaleString(),
+                  formatMoney(sale.grandTotal, settings.currency),
+                ])}
+              />
+            )}
 
-          {activeView === 'voided' && (
-            <ReportTable
-              title="Voided sales report"
-              subtitle="Voided transactions"
-              headers={['Receipt', 'Customer', 'Date', 'Total']}
-              empty="No voided sales recorded yet."
-              rows={displayVoidedRows.map((sale) => [
-                sale.transactionId,
-                sale.customerName ?? 'Walk-in Customer',
-                new Date(sale.timestamp).toLocaleString(),
-                formatMoney(sale.grandTotal, settings.currency),
-              ])}
-            />
-          )}
+            {(activeView === 'cashier-closing' || activeView === 'end-of-day') && (
+              <ReportTable
+                title={
+                  activeView === 'cashier-closing' ? 'Cashier closing report' : 'End-of-day report'
+                }
+                subtitle="Sales, expenses, profit, and sync summary for the selected period"
+                headers={['Metric', 'Value']}
+                empty="No report data yet."
+                rows={[
+                  ['Sales', formatMoney(data.revenue, settings.currency)],
+                  ['Credit Due', formatMoney(data.receivables, settings.currency)],
+                  ['Gross Profit', formatMoney(data.grossProfit, settings.currency)],
+                  ['Expenses', formatMoney(data.expenseTotal, settings.currency)],
+                  ['Net Profit', formatMoney(data.netProfit, settings.currency)],
+                  ['Pending Sync', data.pendingSync.toString()],
+                ]}
+              />
+            )}
 
-          {(activeView === 'cashier-closing' || activeView === 'end-of-day') && (
-            <ReportTable
-              title={
-                activeView === 'cashier-closing' ? 'Cashier closing report' : 'End-of-day report'
-              }
-              subtitle="Sales, expenses, profit, and sync summary for the selected period"
-              headers={['Metric', 'Value']}
-              empty="No report data yet."
-              rows={[
-                ['Sales', formatMoney(data.revenue, settings.currency)],
-                ['Credit Due', formatMoney(data.receivables, settings.currency)],
-                ['Gross Profit', formatMoney(data.grossProfit, settings.currency)],
-                ['Expenses', formatMoney(data.expenseTotal, settings.currency)],
-                ['Net Profit', formatMoney(data.netProfit, settings.currency)],
-                ['Pending Sync', data.pendingSync.toString()],
-              ]}
-            />
-          )}
-
-          {activeView === 'audit' && (
-            <ReportTable
-              title="Audit trail"
-              subtitle="Local sync events and operation records"
-              headers={['Created', 'Entity', 'Action', 'Status', 'Key']}
-              empty="No audit events yet."
-              rows={syncQueue.map((item) => [
-                new Date(item.createdAt).toLocaleString(),
-                item.entity,
-                item.action,
-                item.status,
-                item.idempotencyKey,
-              ])}
-            />
-          )}
-        </div>
-      </PermissionGate>
+            {activeView === 'audit' && (
+              <ReportTable
+                title="Audit trail"
+                subtitle="Authoritative server audit events and local sync status"
+                headers={['Created', 'Entity', 'Action', 'User', 'Operation']}
+                empty="No audit events yet."
+                rows={(serverReportRows.audit?.length
+                  ? serverReportRows.audit
+                  : syncQueue.map((item) => ({
+                      createdAt: item.createdAt,
+                      entityType: item.entity,
+                      action: item.action,
+                      userId: '-',
+                      operationId: item.operationId,
+                    })))!.map((item) => {
+                  const row = item as {
+                    createdAt?: string;
+                    entityType?: string;
+                    action?: string;
+                    userId?: string;
+                    operationId?: string;
+                  };
+                  return [
+                    row.createdAt ? new Date(row.createdAt).toLocaleString() : '-',
+                    row.entityType ?? '-',
+                    row.action ?? '-',
+                    row.userId ?? '-',
+                    row.operationId ?? '-',
+                  ];
+                })}
+              />
+            )}
+          </div>
+        </PermissionGate>
+      )}
     </AppLayout>
   );
 }

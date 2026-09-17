@@ -21,7 +21,12 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as Record<string, unknown>;
     const saleId = typeof body.saleId === 'string' ? body.saleId : '';
     const amount = Number(body.amount);
-    if (!saleId || !Number.isFinite(amount) || amount <= 0) {
+    if (
+      !saleId ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-8
+    ) {
       throw new HttpError(400, 'Sale and positive payment amount are required', 'VALIDATION_ERROR');
     }
     const operationId = typeof body.operationId === 'string' ? body.operationId : randomUUID();

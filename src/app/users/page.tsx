@@ -75,6 +75,37 @@ const permissionGroups: { title: string; items: Permission[] }[] = [
   { title: 'Settings & Control', items: ['settings', 'manage-tax', 'notifications'] },
 ];
 
+const hospitalityPermissions: Permission[] = [
+  'dashboard',
+  'reports',
+  'users',
+  'settings',
+  'expenses',
+  'expense-heads',
+  'export-reports',
+  'view-profit',
+  'manage-tax',
+  'branches',
+  'notifications',
+  'hospitality-reservations',
+  'hospitality-rooms',
+  'hospitality-guests',
+  'hospitality-payments',
+];
+
+const hospitalityPermissionGroups: { title: string; items: Permission[] }[] = [
+  {
+    title: 'Front Office',
+    items: ['dashboard', 'hospitality-reservations', 'hospitality-guests', 'hospitality-payments'],
+  },
+  { title: 'Rooms & Housekeeping', items: ['hospitality-rooms'] },
+  {
+    title: 'Finance & Reports',
+    items: ['expenses', 'expense-heads', 'reports', 'export-reports', 'view-profit', 'manage-tax'],
+  },
+  { title: 'Administration', items: ['users', 'settings', 'branches', 'notifications'] },
+];
+
 const roles: UserRole[] = [
   'super-admin',
   'owner',
@@ -83,6 +114,18 @@ const roles: UserRole[] = [
   'inventory',
   'accountant',
   'expense-clerk',
+  'auditor',
+  'viewer',
+];
+
+const hospitalityRoles: UserRole[] = [
+  'super-admin',
+  'owner',
+  'manager',
+  'receptionist',
+  'housekeeping',
+  'booking-agent',
+  'accountant',
   'auditor',
   'viewer',
 ];
@@ -136,6 +179,40 @@ const defaultPermissionsByRole: Record<UserRole, Permission[]> = {
   'expense-clerk': ['dashboard', 'expenses', 'expense-heads', 'reports'],
   auditor: ['dashboard', 'reports', 'export-reports', 'view-profit'],
   viewer: ['dashboard', 'reports'],
+  receptionist: [
+    'dashboard',
+    'hospitality-reservations',
+    'hospitality-guests',
+    'hospitality-payments',
+    'reports',
+  ],
+  housekeeping: ['dashboard', 'hospitality-rooms', 'hospitality-reservations'],
+  'booking-agent': [
+    'dashboard',
+    'hospitality-reservations',
+    'hospitality-guests',
+    'hospitality-payments',
+    'reports',
+  ],
+};
+
+const hospitalityDefaultPermissions: Partial<Record<UserRole, Permission[]>> = {
+  'super-admin': hospitalityPermissions,
+  owner: hospitalityPermissions,
+  manager: hospitalityPermissions,
+  receptionist: defaultPermissionsByRole.receptionist,
+  housekeeping: defaultPermissionsByRole.housekeeping,
+  'booking-agent': defaultPermissionsByRole['booking-agent'],
+  accountant: [
+    'dashboard',
+    'reports',
+    'export-reports',
+    'expenses',
+    'expense-heads',
+    'view-profit',
+  ],
+  auditor: ['dashboard', 'reports', 'export-reports', 'view-profit'],
+  viewer: ['dashboard', 'reports'],
 };
 
 const permissionLabels: Record<Permission, string> = {
@@ -166,6 +243,10 @@ const permissionLabels: Record<Permission, string> = {
   'sync-logs': 'Review sync logs',
   categories: 'Manage categories',
   'expense-heads': 'Manage expense heads',
+  'hospitality-reservations': 'Manage reservations',
+  'hospitality-rooms': 'Manage rooms and services',
+  'hospitality-guests': 'Manage guests',
+  'hospitality-payments': 'Record guest payments',
 };
 
 function emptyUser(): TovaUser {
@@ -189,6 +270,17 @@ export default function UsersPage() {
   const [rowsPerPage] = useRowsPerPage();
   const [page, setPage] = useState(1);
   const canDeleteUsers = currentUser?.role === 'owner' || currentUser?.role === 'super-admin';
+  const isHospitality = settings.businessMode === 'hospitality';
+  const activePermissions = isHospitality ? hospitalityPermissions : permissions;
+  const activePermissionGroups = isHospitality ? hospitalityPermissionGroups : permissionGroups;
+  const availableRoles = isHospitality ? hospitalityRoles : roles;
+  const permissionsForRole = (role: UserRole) =>
+    (isHospitality ? hospitalityDefaultPermissions[role] : defaultPermissionsByRole[role]) ?? [];
+  const roleLabels: Partial<Record<UserRole, string>> = {
+    receptionist: 'Front Desk / Reception',
+    housekeeping: 'Housekeeping',
+    'booking-agent': 'Reservations Officer',
+  };
 
   const activeUsers = useMemo(
     () => users.filter((user) => user.status === 'active').length,
@@ -200,6 +292,10 @@ export default function UsersPage() {
 
   const openCreate = () => {
     const user = emptyUser();
+    if (isHospitality) {
+      user.role = 'receptionist';
+      user.permissions = defaultPermissionsByRole.receptionist;
+    }
     setForm(user);
     setEditing(user);
     setLoginPassword('');
@@ -255,8 +351,12 @@ export default function UsersPage() {
 
   return (
     <AppLayout
-      title="Users & Permissions"
-      subtitle="Create users, assign roles, and control access"
+      title={isHospitality ? 'Hospitality Team & Access' : 'Users & Permissions'}
+      subtitle={
+        isHospitality
+          ? 'Manage front desk, reservations, housekeeping, and finance access'
+          : 'Create users, assign roles, and control access'
+      }
     >
       <PermissionGate permission="users">
         <div className="mx-auto max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
@@ -309,7 +409,7 @@ export default function UsersPage() {
                     <tr key={user.id} className="hover:bg-muted/30">
                       <td className="px-4 py-3 font-medium">{user.name}</td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{user.email}</td>
-                      <td className="px-4 py-3 capitalize">{user.role}</td>
+                      <td className="px-4 py-3">{roleLabels[user.role] ?? user.role}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {user.permissions
                           .slice(0, 5)
@@ -416,9 +516,12 @@ export default function UsersPage() {
                 value={form.role}
                 onChange={(value) => {
                   const role = value as UserRole;
-                  setForm({ ...form, role, permissions: defaultPermissionsByRole[role] });
+                  setForm({ ...form, role, permissions: permissionsForRole(role) });
                 }}
-                options={roles.map((role) => ({ value: role, label: role }))}
+                options={availableRoles.map((role) => ({
+                  value: role,
+                  label: roleLabels[role] ?? role,
+                }))}
               />
             </label>
             <label className="space-y-1">
@@ -465,7 +568,7 @@ export default function UsersPage() {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setForm({ ...form, permissions })}
+                  onClick={() => setForm({ ...form, permissions: activePermissions })}
                   className="rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted"
                 >
                   Select all
@@ -480,7 +583,7 @@ export default function UsersPage() {
               </div>
             </div>
             <div className="space-y-4">
-              {permissionGroups.map((group) => (
+              {activePermissionGroups.map((group) => (
                 <div key={group.title} className="rounded-xl border border-border bg-muted/20 p-3">
                   <p className="mb-2 text-xs font-bold uppercase text-muted-foreground">
                     {group.title}

@@ -13,6 +13,7 @@ import { assertSellable, getDaysUntilExpiry } from '@/lib/pos/stock';
 import { formatMoney } from '@/lib/pos/money';
 import { getProductDiscountPercent, money, resolveTaxRate } from '@/lib/pos/sale-calculations';
 import { loyaltyRedemption } from '@/lib/pos/loyalty';
+import { normalizeCustomerPhone } from '@/lib/pos/customer';
 
 export interface CartItem {
   id: string;
@@ -124,7 +125,7 @@ export default function CheckoutScreen() {
   const selectedCustomer = customers.find(
     (customer) =>
       customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
-      customer.phone === customerName.trim()
+      normalizeCustomerPhone(customer.phone) === normalizeCustomerPhone(customerName)
   );
   const loyaltyPreview = loyaltyRedemption(
     selectedCustomer,
@@ -148,7 +149,7 @@ export default function CheckoutScreen() {
     const selectedCustomer = customers.find(
       (customer) =>
         customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
-        customer.phone === customerName.trim()
+        normalizeCustomerPhone(customer.phone) === normalizeCustomerPhone(customerName)
     );
     setCart((current) =>
       current.map((item) => {
@@ -251,7 +252,7 @@ export default function CheckoutScreen() {
         const selectedCustomer = customers.find(
           (customer) =>
             customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
-            customer.phone === customerName.trim()
+            normalizeCustomerPhone(customer.phone) === normalizeCustomerPhone(customerName)
         );
         const rule = selectedCustomer?.discountRules?.find(
           (candidate) => candidate.inventoryItemId === product.id && candidate.active

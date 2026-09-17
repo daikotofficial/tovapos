@@ -18,7 +18,7 @@ const fileEnv = fs.existsSync('.env')
     )
   : {};
 const databaseUrl = process.env.DATABASE_URL || fileEnv.DATABASE_URL;
-const baseUrl = process.env.TEST_BASE_URL || 'http://localhost:3000';
+const baseUrl = process.env.TEST_BASE_URL || 'http://localhost:4028';
 const stamp = Date.now();
 const tenantIds = [];
 
@@ -358,6 +358,15 @@ try {
   });
   assert.equal(forbiddenCreditSale.response.status, 403);
   assert.equal(forbiddenCreditSale.body.code, 'FORBIDDEN');
+  const malformedCurrencySale = await authenticated('/api/commands/sale', companyA.cookie, {
+    operationId: `malformed-currency-${stamp}`,
+    idempotencyKey: `malformed-currency:${stamp}`,
+    items: [{ inventoryItemId: sharedId, quantity: 1, discount: 0, unitPrice: 10.001 }],
+    paymentMethod: 'cash',
+    cashTendered: 10.001,
+  });
+  assert.equal(malformedCurrencySale.response.status, 400);
+  assert.equal(malformedCurrencySale.body.code, 'VALIDATION_ERROR');
   const changedPassword = 'Changed!Cashier456';
   const passwordChange = await authenticated('/api/auth/change-password', cashierCookie, {
     currentPassword: 'Strong!Cashier123',
@@ -462,6 +471,23 @@ try {
   );
   assert.equal(finalStock.body[0].currentQty, 0);
 
+  const concurrentRefunds = await Promise.all(
+    [0, 1].map((index) =>
+      authenticated('/api/commands/refund', companyA.cookie, {
+        operationId: `refund-race-${stamp}-${index}`,
+        saleId: sales[acceptedIndex].body.sale.id,
+        reason: `Refund race test ${index}`,
+      })
+    )
+  );
+  assert.equal(concurrentRefunds.filter((result) => result.response.status === 200).length, 1);
+  assert.equal(concurrentRefunds.filter((result) => result.response.status === 409).length, 1);
+  const refundedStock = await authenticated(
+    `/api/pos-store?store=inventory&ids=${sharedId}`,
+    companyA.cookie
+  );
+  assert.equal(refundedStock.body[0].currentQty, 1);
+
   // Simulate the ordered replay of 20 sales accumulated during a short outage.
   const replayProductId = `offline-replay-${stamp}`;
   const replayProduct = {
@@ -504,6 +530,41 @@ try {
   );
   assert.equal(replayFinalStock.body[0].currentQty, 10);
 
+  const creditSale = await authenticated('/api/commands/sale', companyA.cookie, {
+    operationId: `credit-sale-${stamp}`,
+    idempotencyKey: `credit-sale:${stamp}`,
+    items: [{ inventoryItemId: replayProductId, quantity: 1, discount: 0, unitPrice: 10 }],
+    paymentMethod: 'credit',
+    cashTendered: 0,
+  });
+  assert.equal(creditSale.response.status, 201);
+  const malformedCreditPayment = await authenticated(
+    '/api/commands/credit-payment',
+    companyA.cookie,
+    {
+      operationId: `credit-payment-malformed-${stamp}`,
+      saleId: creditSale.body.sale.id,
+      amount: 0.001,
+      method: 'cash',
+    }
+  );
+  assert.equal(malformedCreditPayment.response.status, 400);
+  const creditPaymentCommands = [6, 6].map((amount, index) => ({
+    operationId: `credit-payment-${stamp}-${index}`,
+    saleId: creditSale.body.sale.id,
+    amount,
+    method: 'cash',
+  }));
+  const creditPayments = await Promise.all(
+    creditPaymentCommands.map((command) =>
+      authenticated('/api/commands/credit-payment', companyA.cookie, command)
+    )
+  );
+  assert.equal(creditPayments.filter((result) => result.response.status === 200).length, 1);
+  assert.equal(creditPayments.filter((result) => result.response.status === 409).length, 1);
+  const acceptedCreditPayment = creditPayments.find((result) => result.response.status === 200);
+  assert.equal(acceptedCreditPayment.body.sale.amountDue, 4);
+
   // Ten concurrent stock-manager deltas serialize on the tenant/product row.
   const concurrentStockId = `concurrent-stock-${stamp}`;
   const concurrentProduct = {
@@ -519,6 +580,28 @@ try {
     quantityDelta: 0,
   });
   assert.equal(stockCreate.response.status, 200);
+  const stockVersion = stockCreate.body.inventory.updatedAt;
+  const metadataUpdate = await authenticated('/api/commands/stock-adjustment', companyA.cookie, {
+    operationId: `stock-metadata-a-${stamp}`,
+    idempotencyKey: `stock-metadata-a:${stamp}`,
+    expectedUpdatedAt: stockVersion,
+    product: { ...concurrentProduct, name: 'Authoritative Concurrent Stock Product' },
+    quantityDelta: 0,
+  });
+  assert.equal(metadataUpdate.response.status, 200);
+  const staleMetadataUpdate = await authenticated(
+    '/api/commands/stock-adjustment',
+    companyA.cookie,
+    {
+      operationId: `stock-metadata-b-${stamp}`,
+      idempotencyKey: `stock-metadata-b:${stamp}`,
+      expectedUpdatedAt: stockVersion,
+      product: { ...concurrentProduct, name: 'Stale Product Name' },
+      quantityDelta: 0,
+    }
+  );
+  assert.equal(staleMetadataUpdate.response.status, 409);
+  assert.equal(staleMetadataUpdate.body.code, 'STALE_INVENTORY_UPDATE');
   const stockAdds = await Promise.all(
     Array.from({ length: 10 }, (_, index) =>
       authenticated('/api/commands/stock-adjustment', companyA.cookie, {

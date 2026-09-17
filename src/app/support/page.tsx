@@ -4,8 +4,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { LifeBuoy, Loader2, MessageSquare, Send } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import type { SupportTicket } from '@/lib/pos/types';
+import { usePosStore } from '@/lib/pos/PosStoreProvider';
 
 export default function SupportPage() {
+  const { activeBusinessMode } = usePosStore();
+  const businessLabel = activeBusinessMode === 'hospitality' ? 'Hospitality' : 'Retail';
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -70,7 +73,10 @@ export default function SupportPage() {
   };
 
   return (
-    <AppLayout title="Support" subtitle="Send tickets to TOVAPOS support and track responses">
+    <AppLayout
+      title={`${businessLabel} Support`}
+      subtitle={`Send ${businessLabel.toLowerCase()} support requests and track responses`}
+    >
       <div className="mx-auto grid max-w-6xl gap-4 px-3 py-4 sm:gap-5 sm:p-6 lg:grid-cols-[380px_1fr]">
         <form
           id="new-ticket"
@@ -83,7 +89,8 @@ export default function SupportPage() {
           </div>
           <div className="space-y-4 p-5">
             <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-muted-foreground">
-              Tickets are sent securely to TOVAPOS support inside the platform admin console.
+              This ticket will be routed to TOVAPOS support with your {businessLabel} business
+              context.
             </p>
             {error && (
               <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">

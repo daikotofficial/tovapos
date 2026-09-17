@@ -14,6 +14,7 @@ function ticketFromRow(row: Record<string, unknown>): SupportTicket {
     id: String(row.id),
     tenantId: String(row.tenant_id),
     tenantName: row.tenant_name ? String(row.tenant_name) : undefined,
+    businessMode: row.business_mode === 'hospitality' ? 'hospitality' : 'retail',
     subject: String(row.subject),
     message: String(row.message),
     status: row.status as SupportTicket['status'],
@@ -106,9 +107,14 @@ export async function GET(request: NextRequest) {
       ),
       getPosPool().query(
         `
-        SELECT st.*, t.name AS tenant_name
+        SELECT st.*, t.name AS tenant_name,
+               COALESCE(settings.data->>'businessMode', 'retail') AS business_mode
         FROM pos_support_tickets st
         JOIN pos_tenants t ON t.id = st.tenant_id
+        LEFT JOIN pos_tenant_records settings
+          ON settings.tenant_id = st.tenant_id
+         AND settings.store_name = 'settings'
+         AND settings.record_id = 'settings'
         ORDER BY st.created_at DESC
         LIMIT 100
         `

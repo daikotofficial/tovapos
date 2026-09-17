@@ -39,6 +39,13 @@ On reconnect:
 4. Server-authoritative inventory and receipt data replace the local projection.
 5. Conflicts remain failed and visible; they are never falsely marked synced.
 
+Offline sales have a 24-hour operating window measured from the first confirmed outage. After
+that window, new offline sales are paused until the application confirms the server and database
+are reachable. Existing queued operations remain durable for synchronization or manual review.
+This is an operational safety limit, not a guarantee that multiple disconnected terminals cannot
+oversell shared stock; exact shared-stock guarantees require live connectivity or per-terminal
+stock allocation.
+
 Retries use bounded exponential backoff and stop after five attempts for manual review.
 
 Refunds and credit payments intentionally require connectivity because duplicate refunds and stale customer balances are unsafe to reconcile automatically.

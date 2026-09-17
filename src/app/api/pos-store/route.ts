@@ -29,7 +29,11 @@ const STORE_NAMES = new Set([
   'customers',
   'vendors',
   'expenses',
+  'inputVat',
   'settings',
+  'hospitalityServices',
+  'hospitalityReservations',
+  'hospitalityGuests',
 ]);
 
 const STORE_ALIASES: Record<string, string> = {
@@ -51,6 +55,10 @@ const READ_PERMISSIONS: Partial<Record<string, Permission[]>> = {
   customers: ['customers', 'checkout'],
   vendors: ['vendors', 'inventory'],
   expenses: ['expenses', 'reports'],
+  inputVat: ['manage-tax', 'reports'],
+  hospitalityServices: ['checkout', 'customers'],
+  hospitalityReservations: ['checkout', 'customers'],
+  hospitalityGuests: ['checkout', 'customers'],
 };
 
 const WRITE_PERMISSIONS: Partial<Record<string, Permission>> = {
@@ -61,7 +69,11 @@ const WRITE_PERMISSIONS: Partial<Record<string, Permission>> = {
   customers: 'customers',
   vendors: 'vendors',
   expenses: 'expenses',
+  inputVat: 'manage-tax',
   settings: 'settings',
+  hospitalityServices: 'checkout',
+  hospitalityReservations: 'checkout',
+  hospitalityGuests: 'checkout',
 };
 
 function getStoreName(request: NextRequest): string {
@@ -75,6 +87,23 @@ function getStoreName(request: NextRequest): string {
     );
   }
   return storeName;
+}
+
+async function assertRetailOnlyFeature(auth: AuthContext, storeName: string): Promise<void> {
+  if (storeName !== 'inputVat') return;
+  const result = await getPosPool().query(
+    `SELECT data->>'businessMode' AS business_mode
+     FROM pos_tenant_records
+     WHERE tenant_id = $1 AND store_name = 'settings' AND record_id = 'settings'`,
+    [auth.tenantId]
+  );
+  if (result.rows[0]?.business_mode === 'hospitality') {
+    throw new HttpError(
+      403,
+      'Input VAT Register is available only for Retail / Product businesses',
+      'RETAIL_FEATURE_ONLY'
+    );
+  }
 }
 
 function prepareRecordForStorage(record: PosRecord): PosRecord {
@@ -212,6 +241,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   if (report === 'refunds') assertPermission(auth, 'refunds');
   if (report === 'credit-sales') assertPermission(auth, 'credit-sales');
   if (report === 'expenses') assertPermission(auth, 'expenses');
+  if (report === 'input-vat') assertPermission(auth, 'manage-tax');
   const values: unknown[] = [auth.tenantId];
   const where: string[] = ['tenant_id = $1'];
 
@@ -257,6 +287,42 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
       FROM pos_tenant_expenses
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY incurred_at DESC, id DESC
+      LIMIT $${values.length - 1} OFFSET $${values.length}
+      `,
+      values
+    );
+    return NextResponse.json({ rows: result.rows.map((row) => row.data), limit, offset });
+  }
+
+  if (report === 'audit') {
+    appendDateRange(params, 'created_at', values, where);
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `
+      SELECT id, action, entity_type AS "entityType", entity_id AS "entityId",
+             operation_id AS "operationId", user_id AS "userId", metadata,
+             created_at AS "createdAt"
+      FROM pos_audit_log
+      WHERE ${where.join(' AND ')}
+      ORDER BY created_at DESC, id DESC
+      LIMIT $${values.length - 1} OFFSET $${values.length}
+      `,
+      values
+    );
+    return NextResponse.json({ rows: result.rows, limit, offset });
+  }
+
+  if (report === 'input-vat') {
+    appendDateRange(params, "data->>'date'", values, where, true);
+    where.push("store_name = 'inputVat'");
+    where.push("coalesce(data->>'status', 'recorded') = 'recorded'");
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `
+      SELECT data
+      FROM pos_tenant_records
+      WHERE ${where.join(' AND ')}
+      ORDER BY data->>'date' DESC, record_id DESC
       LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
@@ -664,6 +730,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
     const storeName = getStoreName(request);
+    await assertRetailOnlyFeature(auth, storeName);
     const planFeature = WRITE_PERMISSIONS[storeName];
     if (planFeature && storeName !== 'users') {
       await assertTenantPlanPermission(auth.tenantId, planFeature);
@@ -735,6 +802,7 @@ export async function PUT(request: NextRequest) {
     const auth = await requireAuth(request);
     assertTenantActive(auth);
     const storeName = getStoreName(request);
+    await assertRetailOnlyFeature(auth, storeName);
     if (['inventory', 'stockMovements', 'sales'].includes(storeName)) {
       throw new HttpError(
         405,
@@ -751,6 +819,90 @@ export async function PUT(request: NextRequest) {
     let records = (Array.isArray(body) ? body : [body]) as PosRecord[];
     if (records.length === 0 || records.length > 500) {
       throw new HttpError(400, 'Write batch must contain 1 to 500 records', 'VALIDATION_ERROR');
+    }
+
+    if (storeName === 'inputVat') {
+      for (const record of records) {
+        const date = typeof record.date === 'string' ? record.date : '';
+        const vendorName = typeof record.vendorName === 'string' ? record.vendorName.trim() : '';
+        const goodsAmount = Number(record.goodsAmount);
+        const inputVatAmount = Number(record.inputVatAmount);
+        if (
+          !record.id ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+          !vendorName ||
+          !Number.isFinite(goodsAmount) ||
+          goodsAmount < 0 ||
+          !Number.isFinite(inputVatAmount) ||
+          inputVatAmount < 0
+        ) {
+          throw new HttpError(
+            400,
+            'Input VAT record contains invalid required fields',
+            'VALIDATION_ERROR'
+          );
+        }
+        if (
+          Math.abs(goodsAmount * 100 - Math.round(goodsAmount * 100)) > 1e-8 ||
+          Math.abs(inputVatAmount * 100 - Math.round(inputVatAmount * 100)) > 1e-8
+        ) {
+          throw new HttpError(
+            400,
+            'Input VAT amounts must use at most two decimal places',
+            'VALIDATION_ERROR'
+          );
+        }
+        record.vendorName = vendorName;
+        record.goodsAmount = goodsAmount;
+        record.inputVatAmount = inputVatAmount;
+        if (record.totalInvoiceAmount !== undefined && record.totalInvoiceAmount !== null) {
+          const totalInvoiceAmount = Number(record.totalInvoiceAmount);
+          if (!Number.isFinite(totalInvoiceAmount) || totalInvoiceAmount < 0) {
+            throw new HttpError(400, 'Total invoice amount is invalid', 'VALIDATION_ERROR');
+          }
+          if (Math.abs(totalInvoiceAmount * 100 - Math.round(totalInvoiceAmount * 100)) > 1e-8) {
+            throw new HttpError(
+              400,
+              'Total invoice amount must use at most two decimal places',
+              'VALIDATION_ERROR'
+            );
+          }
+          record.totalInvoiceAmount = totalInvoiceAmount;
+        }
+      }
+    }
+
+    if (storeName === 'customers') {
+      const phoneOwners = new Map<string, string>();
+      for (const record of records) {
+        const phone = typeof record.phone === 'string' ? record.phone.trim() : '';
+        const normalizedPhone = phone.replace(/[^\d+]/g, '');
+        if (!normalizedPhone) {
+          throw new HttpError(400, 'Customer phone number is required', 'PHONE_REQUIRED');
+        }
+        const batchOwner = phoneOwners.get(normalizedPhone);
+        if (batchOwner && batchOwner !== record.id) {
+          throw new HttpError(409, 'Customer phone numbers must be unique', 'DUPLICATE_PHONE');
+        }
+        phoneOwners.set(normalizedPhone, record.id as string);
+        const duplicate = await getPosPool().query(
+          `SELECT data->>'name' AS name
+           FROM pos_tenant_records
+           WHERE tenant_id = $1 AND store_name = 'customers'
+             AND record_id <> $2
+             AND regexp_replace(coalesce(data->>'phone', ''), '[^0-9+]', '', 'g') = $3
+           LIMIT 1`,
+          [auth.tenantId, record.id, normalizedPhone]
+        );
+        if (duplicate.rowCount) {
+          throw new HttpError(
+            409,
+            `This phone number already belongs to ${duplicate.rows[0]?.name ?? 'another customer'}`,
+            'DUPLICATE_PHONE'
+          );
+        }
+        record.phone = normalizedPhone;
+      }
     }
 
     if (storeName === 'users') {
@@ -785,6 +937,9 @@ export async function PUT(request: NextRequest) {
           'manager',
           'cashier',
           'inventory',
+          'receptionist',
+          'housekeeping',
+          'booking-agent',
           'accountant',
           'expense-clerk',
           'auditor',
@@ -909,7 +1064,7 @@ export async function PUT(request: NextRequest) {
           [auth.tenantId]
         );
         const plan = getSubscriptionPlan(settingsResult.rows[0]?.data?.subscriptionPlanId);
-        if (plan.productLimit) {
+        if (process.env.DEPLOYMENT_MODE !== 'onprem' && plan.productLimit) {
           const existingInventory = await client.query(
             'SELECT count(*)::bigint AS product_count FROM pos_tenant_inventory WHERE tenant_id = $1',
             [auth.tenantId]
@@ -1021,7 +1176,8 @@ export async function DELETE(request: NextRequest) {
     const auth = await requireAuth(request);
     assertTenantActive(auth);
     const storeName = getStoreName(request);
-    if (storeName === 'sales' || storeName === 'stockMovements') {
+    await assertRetailOnlyFeature(auth, storeName);
+    if (storeName === 'sales' || storeName === 'stockMovements' || storeName === 'inputVat') {
       throw new HttpError(405, 'Financial records cannot be directly deleted', 'DELETE_FORBIDDEN');
     }
     if (storeName === 'inventory') assertPermission(auth, 'delete-product');

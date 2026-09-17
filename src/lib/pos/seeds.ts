@@ -23,6 +23,8 @@ export const defaultProductCategories: ProductCategory[] = [
 export const defaultSettings: BusinessSettings = {
   id: 'settings',
   businessName: 'TOVAPOS',
+  businessMode: 'retail',
+  activeBusinessMode: 'retail',
   logoUrl: '',
   address: '',
   phone: '',

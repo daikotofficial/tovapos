@@ -5,7 +5,9 @@ import Link from 'next/link';
 import {
   AlertTriangle,
   Banknote,
+  BedDouble,
   Boxes,
+  CalendarCheck,
   CircleDollarSign,
   PackageCheck,
   Receipt,
@@ -19,10 +21,14 @@ import { formatMoney } from '@/lib/pos/money';
 import {
   loadInventoryMetrics,
   loadSalesMetrics,
+  loadHospitalityGuests,
+  loadHospitalityReservations,
+  loadHospitalityServices,
   type InventoryMetrics,
   type SalesMetrics,
 } from '@/lib/pos/local-store';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import { isReservationLive, isRoom } from '@/lib/pos/hospitality';
 
 function dayKey(value: string): string {
   return value.slice(0, 10);
@@ -42,14 +48,255 @@ function saleProfit(sale: {
   );
 }
 
+function HospitalityDashboard({
+  currency,
+  isHydrated,
+  isAuthenticated,
+}: {
+  currency: string;
+  isHydrated: boolean;
+  isAuthenticated: boolean;
+}) {
+  const [services, setServices] = useState<Awaited<ReturnType<typeof loadHospitalityServices>>>([]);
+  const [reservations, setReservations] = useState<
+    Awaited<ReturnType<typeof loadHospitalityReservations>>
+  >([]);
+  const [guestCount, setGuestCount] = useState(0);
+
+  useEffect(() => {
+    if (!isHydrated || !isAuthenticated) return;
+    let cancelled = false;
+    const refresh = () =>
+      Promise.all([
+        loadHospitalityServices(),
+        loadHospitalityReservations(),
+        loadHospitalityGuests(),
+      ])
+        .then(([nextServices, nextReservations, nextGuests]) => {
+          if (cancelled) return;
+          setServices(nextServices);
+          setReservations(nextReservations);
+          setGuestCount(nextGuests.length);
+        })
+        .catch((error) => console.error('Failed to load hospitality dashboard data', error));
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 30_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [isAuthenticated, isHydrated]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const stats = useMemo(() => {
+    const now = new Date();
+    const activeReservations = reservations.filter((item) => isReservationLive(item, now));
+    const rooms = services.filter(isRoom);
+    const occupiedRooms = rooms.filter((room) =>
+      activeReservations.some(
+        (reservation) =>
+          reservation.serviceId === room.id &&
+          new Date(reservation.checkInAt).getTime() <= now.getTime()
+      )
+    );
+    const paid = activeReservations.reduce((sum, item) => sum + Number(item.amountPaid || 0), 0);
+    const outstanding = activeReservations.reduce(
+      (sum, item) => sum + Math.max(0, Number(item.total || 0) - Number(item.amountPaid || 0)),
+      0
+    );
+    const vatCollected = activeReservations.reduce((sum, item) => {
+      if (!item.total || !item.amountPaid) return sum;
+      return sum + (item.taxAmount * Math.min(item.amountPaid, item.total)) / item.total;
+    }, 0);
+    return {
+      services: services.length,
+      activeServices: services.filter((item) => item.active).length,
+      rooms: rooms.length,
+      availableRooms: Math.max(0, rooms.length - occupiedRooms.length),
+      occupiedRooms: occupiedRooms.length,
+      reservations: activeReservations.length,
+      checkedIn: activeReservations.filter((item) => item.status === 'checked-in').length,
+      arrivalsToday: activeReservations.filter((item) => item.checkInAt.slice(0, 10) === today)
+        .length,
+      departuresToday: activeReservations.filter((item) => item.checkOutAt.slice(0, 10) === today)
+        .length,
+      guests: guestCount,
+      paid,
+      outstanding,
+      vatCollected,
+      occupancyRate: rooms.length ? Math.round((occupiedRooms.length / rooms.length) * 100) : 0,
+      todayBookings: activeReservations.filter((item) => item.createdAt.slice(0, 10) === today)
+        .length,
+    };
+  }, [guestCount, reservations, services, today]);
+
+  const cards = [
+    ['Available Rooms', stats.availableRooms, `${stats.occupancyRate}% occupancy`, BedDouble],
+    ['Rooms with Guests', stats.occupiedRooms, `${stats.checkedIn} checked in now`, ShieldCheck],
+    [
+      'Arrivals Today',
+      stats.arrivalsToday,
+      `${stats.todayBookings} bookings created today`,
+      CalendarCheck,
+    ],
+    ['Departures Today', stats.departuresToday, 'Scheduled check-outs', CalendarCheck],
+    [
+      'Active Bookings',
+      stats.reservations,
+      `${stats.services} rooms & services configured`,
+      Receipt,
+    ],
+    ['Saved Guests', stats.guests, 'Guest profiles available for selection', PackageCheck],
+    [
+      'Booking Revenue Paid',
+      formatMoney(stats.paid, currency),
+      'Deposits and payments received',
+      CircleDollarSign,
+    ],
+    [
+      'Outstanding Bookings',
+      formatMoney(stats.outstanding, currency),
+      'Unpaid booking balances',
+      TrendingDown,
+    ],
+    [
+      'VAT on Paid Bookings',
+      formatMoney(stats.vatCollected, currency),
+      'Calculated from payments received',
+      Receipt,
+    ],
+  ] as const;
+
+  return (
+    <div className="mx-auto w-full max-w-screen-2xl space-y-5 p-4 sm:p-6">
+      <section className="rounded-xl border border-border bg-card p-5 shadow-card">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase text-primary">Front office overview</p>
+            <h2 className="mt-1 text-2xl font-bold">Today’s operations</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Real-time summary of rooms, reservations, guests, payments, and VAT.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Link
+              href="/reservations"
+              className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white"
+            >
+              Reservations
+            </Link>
+            <Link
+              href="/rooms-services"
+              className="rounded-lg border border-border px-3 py-2 text-sm font-semibold"
+            >
+              Rooms &amp; Services
+            </Link>
+          </div>
+        </div>
+      </section>
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map(([label, value, helper, Icon]) => (
+          <article key={label} className="rounded-xl border border-border bg-card p-4 shadow-card">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Icon size={17} className="text-primary" />
+              {label}
+            </div>
+            <p className="mt-3 text-2xl font-bold font-tabular">{value}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
+          </article>
+        ))}
+      </section>
+      <section className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <article className="rounded-xl border border-border bg-card p-5 shadow-card">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase text-primary">Operational queue</p>
+              <h3 className="mt-1 text-lg font-bold">Today&apos;s arrivals and departures</h3>
+            </div>
+            <Link
+              href="/reservations"
+              className="text-xs font-semibold text-primary hover:underline"
+            >
+              Open reservations
+            </Link>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-primary/5 p-4">
+              <p className="text-xs text-muted-foreground">Arrivals</p>
+              <p className="mt-1 text-2xl font-bold">{stats.arrivalsToday}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Guests expected today</p>
+            </div>
+            <div className="rounded-lg bg-success/5 p-4">
+              <p className="text-xs text-muted-foreground">Departures</p>
+              <p className="mt-1 text-2xl font-bold">{stats.departuresToday}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Rooms to prepare</p>
+            </div>
+          </div>
+        </article>
+        <article className="rounded-xl border border-border bg-card p-5 shadow-card">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase text-primary">Revenue control</p>
+              <h3 className="mt-1 text-lg font-bold">Booking payment position</h3>
+            </div>
+            <Link
+              href="/credit-sales"
+              className="text-xs font-semibold text-primary hover:underline"
+            >
+              View unpaid
+            </Link>
+          </div>
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span>Paid on active bookings</span>
+              <strong>{formatMoney(stats.paid, currency)}</strong>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span>Outstanding balance</span>
+              <strong className="text-warning">{formatMoney(stats.outstanding, currency)}</strong>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{
+                  width: `${stats.paid + stats.outstanding ? Math.min(100, (stats.paid / (stats.paid + stats.outstanding)) * 100) : 0}%`,
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {stats.occupancyRate}% of rooms are occupied right now.
+            </p>
+          </div>
+        </article>
+      </section>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
-  const { sales, expenses, inventory, settings, pendingSyncCount } = usePosStore();
+  const {
+    sales,
+    expenses,
+    inventory,
+    settings,
+    pendingSyncCount,
+    activeBusinessMode,
+    isHydrated,
+    isAuthenticated,
+  } = usePosStore();
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function loadMetrics() {
+      if (activeBusinessMode === 'hospitality') {
+        setSalesMetrics(null);
+        setInventoryMetrics(null);
+        return;
+      }
       try {
         const [nextSalesMetrics, nextInventoryMetrics] = await Promise.all([
           loadSalesMetrics(),
@@ -66,7 +313,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [settings.expiryAlertDays]);
+  }, [activeBusinessMode, settings.expiryAlertDays]);
 
   const data = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -217,307 +464,317 @@ export default function DashboardPage() {
   return (
     <AppLayout title="Dashboard" subtitle="Business summary">
       <PermissionGate permission="dashboard">
-        <div className="mx-auto w-full max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
-          <section className="overflow-hidden rounded-lg border border-border bg-[#071412] text-white shadow-card sm:rounded-xl">
-            <div className="grid min-w-0 gap-4 p-4 lg:grid-cols-[1fr_420px] lg:p-6">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-md bg-[#19b8a6]/20 px-3 py-1 text-xs font-bold uppercase text-[#8ee8df]">
-                    Summary
-                  </span>
-                  <span className="rounded-md bg-white/10 px-3 py-1 text-xs font-semibold text-white/70">
-                    {pendingSyncCount} pending sync
-                  </span>
-                </div>
-                <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-3">
-                  <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-                    <p className="text-[11px] font-bold uppercase text-white/50">Month Revenue</p>
-                    <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
-                      {formatMoney(data.monthRevenue, settings.currency)}
-                    </p>
+        {activeBusinessMode === 'hospitality' ? (
+          <HospitalityDashboard
+            currency={settings.currency}
+            isHydrated={isHydrated}
+            isAuthenticated={isAuthenticated}
+          />
+        ) : (
+          <div className="mx-auto w-full max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
+            <section className="overflow-hidden rounded-lg border border-border bg-[#071412] text-white shadow-card sm:rounded-xl">
+              <div className="grid min-w-0 gap-4 p-4 lg:grid-cols-[1fr_420px] lg:p-6">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-md bg-[#19b8a6]/20 px-3 py-1 text-xs font-bold uppercase text-[#8ee8df]">
+                      Summary
+                    </span>
+                    <span className="rounded-md bg-white/10 px-3 py-1 text-xs font-semibold text-white/70">
+                      {pendingSyncCount} pending sync
+                    </span>
                   </div>
-                  <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-                    <p className="text-[11px] font-bold uppercase text-white/50">Gross Profit</p>
-                    <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
-                      {formatMoney(data.grossProfit, settings.currency)}
-                    </p>
-                  </div>
-                  <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-                    <p className="text-[11px] font-bold uppercase text-white/50">
-                      Potential Stock Profit
-                    </p>
-                    <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
-                      {formatMoney(data.potentialMargin, settings.currency)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-4">
-                <p className="text-sm font-bold">Cash position</p>
-                <div className="mt-4 space-y-3">
-                  {[
-                    ['Cash sales', data.cashSales, 'bg-success'],
-                    ['Card / mobile', data.nonCashSales, 'bg-primary'],
-                    ['Recorded expenses', data.expenseTotal, 'bg-danger'],
-                  ].map(([label, amount, color]) => {
-                    const value = Number(amount);
-                    const max = Math.max(data.revenue, data.expenseTotal, 1);
-                    return (
-                      <div key={String(label)}>
-                        <div className="mb-1 flex min-w-0 justify-between gap-3 text-xs">
-                          <span className="min-w-0 text-white/65">{label}</span>
-                          <span className="shrink-0 font-semibold font-tabular">
-                            {formatMoney(value, settings.currency)}
-                          </span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            className={`h-full rounded-full ${color}`}
-                            style={{ width: `${Math.max(4, (value / max) * 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            {kpis.map((item) => {
-              const Icon = item.icon;
-              return (
-                <article
-                  key={item.label}
-                  className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold uppercase text-muted-foreground">
-                        {item.label}
-                      </p>
-                      <p
-                        className={`mt-2 break-words text-[1.65rem] font-bold leading-tight font-tabular sm:text-2xl ${item.tone}`}
-                      >
-                        {item.value}
+                  <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-3">
+                    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
+                      <p className="text-[11px] font-bold uppercase text-white/50">Month Revenue</p>
+                      <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
+                        {formatMoney(data.monthRevenue, settings.currency)}
                       </p>
                     </div>
-                    <div
-                      className={`flex h-10 w-10 items-center justify-center rounded-md ${item.bg} ${item.tone}`}
-                    >
-                      <Icon size={18} />
+                    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
+                      <p className="text-[11px] font-bold uppercase text-white/50">Gross Profit</p>
+                      <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
+                        {formatMoney(data.grossProfit, settings.currency)}
+                      </p>
+                    </div>
+                    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
+                      <p className="text-[11px] font-bold uppercase text-white/50">
+                        Potential Stock Profit
+                      </p>
+                      <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
+                        {formatMoney(data.potentialMargin, settings.currency)}
+                      </p>
                     </div>
                   </div>
-                  <p className="mt-3 text-xs leading-5 text-muted-foreground">{item.helper}</p>
-                </article>
-              );
-            })}
-          </section>
+                </div>
 
-          <section className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-[1fr_360px]">
-            <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-white shadow-card sm:rounded-xl">
-              <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                <div>
-                  <p className="text-sm font-bold">Product performance</p>
-                  <p className="text-xs text-muted-foreground">Top sellers by revenue and margin</p>
+                <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-4">
+                  <p className="text-sm font-bold">Cash position</p>
+                  <div className="mt-4 space-y-3">
+                    {[
+                      ['Cash sales', data.cashSales, 'bg-success'],
+                      ['Card / mobile', data.nonCashSales, 'bg-primary'],
+                      ['Recorded expenses', data.expenseTotal, 'bg-danger'],
+                    ].map(([label, amount, color]) => {
+                      const value = Number(amount);
+                      const max = Math.max(data.revenue, data.expenseTotal, 1);
+                      return (
+                        <div key={String(label)}>
+                          <div className="mb-1 flex min-w-0 justify-between gap-3 text-xs">
+                            <span className="min-w-0 text-white/65">{label}</span>
+                            <span className="shrink-0 font-semibold font-tabular">
+                              {formatMoney(value, settings.currency)}
+                            </span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className={`h-full rounded-full ${color}`}
+                              style={{ width: `${Math.max(4, (value / max) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                <TrendingUp size={18} className="text-primary" />
               </div>
-              <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
-                <table className="w-full min-w-[760px]">
-                  <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3">Product</th>
-                      <th className="px-4 py-3">Units</th>
-                      <th className="px-4 py-3">Revenue</th>
-                      <th className="px-4 py-3">Profit</th>
-                      <th className="px-4 py-3">Margin</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {data.topProducts.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={5}
-                          className="px-4 py-10 text-center text-sm text-muted-foreground"
-                        >
-                          No product sales yet.
-                        </td>
-                      </tr>
-                    ) : (
-                      data.topProducts.map((product) => (
-                        <tr key={product.name}>
-                          <td className="px-4 py-3 font-medium">{product.name}</td>
-                          <td className="px-4 py-3 font-tabular">{product.qty}</td>
-                          <td className="px-4 py-3 font-tabular">
-                            {formatMoney(product.revenue, settings.currency)}
-                          </td>
-                          <td className="px-4 py-3 font-tabular text-success">
-                            {formatMoney(product.profit, settings.currency)}
-                          </td>
-                          <td className="px-4 py-3 font-tabular">
-                            {product.revenue > 0
-                              ? `${Math.round((product.profit / product.revenue) * 100)}%`
-                              : '0%'}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            </section>
 
-            <div className="min-w-0 space-y-4 sm:space-y-5">
-              <div className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-bold">Stock risk</p>
-                  <AlertTriangle size={18} className="text-warning" />
-                </div>
-                <div className="mt-4 grid min-w-0 grid-cols-3 gap-2">
-                  <div className="rounded-md bg-warning/10 p-3 text-warning">
-                    <p className="text-[10px] font-bold uppercase">Alerts</p>
-                    <p className="mt-1 text-2xl font-bold font-tabular">
-                      {data.stockAlerts.length}
-                    </p>
-                  </div>
-                  <div className="rounded-md bg-danger/10 p-3 text-danger">
-                    <p className="text-[10px] font-bold uppercase">Expired</p>
-                    <p className="mt-1 text-2xl font-bold font-tabular">
-                      {data.expiredItems.length}
-                    </p>
-                  </div>
-                  <div className="rounded-md bg-success/10 p-3 text-success">
-                    <p className="text-[10px] font-bold uppercase">SKUs</p>
-                    <p className="mt-1 text-2xl font-bold font-tabular">{data.totalProducts}</p>
-                  </div>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <Link
-                    href="/inventory-management?status=alerts"
-                    className="rounded-md border border-border px-3 py-2 text-center text-xs font-semibold text-warning hover:bg-warning/10"
+            <section className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {kpis.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <article
+                    key={item.label}
+                    className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl"
                   >
-                    View stock alerts
-                  </Link>
-                  <Link
-                    href="/inventory-management?status=expired"
-                    className="rounded-md border border-border px-3 py-2 text-center text-xs font-semibold text-danger hover:bg-danger/10"
-                  >
-                    View expired
-                  </Link>
-                </div>
-                <div className="mt-4 divide-y divide-border">
-                  {data.stockAlerts.slice(0, 5).map((item) => (
-                    <div key={item.id} className="flex items-center justify-between gap-3 py-2">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {item.sku} · {item.stockStatus}
+                        <p className="text-xs font-bold uppercase text-muted-foreground">
+                          {item.label}
+                        </p>
+                        <p
+                          className={`mt-2 break-words text-[1.65rem] font-bold leading-tight font-tabular sm:text-2xl ${item.tone}`}
+                        >
+                          {item.value}
                         </p>
                       </div>
-                      <p className="font-bold font-tabular">{item.currentQty}</p>
-                    </div>
-                  ))}
-                  {data.stockAlerts.length === 0 && (
-                    <p className="py-5 text-center text-sm text-muted-foreground">
-                      No active stock alerts.
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-bold">Expense pressure</p>
-                  <Banknote size={18} className="text-danger" />
-                </div>
-                <div className="mt-4 space-y-3">
-                  {data.expenseCategories.length === 0 ? (
-                    <p className="py-4 text-center text-sm text-muted-foreground">
-                      No expenses recorded yet.
-                    </p>
-                  ) : (
-                    data.expenseCategories.map(([category, amount]) => (
-                      <div key={category}>
-                        <div className="mb-1 flex justify-between text-xs">
-                          <span>{category}</span>
-                          <span className="font-semibold font-tabular">
-                            {formatMoney(amount, settings.currency)}
-                          </span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-danger"
-                            style={{
-                              width: `${Math.max(5, (amount / Math.max(data.expenseTotal, 1)) * 100)}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-3">
-            {[
-              {
-                label: 'Operational health',
-                icon: ShieldCheck,
-                lines: [
-                  `${data.completedSales.length} completed sale${data.completedSales.length === 1 ? '' : 's'}`,
-                  `${data.recordedExpenses.length} recorded expense${data.recordedExpenses.length === 1 ? '' : 's'}`,
-                  `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting to be sent`,
-                ],
-              },
-              {
-                label: 'Inventory posture',
-                icon: PackageCheck,
-                lines: [
-                  `${formatMoney(data.retailStockValue, settings.currency)} retail value`,
-                  `${formatMoney(data.stockValue, settings.currency)} cost value`,
-                  `${formatMoney(data.potentialMargin, settings.currency)} potential gross margin`,
-                ],
-              },
-              {
-                label: 'Profit bridge',
-                icon: TrendingUp,
-                lines: [
-                  `${formatMoney(data.revenue, settings.currency)} revenue`,
-                  `${formatMoney(data.grossProfit, settings.currency)} gross profit`,
-                  `${formatMoney(data.netProfit, settings.currency)} after expenses`,
-                ],
-              },
-            ].map((panel) => {
-              const Icon = panel.icon;
-              return (
-                <article
-                  key={panel.label}
-                  className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl"
-                >
-                  <div className="flex items-center gap-2">
-                    <Icon size={18} className="text-primary" />
-                    <p className="text-sm font-bold">{panel.label}</p>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {panel.lines.map((line) => (
                       <div
-                        key={line}
-                        className="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground"
+                        className={`flex h-10 w-10 items-center justify-center rounded-md ${item.bg} ${item.tone}`}
                       >
-                        {line}
+                        <Icon size={18} />
+                      </div>
+                    </div>
+                    <p className="mt-3 text-xs leading-5 text-muted-foreground">{item.helper}</p>
+                  </article>
+                );
+              })}
+            </section>
+
+            <section className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-[1fr_360px]">
+              <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-white shadow-card sm:rounded-xl">
+                <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                  <div>
+                    <p className="text-sm font-bold">Product performance</p>
+                    <p className="text-xs text-muted-foreground">
+                      Top sellers by revenue and margin
+                    </p>
+                  </div>
+                  <TrendingUp size={18} className="text-primary" />
+                </div>
+                <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
+                  <table className="w-full min-w-[760px]">
+                    <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
+                      <tr>
+                        <th className="px-4 py-3">Product</th>
+                        <th className="px-4 py-3">Units</th>
+                        <th className="px-4 py-3">Revenue</th>
+                        <th className="px-4 py-3">Profit</th>
+                        <th className="px-4 py-3">Margin</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {data.topProducts.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-4 py-10 text-center text-sm text-muted-foreground"
+                          >
+                            No product sales yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        data.topProducts.map((product) => (
+                          <tr key={product.name}>
+                            <td className="px-4 py-3 font-medium">{product.name}</td>
+                            <td className="px-4 py-3 font-tabular">{product.qty}</td>
+                            <td className="px-4 py-3 font-tabular">
+                              {formatMoney(product.revenue, settings.currency)}
+                            </td>
+                            <td className="px-4 py-3 font-tabular text-success">
+                              {formatMoney(product.profit, settings.currency)}
+                            </td>
+                            <td className="px-4 py-3 font-tabular">
+                              {product.revenue > 0
+                                ? `${Math.round((product.profit / product.revenue) * 100)}%`
+                                : '0%'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="min-w-0 space-y-4 sm:space-y-5">
+                <div className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold">Stock risk</p>
+                    <AlertTriangle size={18} className="text-warning" />
+                  </div>
+                  <div className="mt-4 grid min-w-0 grid-cols-3 gap-2">
+                    <div className="rounded-md bg-warning/10 p-3 text-warning">
+                      <p className="text-[10px] font-bold uppercase">Alerts</p>
+                      <p className="mt-1 text-2xl font-bold font-tabular">
+                        {data.stockAlerts.length}
+                      </p>
+                    </div>
+                    <div className="rounded-md bg-danger/10 p-3 text-danger">
+                      <p className="text-[10px] font-bold uppercase">Expired</p>
+                      <p className="mt-1 text-2xl font-bold font-tabular">
+                        {data.expiredItems.length}
+                      </p>
+                    </div>
+                    <div className="rounded-md bg-success/10 p-3 text-success">
+                      <p className="text-[10px] font-bold uppercase">SKUs</p>
+                      <p className="mt-1 text-2xl font-bold font-tabular">{data.totalProducts}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Link
+                      href="/inventory-management?status=alerts"
+                      className="rounded-md border border-border px-3 py-2 text-center text-xs font-semibold text-warning hover:bg-warning/10"
+                    >
+                      View stock alerts
+                    </Link>
+                    <Link
+                      href="/inventory-management?status=expired"
+                      className="rounded-md border border-border px-3 py-2 text-center text-xs font-semibold text-danger hover:bg-danger/10"
+                    >
+                      View expired
+                    </Link>
+                  </div>
+                  <div className="mt-4 divide-y divide-border">
+                    {data.stockAlerts.slice(0, 5).map((item) => (
+                      <div key={item.id} className="flex items-center justify-between gap-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{item.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {item.sku} · {item.stockStatus}
+                          </p>
+                        </div>
+                        <p className="font-bold font-tabular">{item.currentQty}</p>
                       </div>
                     ))}
+                    {data.stockAlerts.length === 0 && (
+                      <p className="py-5 text-center text-sm text-muted-foreground">
+                        No active stock alerts.
+                      </p>
+                    )}
                   </div>
-                </article>
-              );
-            })}
-          </section>
-        </div>
+                </div>
+
+                <div className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold">Expense pressure</p>
+                    <Banknote size={18} className="text-danger" />
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {data.expenseCategories.length === 0 ? (
+                      <p className="py-4 text-center text-sm text-muted-foreground">
+                        No expenses recorded yet.
+                      </p>
+                    ) : (
+                      data.expenseCategories.map(([category, amount]) => (
+                        <div key={category}>
+                          <div className="mb-1 flex justify-between text-xs">
+                            <span>{category}</span>
+                            <span className="font-semibold font-tabular">
+                              {formatMoney(amount, settings.currency)}
+                            </span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-danger"
+                              style={{
+                                width: `${Math.max(5, (amount / Math.max(data.expenseTotal, 1)) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-3">
+              {[
+                {
+                  label: 'Operational health',
+                  icon: ShieldCheck,
+                  lines: [
+                    `${data.completedSales.length} completed sale${data.completedSales.length === 1 ? '' : 's'}`,
+                    `${data.recordedExpenses.length} recorded expense${data.recordedExpenses.length === 1 ? '' : 's'}`,
+                    `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting to be sent`,
+                  ],
+                },
+                {
+                  label: 'Inventory posture',
+                  icon: PackageCheck,
+                  lines: [
+                    `${formatMoney(data.retailStockValue, settings.currency)} retail value`,
+                    `${formatMoney(data.stockValue, settings.currency)} cost value`,
+                    `${formatMoney(data.potentialMargin, settings.currency)} potential gross margin`,
+                  ],
+                },
+                {
+                  label: 'Profit bridge',
+                  icon: TrendingUp,
+                  lines: [
+                    `${formatMoney(data.revenue, settings.currency)} revenue`,
+                    `${formatMoney(data.grossProfit, settings.currency)} gross profit`,
+                    `${formatMoney(data.netProfit, settings.currency)} after expenses`,
+                  ],
+                },
+              ].map((panel) => {
+                const Icon = panel.icon;
+                return (
+                  <article
+                    key={panel.label}
+                    className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Icon size={18} className="text-primary" />
+                      <p className="text-sm font-bold">{panel.label}</p>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {panel.lines.map((line) => (
+                        <div
+                          key={line}
+                          className="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground"
+                        >
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+          </div>
+        )}
       </PermissionGate>
     </AppLayout>
   );

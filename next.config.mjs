@@ -4,8 +4,10 @@ import { imageHosts } from './image-hosts.config.mjs';
 const nextConfig = {
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
-  distDir:
-    process.env.DIST_DIR || (process.env.NODE_ENV === 'development' ? '.next-dev' : '.next'),
+  // On-premise builds are self-contained for installation on a local server.
+  // Online/Render builds keep the default Next.js output unless explicitly selected.
+  ...(process.env.DEPLOYMENT_MODE === 'onprem' ? { output: 'standalone' } : {}),
+  distDir: process.env.DIST_DIR || (process.env.NODE_ENV === 'development' ? '.next-dev' : '.next'),
 
   images: {
     remotePatterns: imageHosts,

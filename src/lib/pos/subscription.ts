@@ -30,6 +30,10 @@ const starterPermissions: Permission[] = [
   'manage-tax',
   'notifications',
   'categories',
+  'hospitality-reservations',
+  'hospitality-rooms',
+  'hospitality-guests',
+  'hospitality-payments',
 ];
 
 const proPermissions: Permission[] = [
@@ -105,6 +109,10 @@ export const subscriptionPlans: Record<SubscriptionPlanId, SubscriptionPlan> = {
   },
 };
 
+export function isOnPremiseDeployment(): boolean {
+  return process.env.NEXT_PUBLIC_DEPLOYMENT_MODE === 'onprem';
+}
+
 export function getSubscriptionPlan(planId?: string): SubscriptionPlan {
   return (
     subscriptionPlans[(planId as SubscriptionPlanId) || 'starter'] ?? subscriptionPlans.starter
@@ -112,10 +120,22 @@ export function getSubscriptionPlan(planId?: string): SubscriptionPlan {
 }
 
 export function planAllowsPermission(planId: string | undefined, permission: Permission): boolean {
+  if (isOnPremiseDeployment()) return true;
   return getSubscriptionPlan(planId).permissions.includes(permission);
 }
 
 export function getProductUsage(planId: string | undefined, currentProducts: number) {
+  if (isOnPremiseDeployment()) {
+    return {
+      plan: subscriptionPlans.delux,
+      limit: null,
+      currentProducts,
+      percent: 0,
+      remaining: null,
+      isNearLimit: false,
+      isAtLimit: false,
+    };
+  }
   const plan = getSubscriptionPlan(planId);
   const limit = plan.productLimit;
   const percent = limit ? Math.min(100, Math.round((currentProducts / limit) * 100)) : 0;

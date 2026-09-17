@@ -10,6 +10,8 @@ import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { CreditPaymentMethod, SaleTransaction } from '@/lib/pos/types';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import ListPagination from '@/components/ui/ListPagination';
+import { loadHospitalityReservations, saveHospitalityReservation } from '@/lib/pos/local-store';
+import type { HospitalityReservation } from '@/lib/pos/types';
 
 const paymentMethods: { id: CreditPaymentMethod; label: string; icon: React.ElementType }[] = [
   { id: 'cash', label: 'Cash', icon: Wallet },
@@ -39,6 +41,13 @@ function getErrorMessage(error: unknown): string {
 
 export default function CreditSalesPage() {
   const { sales, settings, currentUser, reconcileCreditSale, pendingSyncCount } = usePosStore();
+  const hospitalityOnly =
+    settings.businessMode === 'hospitality' ||
+    (settings.businessMode === 'retail-hospitality' &&
+      settings.activeBusinessMode === 'hospitality');
+  const [hospitalityReservations, setHospitalityReservations] = useState<HospitalityReservation[]>(
+    []
+  );
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'open' | 'all' | 'paid'>('open');
   const [selectedId, setSelectedId] = useState('');
@@ -48,6 +57,10 @@ export default function CreditSalesPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [rowsPerPage] = useRowsPerPage();
   const [page, setPage] = useState(1);
+  const [selectedBookingId, setSelectedBookingId] = useState('');
+  const [bookingPaymentAmount, setBookingPaymentAmount] = useState('');
+  const [bookingPaymentMethod, setBookingPaymentMethod] = useState<CreditPaymentMethod>('cash');
+  const [savingBookingPayment, setSavingBookingPayment] = useState(false);
 
   const creditSales = useMemo(
     () =>
@@ -76,6 +89,172 @@ export default function CreditSalesPage() {
   const totalPages = Math.max(1, Math.ceil(filteredSales.length / rowsPerPage));
   const visibleSales = filteredSales.slice((page - 1) * rowsPerPage, page * rowsPerPage);
   React.useEffect(() => setPage(1), [query, rowsPerPage, statusFilter, filteredSales.length]);
+
+  React.useEffect(() => {
+    if (!hospitalityOnly) return;
+    void loadHospitalityReservations()
+      .then(setHospitalityReservations)
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : 'Unable to load unpaid bookings.');
+      });
+  }, [hospitalityOnly]);
+
+  const selectedBooking = hospitalityReservations.find((item) => item.id === selectedBookingId);
+  const recordBookingPayment = async () => {
+    if (!selectedBooking) return;
+    const payment = Number(bookingPaymentAmount);
+    const outstanding = Math.max(0, selectedBooking.total - selectedBooking.amountPaid);
+    if (!Number.isFinite(payment) || payment <= 0 || payment > outstanding) {
+      toast.error(`Enter an amount between 0 and ${formatMoney(outstanding, settings.currency)}.`);
+      return;
+    }
+    setSavingBookingPayment(true);
+    try {
+      const amountPaid = selectedBooking.amountPaid + payment;
+      const updated = {
+        ...selectedBooking,
+        amountPaid,
+        paymentStatus:
+          amountPaid >= selectedBooking.total ? ('paid' as const) : ('partial' as const),
+        paymentMethod: bookingPaymentMethod,
+        paymentRecordedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await saveHospitalityReservation(updated);
+      setHospitalityReservations((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item))
+      );
+      setBookingPaymentAmount('');
+      toast.success('Booking payment recorded successfully.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to record booking payment.');
+    } finally {
+      setSavingBookingPayment(false);
+    }
+  };
+
+  if (hospitalityOnly) {
+    const unpaidBookings = hospitalityReservations.filter(
+      (reservation) => reservation.total > reservation.amountPaid
+    );
+    return (
+      <AppLayout title="Unpaid Bookings" subtitle="Track outstanding hospitality booking balances">
+        <PermissionGate permission="credit-sales">
+          <div className="mx-auto max-w-screen-2xl space-y-5 p-4 sm:p-6">
+            <section className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <SummaryCard
+                label="Outstanding Bookings"
+                value={formatMoney(
+                  unpaidBookings.reduce((sum, item) => sum + item.total - item.amountPaid, 0),
+                  settings.currency
+                )}
+              />
+              <SummaryCard
+                label="Unpaid Reservations"
+                value={unpaidBookings.length.toLocaleString()}
+              />
+            </section>
+            <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_360px]">
+              <div className="overflow-x-auto rounded-xl border border-border bg-white shadow-card">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3">Booking</th>
+                      <th className="px-4 py-3">Guest</th>
+                      <th className="px-4 py-3">Stay</th>
+                      <th className="px-4 py-3">Outstanding</th>
+                      <th className="px-4 py-3">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {unpaidBookings.map((booking) => (
+                      <tr key={booking.id}>
+                        <td className="px-4 py-3 font-mono text-xs">{booking.reservationCode}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-semibold">{booking.guestName}</p>
+                          <p className="text-xs text-muted-foreground">{booking.guestPhone}</p>
+                        </td>
+                        <td className="px-4 py-3">{booking.serviceName}</td>
+                        <td className="px-4 py-3 font-semibold">
+                          {formatMoney(booking.total - booking.amountPaid, settings.currency)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedBookingId(booking.id)}
+                            className="rounded-md bg-primary/10 px-2 py-1 text-xs font-semibold text-primary"
+                          >
+                            Record payment
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {unpaidBookings.length === 0 && (
+                  <p className="p-8 text-center text-sm text-muted-foreground">
+                    No unpaid bookings.
+                  </p>
+                )}
+              </div>
+              <section className="rounded-xl border border-border bg-white p-4 shadow-card">
+                <h3 className="font-semibold">Record booking payment</h3>
+                {!selectedBooking ? (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Select an unpaid booking to record a full or partial payment.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    <div className="rounded-lg bg-muted/40 p-3 text-sm">
+                      <p className="font-semibold">
+                        {selectedBooking.reservationCode} · {selectedBooking.guestName}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Balance:{' '}
+                        {formatMoney(
+                          selectedBooking.total - selectedBooking.amountPaid,
+                          settings.currency
+                        )}
+                      </p>
+                    </div>
+                    <input
+                      type="number"
+                      min="0.01"
+                      value={bookingPaymentAmount}
+                      onChange={(event) => setBookingPaymentAmount(event.target.value)}
+                      placeholder="Amount received"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    />
+                    <select
+                      value={bookingPaymentMethod}
+                      onChange={(event) =>
+                        setBookingPaymentMethod(event.target.value as CreditPaymentMethod)
+                      }
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="card">Card</option>
+                      <option value="mobile">Mobile</option>
+                      <option value="bank-transfer">Bank transfer</option>
+                      <option value="split">Split payment</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void recordBookingPayment()}
+                      disabled={savingBookingPayment}
+                      className="w-full rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {savingBookingPayment ? 'Saving…' : 'Save payment'}
+                    </button>
+                  </div>
+                )}
+              </section>
+            </section>
+          </div>
+        </PermissionGate>
+      </AppLayout>
+    );
+  }
 
   const fillFullAmount = () => {
     if (!selectedSale) return;

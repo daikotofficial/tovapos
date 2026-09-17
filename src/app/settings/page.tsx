@@ -21,11 +21,12 @@ import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
-import { BusinessSettings } from '@/lib/pos/types';
+import { BusinessSettings, BusinessMode } from '@/lib/pos/types';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
 import {
   getProductUsage,
+  isOnPremiseDeployment,
   subscriptionPlans,
   type SubscriptionPlanId,
 } from '@/lib/pos/subscription';
@@ -34,6 +35,8 @@ export default function SettingsPage() {
   const { settings, updateSettings, pendingSyncCount, inventory, isHydrated } = usePosStore();
   const [form, setForm] = useState<BusinessSettings>(settings);
   const [saved, setSaved] = useState(false);
+  const isHospitality = settings.businessMode === 'hospitality';
+  const isOnPremise = isOnPremiseDeployment();
   const productUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
   const planOptions = Object.values(subscriptionPlans);
 
@@ -91,14 +94,18 @@ export default function SettingsPage() {
   return (
     <AppLayout
       title="Settings"
-      subtitle="Manage your account, business details, receipts, and sales preferences"
+      subtitle={
+        isHospitality
+          ? 'Manage your hospitality business, guests, bookings, payments, and receipts'
+          : 'Manage your retail business, products, sales, inventory, and receipts'
+      }
     >
       <AccountSecurityCard />
       <PermissionGate permission="settings">
         <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
           <nav className="sticky top-0 z-10 flex gap-2 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 shadow-card backdrop-blur scrollbar-thin">
             {[
-              ['subscription', 'Plan'],
+              ...(!isOnPremise ? [['subscription', 'Plan']] : []),
               ['loyalty', 'Loyalty'],
               ['business-profile', 'Business'],
               ['tax-receipts', 'Tax & Receipts'],
@@ -107,93 +114,98 @@ export default function SettingsPage() {
               ['pos-rules', 'POS Rules'],
               ['branches', 'Branches'],
               ['appearance', 'Appearance'],
-            ].map(([id, label]) => (
-              <a
-                key={id}
-                href={`#${id}`}
-                className="whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-              >
-                {label}
-              </a>
-            ))}
+            ]
+              .filter(([id]) => !isHospitality || !['loyalty', 'alerts', 'pos-rules'].includes(id))
+              .map(([id, label]) => (
+                <a
+                  key={id}
+                  href={`#${id}`}
+                  className="whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                >
+                  {label}
+                </a>
+              ))}
           </nav>
-          <div
-            id="subscription"
-            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-          >
-            <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-              <CreditCard size={16} className="text-primary" />
-              <span className="text-sm font-semibold">Subscription & Plan</span>
-            </div>
-            <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-3">
-              <div className="rounded-lg bg-muted/40 px-4 py-3">
-                <p className="text-xs font-bold uppercase text-muted-foreground">Current plan</p>
-                <p className="mt-1 text-lg font-bold">{productUsage.plan.name}</p>
+          {!isOnPremise && (
+            <div
+              id="subscription"
+              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+            >
+              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                <CreditCard size={16} className="text-primary" />
+                <span className="text-sm font-semibold">Subscription & Plan</span>
               </div>
-              <div className="rounded-lg bg-muted/40 px-4 py-3">
-                <p className="text-xs font-bold uppercase text-muted-foreground">Product usage</p>
-                <p className="mt-1 text-lg font-bold font-tabular">
-                  {productUsage.currentProducts.toLocaleString()}
-                  {productUsage.limit ? ` / ${productUsage.limit.toLocaleString()}` : ' / Custom'}
-                </p>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Counts distinct product/batch records, not units in stock.
-                </p>
+              <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-3">
+                <div className="rounded-lg bg-muted/40 px-4 py-3">
+                  <p className="text-xs font-bold uppercase text-muted-foreground">Current plan</p>
+                  <p className="mt-1 text-lg font-bold">{productUsage.plan.name}</p>
+                </div>
+                <div className="rounded-lg bg-muted/40 px-4 py-3">
+                  <p className="text-xs font-bold uppercase text-muted-foreground">Product usage</p>
+                  <p className="mt-1 text-lg font-bold font-tabular">
+                    {productUsage.currentProducts.toLocaleString()}
+                    {productUsage.limit ? ` / ${productUsage.limit.toLocaleString()}` : ' / Custom'}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Counts distinct product/batch records, not units in stock.
+                  </p>
+                </div>
+                <div className="rounded-lg bg-muted/40 px-4 py-3">
+                  <p className="text-xs font-bold uppercase text-muted-foreground">Status</p>
+                  <p className="mt-1 text-lg font-bold capitalize">
+                    {settings.subscriptionStatus ?? 'active'}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-lg bg-muted/40 px-4 py-3">
-                <p className="text-xs font-bold uppercase text-muted-foreground">Status</p>
-                <p className="mt-1 text-lg font-bold capitalize">
-                  {settings.subscriptionStatus ?? 'active'}
-                </p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-3 border-t border-border p-5 lg:grid-cols-3">
-              {planOptions.map((plan) => {
-                const active = (form.subscriptionPlanId ?? 'starter') === plan.id;
-                return (
-                  <div
-                    key={plan.id}
-                    className={`flex flex-col rounded-xl border p-4 ${
-                      active ? 'border-primary bg-primary/5' : 'border-border bg-background'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-base font-black">{plan.name}</p>
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          {plan.description}
-                        </p>
-                      </div>
-                      {active && <CheckCircle2 size={18} className="shrink-0 text-primary" />}
-                    </div>
-                    <p className="mt-3 text-sm font-bold">
-                      {plan.monthlyPrice
-                        ? `NGN ${plan.monthlyPrice.toLocaleString()} / month`
-                        : 'Custom'}
-                      <span className="ml-2 rounded-full bg-success/10 px-2 py-1 text-[10px] font-black uppercase text-success">
-                        Free now
-                      </span>
-                    </p>
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Product limit:{' '}
-                      {plan.productLimit ? plan.productLimit.toLocaleString() : 'Custom'}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => void changePlan(plan.id)}
-                      disabled={active}
-                      className="mt-4 rounded-lg border border-border px-3 py-2 text-sm font-semibold disabled:opacity-60"
+              <div className="grid grid-cols-1 gap-3 border-t border-border p-5 lg:grid-cols-3">
+                {planOptions.map((plan) => {
+                  const active = (form.subscriptionPlanId ?? 'starter') === plan.id;
+                  return (
+                    <div
+                      key={plan.id}
+                      className={`flex flex-col rounded-xl border p-4 ${
+                        active ? 'border-primary bg-primary/5' : 'border-border bg-background'
+                      }`}
                     >
-                      {active ? 'Current plan' : `Switch to ${plan.name}`}
-                    </button>
-                  </div>
-                );
-              })}
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-base font-black">{plan.name}</p>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                            {plan.description}
+                          </p>
+                        </div>
+                        {active && <CheckCircle2 size={18} className="shrink-0 text-primary" />}
+                      </div>
+                      <p className="mt-3 text-sm font-bold">
+                        {plan.monthlyPrice
+                          ? `NGN ${plan.monthlyPrice.toLocaleString()} / month`
+                          : 'Custom'}
+                        <span className="ml-2 rounded-full bg-success/10 px-2 py-1 text-[10px] font-black uppercase text-success">
+                          Free now
+                        </span>
+                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Product limit:{' '}
+                        {plan.productLimit ? plan.productLimit.toLocaleString() : 'Custom'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void changePlan(plan.id)}
+                        disabled={active}
+                        className="mt-4 rounded-lg border border-border px-3 py-2 text-sm font-semibold disabled:opacity-60"
+                      >
+                        {active ? 'Current plan' : `Switch to ${plan.name}`}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           <div
             id="loyalty"
+            style={{ display: isHospitality ? 'none' : undefined }}
             className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
           >
             <div className="px-4 py-3 border-b border-border">
@@ -277,6 +289,55 @@ export default function SettingsPage() {
                   className="w-full px-3 py-2 rounded-lg border border-border bg-background"
                 />
               </label>
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">Business Type</span>
+                <NiceSelect
+                  value={form.businessMode ?? 'retail'}
+                  onChange={(businessMode) =>
+                    setForm({
+                      ...form,
+                      businessMode: businessMode as BusinessMode,
+                      activeBusinessMode: businessMode === 'hospitality' ? 'hospitality' : 'retail',
+                    })
+                  }
+                  options={
+                    form.businessMode === 'retail-hospitality'
+                      ? [{ value: 'retail-hospitality', label: 'Retail + Hospitality' }]
+                      : form.businessMode === 'hospitality'
+                        ? [{ value: 'hospitality', label: 'Hospitality only' }]
+                        : [{ value: 'retail', label: 'Retail only' }]
+                  }
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  This business type is selected during signup. Retail and hospitality records
+                  remain in separate sections.
+                </span>
+              </label>
+              {form.businessMode === 'retail-hospitality' && (
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Active operating area</span>
+                  <NiceSelect
+                    value={form.activeBusinessMode ?? 'retail'}
+                    onChange={(activeBusinessMode) =>
+                      setForm({
+                        ...form,
+                        activeBusinessMode: activeBusinessMode as 'retail' | 'hospitality',
+                      })
+                    }
+                    options={[
+                      { value: 'retail', label: 'Retail — products, POS, inventory' },
+                      {
+                        value: 'hospitality',
+                        label: 'Hospitality — reservations, rooms & services',
+                      },
+                    ]}
+                  />
+                  <span className="text-[11px] text-muted-foreground">
+                    Save this setting before changing operating areas. Only the selected area will
+                    appear in navigation.
+                  </span>
+                </label>
+              )}
               <label className="space-y-1">
                 <span className="text-xs text-muted-foreground">Company logo</span>
                 <input
@@ -525,6 +586,7 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div
               id="alerts"
+              style={{ display: isHospitality ? 'none' : undefined }}
               className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
             >
               <div className="px-4 py-3 border-b border-border flex items-center gap-2">
@@ -615,6 +677,7 @@ export default function SettingsPage() {
 
             <div
               id="pos-rules"
+              style={{ display: isHospitality ? 'none' : undefined }}
               className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
             >
               <div className="px-4 py-3 border-b border-border flex items-center gap-2">
