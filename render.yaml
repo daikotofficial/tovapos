@@ -46,6 +46,33 @@ services:
         value: 15000
       - key: DATABASE_QUERY_TIMEOUT_MS
         value: 20000
+      - key: AFFILIATE_API_URL
+        sync: false
+      - key: AFFILIATE_PRODUCT
+        value: tovapos
+      - key: AFFILIATE_INTEGRATION_KEY
+        sync: false
+
+  - type: cron
+    runtime: node
+    name: tovapos-affiliate-events
+    plan: starter
+    schedule: '*/5 * * * *'
+    buildCommand: npm ci
+    startCommand: node scripts/run-affiliate-events.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: TOVAPOS_WEB_HOSTPORT
+        fromService:
+          type: web
+          name: tovapos
+          property: hostport
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: tovapos
+          envVarKey: CRON_SECRET
 
   - type: cron
     runtime: node

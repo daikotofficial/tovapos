@@ -39,9 +39,14 @@ const authStats = [
 interface AuthScreenProps {
   initialTab?: 'login' | 'signup';
   initialError?: string;
+  initialReferralCode?: string;
 }
 
-export default function AuthScreen({ initialTab = 'login', initialError = '' }: AuthScreenProps) {
+export default function AuthScreen({
+  initialTab = 'login',
+  initialError = '',
+  initialReferralCode = '',
+}: AuthScreenProps) {
   const tab = initialTab;
 
   const formWidth = tab === 'signup' ? 'max-w-[620px]' : 'max-w-[480px] lg:self-center';
@@ -159,7 +164,10 @@ export default function AuthScreen({ initialTab = 'login', initialError = '' }: 
               {tab === 'login' ? (
                 <LoginForm initialError={initialTab === 'login' ? initialError : ''} />
               ) : (
-                <SignupForm initialError={initialTab === 'signup' ? initialError : ''} />
+                <SignupForm
+                  initialError={initialTab === 'signup' ? initialError : ''}
+                  initialReferralCode={initialReferralCode}
+                />
               )}
             </div>
           </section>

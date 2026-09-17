@@ -8,6 +8,7 @@ type SignUpLoginPageProps = {
     authError?: string | string[];
     email?: string | string[];
     password?: string | string[];
+    ref?: string | string[];
   }>;
 };
 
@@ -18,6 +19,7 @@ export default async function SignUpLoginPage({ searchParams }: SignUpLoginPageP
   }
   const requestedTab = Array.isArray(params?.tab) ? params?.tab[0] : params?.tab;
   const requestedError = Array.isArray(params?.authError) ? params.authError[0] : params?.authError;
+  const requestedReferralCode = Array.isArray(params?.ref) ? params.ref[0] : params?.ref;
   const initialTab = requestedTab === 'signup' ? 'signup' : 'login';
   const initialError =
     requestedError === 'duplicate-email'
@@ -34,5 +36,11 @@ export default async function SignUpLoginPage({ searchParams }: SignUpLoginPageP
                 ? 'Registration could not be completed. Check the form and try again.'
                 : '';
 
-  return <AuthScreen initialTab={initialTab} initialError={initialError} />;
+  return (
+    <AuthScreen
+      initialTab={initialTab}
+      initialError={initialError}
+      initialReferralCode={requestedReferralCode}
+    />
+  );
 }

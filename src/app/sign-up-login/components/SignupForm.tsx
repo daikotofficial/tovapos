@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, Loader2, CheckCircle2, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import type { BusinessMode } from '@/lib/pos/types';
 
 interface SignupFormData {
   businessName: string;
@@ -17,13 +18,19 @@ interface SignupFormData {
   password: string;
   confirmPassword: string;
   agreeTerms: boolean;
+  businessMode: BusinessMode;
+  referralCode?: string;
 }
 
 interface SignupFormProps {
   initialError?: string;
+  initialReferralCode?: string;
 }
 
-export default function SignupForm({ initialError = '' }: SignupFormProps) {
+export default function SignupForm({
+  initialError = '',
+  initialReferralCode = '',
+}: SignupFormProps) {
   const { registerBusiness } = usePosStore();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -38,12 +45,14 @@ export default function SignupForm({ initialError = '' }: SignupFormProps) {
     handleSubmit,
     watch,
     setError,
+    clearErrors,
     formState: { errors, isSubmitting, isSubmitSuccessful },
-  } = useForm<SignupFormData>();
+  } = useForm<SignupFormData>({ defaultValues: { referralCode: initialReferralCode } });
 
   const password = watch('password');
 
   const onSubmit = async (data: SignupFormData) => {
+    clearErrors('root.serverError');
     try {
       const result = await registerBusiness({
         businessName: data.businessName,
@@ -53,11 +62,12 @@ export default function SignupForm({ initialError = '' }: SignupFormProps) {
         phone: data.phone,
         address: data.address,
         password: data.password,
+        businessMode: data.businessMode,
       });
       setRegistrationResult(result);
       toast.success('Registration completed. Confirm your email to continue.');
     } catch (error) {
-      setError('email', {
+      setError('root.serverError', {
         message: error instanceof Error ? error.message : 'Unable to register business',
       });
     }
@@ -128,6 +138,11 @@ export default function SignupForm({ initialError = '' }: SignupFormProps) {
           {initialError}
         </p>
       )}
+      {errors.root?.serverError?.message && (
+        <p className="mb-4 rounded-md border border-danger/25 bg-danger/10 px-3 py-2 text-sm leading-6 text-danger">
+          {errors.root.serverError.message}
+        </p>
+      )}
 
       <form
         action="/api/auth/register"
@@ -156,6 +171,36 @@ export default function SignupForm({ initialError = '' }: SignupFormProps) {
               placeholder="e.g. TOVA Supermarket"
             />
             {errors.businessName && <p className={errorClass}>{errors.businessName.message}</p>}
+          </div>
+
+          <div>
+            <label className={labelClass}>
+              Business Type <span className="text-danger">*</span>
+            </label>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {[
+                ['retail', 'Retail', 'Products, inventory, and POS sales'],
+                ['hospitality', 'Hospitality', 'Rooms, stays, and guest services'],
+              ].map(([value, label, description]) => (
+                <label
+                  key={value}
+                  className="cursor-pointer rounded-md border border-border bg-white p-3 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+                >
+                  <input
+                    type="radio"
+                    value={value}
+                    defaultChecked={value === 'retail'}
+                    {...register('businessMode', { required: 'Select a business type' })}
+                    className="sr-only"
+                  />
+                  <span className="block text-sm font-semibold">{label}</span>
+                  <span className="mt-1 block text-[10px] leading-4 text-muted-foreground">
+                    {description}
+                  </span>
+                </label>
+              ))}
+            </div>
+            {errors.businessMode && <p className={errorClass}>{errors.businessMode.message}</p>}
           </div>
 
           <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
@@ -191,6 +236,31 @@ export default function SignupForm({ initialError = '' }: SignupFormProps) {
               />
               {errors.phone && <p className={errorClass}>{errors.phone.message}</p>}
             </div>
+          </div>
+
+          <div>
+            <label htmlFor="referralCode" className={labelClass}>
+              Referral code{' '}
+              <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <p className="mb-1 min-h-5 text-[10px] leading-5 text-muted-foreground">
+              If someone invited you, enter their Tova affiliate code.
+            </p>
+            <input
+              id="referralCode"
+              autoComplete="off"
+              placeholder="TOVA7KQ4M8"
+              {...register('referralCode', {
+                setValueAs: (value) =>
+                  typeof value === 'string' ? value.trim().toUpperCase() : value,
+                pattern: {
+                  value: /^(?:TOVA[A-HJ-NP-Z2-9]{6}|TV-[A-HJ-NP-Z2-9]{6,8}|TV-[A-F0-9]{32})$/,
+                  message: 'Enter a valid referral code',
+                },
+              })}
+              className={`${inputClass(!!errors.referralCode)} font-mono uppercase`}
+            />
+            {errors.referralCode && <p className={errorClass}>{errors.referralCode.message}</p>}
           </div>
 
           <div>

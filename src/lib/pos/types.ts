@@ -143,6 +143,7 @@ export interface ExpenseRecord {
   syncStatus: 'pending' | 'synced' | 'failed';
   createdAt: string;
   updatedAt?: string;
+  businessArea?: 'retail' | 'hospitality';
 }
 
 export interface RecordExpenseInput {
@@ -156,6 +157,23 @@ export interface RecordExpenseInput {
   recordedBy: string;
 }
 
+export interface InputVatRecord {
+  id: string;
+  recordNumber: string;
+  date: string;
+  vendorName: string;
+  vendorTin?: string;
+  invoiceNumber?: string;
+  goodsAmount: number;
+  inputVatAmount: number;
+  totalInvoiceAmount?: number;
+  notes?: string;
+  recordedBy: string;
+  status: 'recorded' | 'voided';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type SyncEntity =
   | 'inventory'
   | 'stockMovement'
@@ -165,8 +183,12 @@ export type SyncEntity =
   | 'vendor'
   | 'settings'
   | 'expense'
+  | 'inputVat'
   | 'expenseHead'
-  | 'report';
+  | 'report'
+  | 'hospitalityService'
+  | 'hospitalityReservation'
+  | 'hospitalityGuest';
 export type SyncAction = 'create' | 'update' | 'delete';
 
 export interface SyncQueueItem {
@@ -241,7 +263,11 @@ export type Permission =
   | 'notifications'
   | 'sync-logs'
   | 'categories'
-  | 'expense-heads';
+  | 'expense-heads'
+  | 'hospitality-reservations'
+  | 'hospitality-rooms'
+  | 'hospitality-guests'
+  | 'hospitality-payments';
 
 export type UserRole =
   | 'super-admin'
@@ -252,7 +278,10 @@ export type UserRole =
   | 'accountant'
   | 'expense-clerk'
   | 'auditor'
-  | 'viewer';
+  | 'viewer'
+  | 'receptionist'
+  | 'housekeeping'
+  | 'booking-agent';
 
 export interface TovaUser {
   id: string;
@@ -281,6 +310,59 @@ export interface RegisterBusinessInput {
   phone: string;
   address?: string;
   password: string;
+  businessMode?: BusinessMode;
+  referralCode?: string;
+}
+
+export type BusinessMode = 'retail' | 'hospitality' | 'retail-hospitality';
+
+export type HospitalityReservationStatus = 'reserved' | 'checked-in' | 'checked-out' | 'cancelled';
+
+export interface HospitalityService {
+  id: string;
+  name: string;
+  code: string;
+  type?: 'room' | 'service';
+  description?: string;
+  amenities?: string[];
+  capacity?: number;
+  rate: number;
+  rateUnit: 'night' | 'hour' | 'service';
+  taxRate?: number;
+  taxMode?: 'inclusive' | 'exclusive';
+  active: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface HospitalityReservation {
+  id: string;
+  reservationCode: string;
+  serviceId: string;
+  serviceName: string;
+  guestId?: string;
+  guestName: string;
+  guestPhone: string;
+  guestEmail?: string;
+  guestIdentityNumber?: string;
+  checkInAt: string;
+  checkOutAt: string;
+  quantity: number;
+  rate: number;
+  discount: number;
+  taxRate: number;
+  taxMode: 'inclusive' | 'exclusive';
+  subtotal: number;
+  taxAmount: number;
+  total: number;
+  status: HospitalityReservationStatus;
+  amountPaid: number;
+  paymentStatus?: 'unpaid' | 'partial' | 'paid';
+  paymentMethod?: CreditPaymentMethod;
+  paymentRecordedAt?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Customer {
@@ -293,6 +375,21 @@ export interface Customer {
   creditLimit: number;
   totalSpend: number;
   discountRules?: CustomerDiscountRule[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** Hospitality guest records are intentionally separate from retail customers. */
+export interface HospitalityGuest {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  identityNumber?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  notes?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -324,6 +421,8 @@ export interface Vendor {
 export interface BusinessSettings {
   id: 'settings';
   businessName: string;
+  businessMode?: BusinessMode;
+  activeBusinessMode?: 'retail' | 'hospitality';
   logoUrl?: string;
   address?: string;
   phone?: string;
@@ -383,6 +482,7 @@ export interface SupportTicket {
   id: string;
   tenantId: string;
   tenantName?: string;
+  businessMode?: BusinessMode;
   subject: string;
   message: string;
   status: 'open' | 'pending' | 'resolved' | 'closed';

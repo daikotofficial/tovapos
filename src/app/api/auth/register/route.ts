@@ -12,6 +12,11 @@ import {
   sameOriginRedirectUrl,
 } from '@/lib/server/security';
 import { ensureSecuritySchema } from '@/lib/server/security-schema';
+import {
+  deliverAffiliateEvent,
+  normalizeAffiliateCode,
+  queueAffiliateSignup,
+} from '@/lib/server/affiliate';
 
 function requiredText(value: unknown, label: string, maxLength = 200): string {
   if (typeof value !== 'string' || !value.trim()) {
@@ -50,6 +55,13 @@ export async function POST(request: NextRequest) {
     const email = requiredText(body.email, 'Email').toLowerCase();
     const phone = requiredText(body.phone, 'Phone number', 50);
     const password = requiredText(body.password, 'Password', 200);
+    let referralCode: string | null = null;
+    try {
+      referralCode = normalizeAffiliateCode(body.referralCode);
+    } catch {
+      throw new HttpError(400, 'Enter a valid referral code', 'VALIDATION_ERROR');
+    }
+    const businessMode = body.businessMode === 'hospitality' ? 'hospitality' : 'retail';
     if (isNativeForm && body.confirmPassword !== password) {
       throw new HttpError(400, 'Passwords do not match', 'VALIDATION_ERROR');
     }
@@ -69,6 +81,21 @@ export async function POST(request: NextRequest) {
     const registrationAttemptKey = createHash('sha256')
       .update(`register|${clientAddress}`)
       .digest('hex');
+    const existingRegistrationRate = await getPosPool().query(
+      `SELECT blocked_until
+       FROM pos_auth_attempts
+       WHERE attempt_key = $1
+         AND blocked_until > now()
+       LIMIT 1`,
+      [registrationAttemptKey]
+    );
+    if (existingRegistrationRate.rows[0]?.blocked_until) {
+      throw new HttpError(
+        429,
+        'Too many business registrations from this network. Please try again after the one-hour limit expires.',
+        'RATE_LIMITED'
+      );
+    }
     const registrationRate = await getPosPool().query(
       `INSERT INTO pos_auth_attempts (attempt_key, failures, blocked_until, last_attempt_at)
        VALUES ($1, 1, NULL, now())
@@ -122,11 +149,15 @@ export async function POST(request: NextRequest) {
     const settings = {
       ...defaultSettings,
       businessName,
+      businessMode,
+      activeBusinessMode: businessMode === 'hospitality' ? 'hospitality' : 'retail',
       address: typeof body.address === 'string' ? body.address.trim().slice(0, 500) : '',
       phone,
       email,
+      affiliateReferralCode: referralCode,
       updatedAt: now,
     };
+    let affiliateEventId: string | null = null;
     const client = await getPosPool().connect();
     try {
       await client.query('BEGIN');
@@ -166,6 +197,9 @@ export async function POST(request: NextRequest) {
          VALUES ($1, $2, 'tenant.registered', 'tenant', $1, $3::jsonb)`,
         [tenantId, userId, JSON.stringify({ businessName, slug, ownerEmail: email })]
       );
+      if (referralCode) {
+        affiliateEventId = await queueAffiliateSignup(client, { tenantId, referralCode });
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -173,6 +207,8 @@ export async function POST(request: NextRequest) {
     } finally {
       client.release();
     }
+
+    if (affiliateEventId) await deliverAffiliateEvent(affiliateEventId);
 
     let verification: { developmentVerificationUrl?: string } = {};
     let emailDeliveryFailed = false;

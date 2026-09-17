@@ -132,6 +132,25 @@ export async function ensureSecuritySchema(): Promise<void> {
           last_attempt_at timestamptz NOT NULL DEFAULT now()
         );
 
+        CREATE TABLE IF NOT EXISTS pos_affiliate_events (
+          id text PRIMARY KEY,
+          event_type text NOT NULL CHECK (event_type IN ('signup', 'subscription')),
+          product text NOT NULL,
+          external_id text NOT NULL,
+          payload jsonb NOT NULL,
+          status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'sent', 'failed')),
+          attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          next_attempt_at timestamptz,
+          last_error text,
+          sent_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          UNIQUE (event_type, product, external_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS pos_affiliate_events_retry_idx
+          ON pos_affiliate_events (status, next_attempt_at);
+
         CREATE TABLE IF NOT EXISTS pos_platform_admins (
           id text PRIMARY KEY,
           name text NOT NULL,
