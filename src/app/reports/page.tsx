@@ -212,8 +212,18 @@ function salePaymentStatus(sale: SaleTransaction): string {
   return sale.paymentStatus === 'partial' ? 'Partial' : 'Paid';
 }
 
-function paymentMethodLabel(method: string): string {
+function paymentMethodLabel(
+  method: string,
+  breakdown?: Partial<Record<'cash' | 'card' | 'mobile' | 'bank-transfer', number>>,
+  currency?: string
+): string {
   if (method === 'credit') return 'Customer Credit';
+  if (method === 'split' && breakdown) {
+    const parts = Object.entries(breakdown)
+      .filter(([, amount]) => Number(amount) > 0)
+      .map(([name, amount]) => `${name.replace('-', ' ')} ${formatMoney(Number(amount), currency)}`);
+    return parts.length ? `Split: ${parts.join(' + ')}` : 'Split payment';
+  }
   return method.replace('-', ' ');
 }
 
@@ -1356,7 +1366,7 @@ function ReportsContent() {
                     .map((sale) => [
                       sale.transactionId,
                       sale.customerName ?? 'Walk-in Customer',
-                      paymentMethodLabel(sale.paymentMethod),
+                      paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
                       salePaymentStatus(sale),
                       isCreditSale(sale)
                         ? formatMoney(0, settings.currency)
@@ -1412,7 +1422,7 @@ function ReportsContent() {
                   sale.customerName ?? 'Walk-in Customer',
                   sale.cashier,
                   sale.items.reduce((sum, item) => sum + item.quantity, 0).toString(),
-                  paymentMethodLabel(sale.paymentMethod),
+                  paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
                   salePaymentStatus(sale),
                   formatMoney(sale.subtotal, settings.currency),
                   formatMoney(sale.discountTotal, settings.currency),

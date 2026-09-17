@@ -25,6 +25,19 @@ interface AddStockModalProps {
 
 type FormData = Omit<InventoryItem, 'id' | 'stockStatus'> & { id?: string };
 
+function cleanAmount(value: string): string {
+  return value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+}
+
+function formatAmountInput(value: string): void {
+  const numeric = Number(value.replace(/,/g, ''));
+  if (Number.isFinite(numeric) && value.trim() !== '') {
+    // Keep the form value numeric while showing thousands separators to the user.
+    const input = document.activeElement as HTMLInputElement | null;
+    if (input) input.value = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 }).format(numeric);
+  }
+}
+
 export default function AddStockModal({ open, onClose, editItem, onSave }: AddStockModalProps) {
   const { settings, updateSettings } = usePosStore();
   const skuInputRef = useRef<HTMLInputElement | null>(null);
@@ -176,9 +189,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
           : computeProfitMargin(Number(data.unitCost), Number(data.sellingPrice)),
       discountType: data.discountType ?? 'none',
       discountValue: Number(data.discountValue) || 0,
-      taxApplicable: Boolean(
-        data.taxMode === 'inclusive' && (data.taxApplicable || Number(data.taxRate) > 0)
-      ),
+      taxApplicable: Boolean(data.taxApplicable || Number(data.taxRate) > 0),
       taxRate: Number(data.taxRate) || 0,
       taxMode: data.taxMode ?? 'exclusive',
       unitOfMeasurement: data.unitOfMeasurement?.trim() || 'unit',
@@ -542,9 +553,15 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                   {settings.currency}
                 </span>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   step="0.01"
                   {...unitCostRegistration}
+                  onChange={(event) => {
+                    event.target.value = cleanAmount(event.target.value);
+                    unitCostRegistration.onChange(event);
+                  }}
+                  onBlur={(event) => formatAmountInput(event.target.value)}
                   className={`${inputClass} pl-14 font-tabular`}
                   placeholder="0.00"
                 />
@@ -583,10 +600,12 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                   {settings.currency}
                 </span>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   step="0.01"
                   {...sellingPriceRegistration}
                   onChange={(event) => {
+                    event.target.value = cleanAmount(event.target.value);
                     sellingPriceRegistration.onChange(event);
                     setPricingMode('manual');
                     setValue('profitMargin', 0, {
@@ -594,6 +613,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                       shouldValidate: false,
                     });
                   }}
+                  onBlur={(event) => formatAmountInput(event.target.value)}
                   className={`${inputClass} pl-14 font-tabular`}
                   placeholder="0.00"
                 />
@@ -636,7 +656,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 onChange={(taxId) => {
                   const tax = taxOptions.find((candidate) => candidate.id === taxId);
                   setValue('taxId', taxId, { shouldDirty: true });
-                  setValue('taxApplicable', Boolean(tax && tax.mode === 'inclusive'), {
+                  setValue('taxApplicable', Boolean(tax && Number(tax.rate) > 0), {
                     shouldDirty: true,
                   });
                   setValue('taxRate', tax?.rate ?? 0, { shouldDirty: true });
@@ -671,13 +691,13 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 value={selectedTaxMode}
                 onChange={(taxMode) => {
                   setValue('taxMode', taxMode as FormData['taxMode'], { shouldDirty: true });
-                  setValue('taxApplicable', taxMode === 'inclusive' && selectedTaxRate > 0, {
+                  setValue('taxApplicable', selectedTaxRate > 0, {
                     shouldDirty: true,
                   });
                 }}
                 options={[
-                  { value: 'exclusive', label: 'VAT exempt (no VAT)' },
-                  { value: 'inclusive', label: 'VAT applies (add separately)' },
+                  { value: 'exclusive', label: 'VAT added to price' },
+                  { value: 'inclusive', label: 'VAT included in price' },
                 ]}
               />
             </div>

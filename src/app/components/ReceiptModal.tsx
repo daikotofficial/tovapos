@@ -85,7 +85,7 @@ export default function ReceiptModal({
         </div>
 
         {/* Receipt Paper */}
-        <div className="bg-white border border-border rounded-xl overflow-hidden">
+        <div className="receipt-paper bg-white border border-border rounded-xl overflow-hidden">
           {/* Header */}
           <div className="text-center px-6 py-4 border-b border-dashed border-border bg-muted/20">
             {showLogo && businessLogo && (
@@ -194,6 +194,17 @@ export default function ReceiptModal({
                   {formatMoney(sale.subtotal, currency)}
                 </span>
               </div>
+              {sale.paymentMethod === 'split' && sale.paymentBreakdown && (
+                <div className="mt-2 border-t border-dashed border-border pt-2">
+                  <p className="text-muted-foreground">Payment split</p>
+                  {Object.entries(sale.paymentBreakdown).filter(([, amount]) => Number(amount) > 0).map(([method, amount]) => (
+                    <div key={method} className="flex justify-between">
+                      <span className="capitalize">{method.replace('-', ' ')}</span>
+                      <span className="font-tabular">{formatMoney(Number(amount), currency)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {sale.discountTotal > 0 && (
                 <div className="flex justify-between text-success">
                   <span>Discount</span>

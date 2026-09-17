@@ -4,6 +4,7 @@ import type {
   BusinessSettings,
   Customer,
   InventoryItem,
+  PaymentBreakdown,
   SaleTransaction,
   StockMovement,
 } from '@/lib/pos/types';
@@ -26,6 +27,25 @@ interface SaleCommandItem {
   quantity: number;
   discount: number;
   unitPrice: number;
+}
+
+function parsePaymentBreakdown(value: unknown, paymentMethod: string): PaymentBreakdown | undefined {
+  if (paymentMethod !== 'split') return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new HttpError(400, 'Split payment amounts are required', 'VALIDATION_ERROR');
+  }
+  const allowed = ['cash', 'card', 'mobile', 'bank-transfer'] as const;
+  const breakdown: PaymentBreakdown = {};
+  let count = 0;
+  for (const method of allowed) {
+    const amount = Number((value as Record<string, unknown>)[method] ?? 0);
+    if (!Number.isFinite(amount) || amount < 0 || Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-8) {
+      throw new HttpError(400, 'Split payment amount is invalid', 'VALIDATION_ERROR');
+    }
+    if (amount > 0) { breakdown[method] = money(amount); count += 1; }
+  }
+  if (count < 2) throw new HttpError(400, 'Split payment requires at least two methods', 'VALIDATION_ERROR');
+  return breakdown;
 }
 
 function commandHash(body: unknown): string {
@@ -88,6 +108,7 @@ export async function POST(request: NextRequest) {
     const items = parseItems(body.items);
     const paymentMethod = typeof body.paymentMethod === 'string' ? body.paymentMethod : 'cash';
     const cashTendered = Number(body.cashTendered ?? 0);
+    const paymentBreakdown = parsePaymentBreakdown(body.paymentBreakdown, paymentMethod);
     if (
       !['cash', 'card', 'mobile', 'bank-transfer', 'split', 'credit'].includes(paymentMethod) ||
       !Number.isFinite(cashTendered) ||
@@ -109,6 +130,7 @@ export async function POST(request: NextRequest) {
       items,
       paymentMethod,
       cashTendered,
+      paymentBreakdown,
       customerName,
       loyaltyPointsToRedeem,
     });
@@ -207,8 +229,7 @@ export async function POST(request: NextRequest) {
             quantity: requested.quantity,
             discount: requested.discount,
             taxApplicable: Boolean(
-              productData.taxMode === 'inclusive' &&
-              (productData.taxApplicable || Number(productData.taxRate) > 0)
+              productData.taxApplicable || Number(productData.taxRate) > 0
             ),
             taxRate: Number(productData.taxRate) || 0,
             taxMode: productData.taxMode ?? settings.taxMode ?? 'exclusive',
@@ -277,6 +298,7 @@ export async function POST(request: NextRequest) {
         amountPaid: paymentMethod === 'credit' ? 0 : grandTotal,
         amountDue: paymentMethod === 'credit' ? grandTotal : 0,
         cashTendered,
+        paymentBreakdown,
         changeGiven: Math.max(0, money(cashTendered - grandTotal)),
         customerName,
         timestamp: now,
@@ -374,6 +396,14 @@ export async function POST(request: NextRequest) {
           'A valid customer is required to redeem loyalty points',
           'LOYALTY_CUSTOMER_REQUIRED'
         );
+      }
+
+      if (paymentMethod === 'split' && paymentBreakdown) {
+        const splitTotal = money(Object.values(paymentBreakdown).reduce((sum, amount) => sum + (amount ?? 0), 0));
+        const expected = Number(sale.amountPaid ?? grandTotal);
+        if (splitTotal !== expected) {
+          throw new HttpError(400, 'Split payment amounts must equal the amount due', 'VALIDATION_ERROR');
+        }
       }
 
       if (paymentMethod === 'cash' && cashTendered < Number(sale.amountPaid ?? grandTotal)) {

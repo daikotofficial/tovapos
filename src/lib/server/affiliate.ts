@@ -52,7 +52,7 @@ export async function deliverAffiliateEvent(eventId: string): Promise<void> {
     key.length < 32
   ) {
     await getPosPool().query(
-      `UPDATE pos_affiliate_events SET status = 'failed', last_error = $2, updated_at = now()
+      `UPDATE pos_affiliate_events SET status = 'pending', next_attempt_at = now() + interval '5 minutes', last_error = $2, updated_at = now()
        WHERE id = $1 AND status <> 'sent'`,
       [eventId, 'Affiliate integration is not configured']
     );
@@ -81,7 +81,7 @@ export async function deliverAffiliateEvent(eventId: string): Promise<void> {
       await getPosPool().query(
         `UPDATE pos_affiliate_events
          SET status = $2, last_error = $3, next_attempt_at = CASE WHEN $2 = 'pending' THEN now() + interval '5 minutes' ELSE NULL END, updated_at = now()
-         WHERE id = $1`,
+         WHERE id = $1 AND status = 'sending'`,
         [
           eventId,
           retryable ? 'pending' : 'failed',
@@ -91,12 +91,12 @@ export async function deliverAffiliateEvent(eventId: string): Promise<void> {
       return;
     }
     await getPosPool().query(
-      `UPDATE pos_affiliate_events SET status = 'sent', sent_at = now(), last_error = NULL, updated_at = now() WHERE id = $1`,
+      `UPDATE pos_affiliate_events SET status = 'sent', sent_at = now(), last_error = NULL, updated_at = now() WHERE id = $1 AND status = 'sending'`,
       [eventId]
     );
   } catch (error) {
     await getPosPool().query(
-      `UPDATE pos_affiliate_events SET status = 'pending', last_error = $2, next_attempt_at = now() + interval '5 minutes', updated_at = now() WHERE id = $1`,
+      `UPDATE pos_affiliate_events SET status = 'pending', last_error = $2, next_attempt_at = now() + interval '5 minutes', updated_at = now() WHERE id = $1 AND status = 'sending'`,
       [
         eventId,
         error instanceof Error ? error.message.slice(0, 500) : 'Affiliate API request failed',

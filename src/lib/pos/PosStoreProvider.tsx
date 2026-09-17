@@ -1395,6 +1395,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                 items: input.items,
                 paymentMethod: input.paymentMethod,
                 cashTendered: input.cashTendered,
+                paymentBreakdown: input.paymentBreakdown,
                 customerName: input.customerName,
                 loyaltyPointsToRedeem: input.loyaltyPointsToRedeem,
               }),
@@ -1465,7 +1466,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               quantity: line.quantity,
               discount: line.discount,
               taxApplicable: Boolean(
-                item?.taxMode === 'inclusive' && (item?.taxApplicable || Number(item?.taxRate) > 0)
+                item?.taxApplicable || Number(item?.taxRate) > 0
               ),
               taxRate: Number(item?.taxRate) || 0,
               taxMode: item?.taxMode ?? settings.taxMode ?? 'exclusive',
@@ -1492,7 +1493,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               quantity: line.quantity,
               discount: line.discount,
               taxApplicable: Boolean(
-                item.taxMode === 'inclusive' && (item.taxApplicable || Number(item.taxRate) > 0)
+                item.taxApplicable || Number(item.taxRate) > 0
               ),
               taxRate: Number(item.taxRate) || 0,
               taxMode: item.taxMode ?? settings.taxMode ?? 'exclusive',
@@ -1539,6 +1540,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           amountPaid: input.paymentMethod === 'credit' ? 0 : saleTotals.grandTotal,
           amountDue: input.paymentMethod === 'credit' ? saleTotals.grandTotal : 0,
           cashTendered: input.cashTendered,
+          paymentBreakdown: input.paymentBreakdown,
           changeGiven:
             input.paymentMethod === 'cash' && input.cashTendered !== undefined
               ? Math.max(0, Number((input.cashTendered - saleTotals.grandTotal).toFixed(2)))

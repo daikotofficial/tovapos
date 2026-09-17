@@ -7,7 +7,7 @@ import PaymentPanel from './PaymentPanel';
 import ReceiptModal from './ReceiptModal';
 import RefundModal from './RefundModal';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
-import { InventoryItem, PaymentMethod, SaleTransaction } from '@/lib/pos/types';
+import { InventoryItem, PaymentBreakdown, PaymentMethod, SaleTransaction } from '@/lib/pos/types';
 import { loadInventoryByIds, loadInventoryPage, lookupInventoryItem } from '@/lib/pos/local-store';
 import { assertSellable, getDaysUntilExpiry } from '@/lib/pos/stock';
 import { formatMoney } from '@/lib/pos/money';
@@ -61,6 +61,7 @@ export default function CheckoutScreen() {
   const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [cashTendered, setCashTendered] = useState('');
+  const [paymentBreakdown, setPaymentBreakdown] = useState<PaymentBreakdown>({ cash: 0, 'bank-transfer': 0 });
   const [showReceipt, setShowReceipt] = useState(false);
   const [showRefund, setShowRefund] = useState(false);
   const [completedSale, setCompletedSale] = useState<SaleTransaction | null>(null);
@@ -101,20 +102,20 @@ export default function CheckoutScreen() {
   const taxLines = cart.map((item) => {
     const gross = money(item.unitPrice * item.quantity);
     const lineTaxRate =
-      item.taxMode === 'inclusive'
-        ? resolveTaxRate(item.taxApplicable, item.taxRate, defaultTaxRate)
-        : 0;
+      item.taxApplicable ? resolveTaxRate(item.taxApplicable, item.taxRate, defaultTaxRate) : 0;
     const combinedDiscount = item.customerDiscountLocked
       ? item.discount
       : 100 * (1 - (1 - item.discount / 100) * (1 - globalDiscount / 100));
     const discountedGross = money(gross * (1 - combinedDiscount / 100));
-    const taxAmount = money(discountedGross * (lineTaxRate / 100));
+    const taxAmount = item.taxMode === 'inclusive'
+      ? money(discountedGross - discountedGross / (1 + lineTaxRate / 100))
+      : money(discountedGross * (lineTaxRate / 100));
 
     return {
       lineTaxRate,
       taxMode: item.taxMode,
       taxAmount,
-      exclusiveTaxAmount: taxAmount,
+      exclusiveTaxAmount: item.taxMode === 'exclusive' ? taxAmount : 0,
     };
   });
   const taxAmount = money(taxLines.reduce((sum, line) => sum + line.taxAmount, 0));
@@ -291,8 +292,7 @@ export default function CheckoutScreen() {
             baseDiscount: getProductDiscountPercent(product),
             customerDiscountLocked: Boolean(rule),
             taxApplicable: Boolean(
-              product.taxMode === 'inclusive' &&
-              (product.taxApplicable || Number(product.taxRate) > 0)
+              product.taxApplicable || Number(product.taxRate) > 0
             ),
             taxRate: Number(product.taxRate) || Number(settings.taxRate) || 0,
             taxMode: product.taxMode ?? settings.taxMode ?? 'exclusive',
@@ -476,6 +476,17 @@ export default function CheckoutScreen() {
       return;
     }
 
+    const normalizedSplit = Object.fromEntries(
+      Object.entries(paymentBreakdown).map(([method, amount]) => [method, money(Number(amount) || 0)])
+    ) as PaymentBreakdown;
+    if (paymentMethod === 'split') {
+      const splitTotal = money(Object.values(normalizedSplit).reduce((sum, amount) => sum + (amount ?? 0), 0));
+      if (splitTotal !== amountToPay || Object.values(normalizedSplit).filter((amount) => (amount ?? 0) > 0).length < 2) {
+        toast.error(`Split payments must use at least two methods and equal ${formatMoney(amountToPay, settings.currency)}.`);
+        return;
+      }
+    }
+
     setIsProcessing(true);
     try {
       const sale = await completeSale({
@@ -494,6 +505,7 @@ export default function CheckoutScreen() {
         paymentMethod,
         cashTendered: tendered,
         changeGiven: paymentMethod === 'cash' && tendered ? tendered - amountToPay : undefined,
+        paymentBreakdown: paymentMethod === 'split' ? normalizedSplit : undefined,
         customerName,
         loyaltyPointsToRedeem: loyaltyPreview.points,
         cashier: currentUser?.name ?? 'Unknown cashier',
@@ -557,6 +569,8 @@ export default function CheckoutScreen() {
           setPaymentMethod={setPaymentMethod}
           cashTendered={cashTendered}
           setCashTendered={setCashTendered}
+          paymentBreakdown={paymentBreakdown}
+          setPaymentBreakdown={setPaymentBreakdown}
           onProcessPayment={processPayment}
           isProcessing={isProcessing}
           currency={settings.currency}

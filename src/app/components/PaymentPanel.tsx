@@ -18,7 +18,7 @@ import { CartItem } from './CheckoutScreen';
 import { formatMoney, getCurrencyInputPrefix } from '@/lib/pos/money';
 import { normalizeCustomerPhone } from '@/lib/pos/customer';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
-import type { PaymentMethod } from '@/lib/pos/types';
+import type { PaymentBreakdown, PaymentMethod, SplitPaymentMethod } from '@/lib/pos/types';
 
 interface PaymentPanelProps {
   cart: CartItem[];
@@ -33,6 +33,8 @@ interface PaymentPanelProps {
   setPaymentMethod: (v: PaymentMethod) => void;
   cashTendered: string;
   setCashTendered: (v: string) => void;
+  paymentBreakdown: PaymentBreakdown;
+  setPaymentBreakdown: (v: PaymentBreakdown) => void;
   onProcessPayment: () => void;
   isProcessing: boolean;
   currency: string;
@@ -63,6 +65,8 @@ export default function PaymentPanel({
   setPaymentMethod,
   cashTendered,
   setCashTendered,
+  paymentBreakdown,
+  setPaymentBreakdown,
   onProcessPayment,
   isProcessing,
   currency,
@@ -392,6 +396,36 @@ export default function PaymentPanel({
                 </span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Non-cash payment guidance */}
+        {paymentMethod === 'split' && (
+          <div className="px-4 py-3 border-b border-border space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground">Split tender amounts</p>
+            {([
+              ['cash', 'Cash'],
+              ['card', 'Card'],
+              ['mobile', 'Mobile'],
+              ['bank-transfer', 'Transfer'],
+            ] as [SplitPaymentMethod, string][]).map(([method, label]) => (
+              <label key={method} className="flex items-center gap-2 text-xs">
+                <span className="w-20 text-muted-foreground">{label}</span>
+                <span className="text-muted-foreground">{currencyPrefix}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={paymentBreakdown[method] ?? ''}
+                  onChange={(event) => setPaymentBreakdown({ ...paymentBreakdown, [method]: Number(event.target.value) || 0 })}
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm font-tabular"
+                  placeholder="0.00"
+                />
+              </label>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              Enter two or more methods. Total: <strong className="text-foreground">{formatMoney(Object.values(paymentBreakdown).reduce((sum, amount) => sum + (amount ?? 0), 0), currency)}</strong> / {formatMoney(amountToPay, currency)}
+            </p>
           </div>
         )}
 

@@ -41,6 +41,10 @@ export interface InventoryItem {
 
 export type PaymentMethod = 'cash' | 'card' | 'mobile' | 'bank-transfer' | 'split' | 'credit';
 
+export type SplitPaymentMethod = Exclude<PaymentMethod, 'split' | 'credit'>;
+
+export type PaymentBreakdown = Partial<Record<SplitPaymentMethod, number>>;
+
 export type CreditPaymentMethod = Exclude<PaymentMethod, 'credit'>;
 
 export interface CreditPayment {
@@ -95,6 +99,7 @@ export interface SaleTransaction {
   creditPayments?: CreditPayment[];
   cashTendered?: number;
   changeGiven?: number;
+  paymentBreakdown?: PaymentBreakdown;
   customerName?: string;
   timestamp: string;
   cashier: string;
@@ -224,6 +229,7 @@ export interface CompleteSaleInput {
   paymentMethod: PaymentMethod;
   cashTendered?: number;
   changeGiven?: number;
+  paymentBreakdown?: PaymentBreakdown;
   customerName?: string;
   loyaltyPointsToRedeem?: number;
   cashier: string;
