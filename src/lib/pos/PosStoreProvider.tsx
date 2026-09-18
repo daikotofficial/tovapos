@@ -65,7 +65,12 @@ import {
   warmInventoryCache,
 } from './local-store';
 import { defaultCustomers, defaultSettings, defaultUsers, defaultVendors } from './seeds';
-import { getProductUsage, isOnPremiseDeployment, planAllowsPermission } from './subscription';
+import {
+  getProductUsage,
+  hasActiveSubscription,
+  isOnPremiseDeployment,
+  planAllowsPermission,
+} from './subscription';
 import { normalizeCustomerPhone } from './customer';
 
 interface PosStoreValue {
@@ -990,13 +995,22 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         currentUser.role === 'super-admin' ||
         currentUser.role === 'owner' ||
         currentUser.permissions.includes(permission);
-      return roleAllows && planAllowsPermission(settings.subscriptionPlanId, permission);
+      return (
+        roleAllows &&
+        hasActiveSubscription(settings) &&
+        planAllowsPermission(settings.subscriptionPlanId, permission)
+      );
     },
-    [currentUser, isAuthenticated, settings.subscriptionPlanId]
+    [currentUser, isAuthenticated, settings]
   );
 
   const upsertInventoryItem = useCallback(
     async (item: InventoryItem) => {
+      if (!hasPermission('inventory')) {
+        throw new Error(
+          'An active subscription is required to manage products. Please subscribe to continue.'
+        );
+      }
       const existingItem = inventory.find((existing) => existing.id === item.id);
       const planUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
       if (!existingItem && planUsage.isAtLimit) {
@@ -1142,7 +1156,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
       return normalized;
     },
-    [currentUser?.name, inventory, isOnline, settings.subscriptionPlanId]
+    [currentUser?.name, hasPermission, inventory, isOnline, settings.subscriptionPlanId]
   );
 
   const upsertUser = useCallback(async (user: TovaUser) => {
@@ -1465,9 +1479,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               unitPrice: line.unitPrice,
               quantity: line.quantity,
               discount: line.discount,
-              taxApplicable: Boolean(
-                item?.taxApplicable || Number(item?.taxRate) > 0
-              ),
+              taxApplicable: Boolean(item?.taxApplicable || Number(item?.taxRate) > 0),
               taxRate: Number(item?.taxRate) || 0,
               taxMode: item?.taxMode ?? settings.taxMode ?? 'exclusive',
             };
@@ -1492,9 +1504,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               unitPrice: line.unitPrice,
               quantity: line.quantity,
               discount: line.discount,
-              taxApplicable: Boolean(
-                item.taxApplicable || Number(item.taxRate) > 0
-              ),
+              taxApplicable: Boolean(item.taxApplicable || Number(item.taxRate) > 0),
               taxRate: Number(item.taxRate) || 0,
               taxMode: item.taxMode ?? settings.taxMode ?? 'exclusive',
             },

@@ -113,6 +113,17 @@ export function isOnPremiseDeployment(): boolean {
   return process.env.NEXT_PUBLIC_DEPLOYMENT_MODE === 'onprem';
 }
 
+export function hasActiveSubscription(settings: {
+  subscriptionStatus?: string;
+  subscriptionRenewsAt?: string;
+}): boolean {
+  if (isOnPremiseDeployment()) return true;
+  const renewsAt = Date.parse(String(settings.subscriptionRenewsAt || ''));
+  return (
+    settings.subscriptionStatus === 'active' && Number.isFinite(renewsAt) && renewsAt > Date.now()
+  );
+}
+
 export function getSubscriptionPlan(planId?: string): SubscriptionPlan {
   return (
     subscriptionPlans[(planId as SubscriptionPlanId) || 'starter'] ?? subscriptionPlans.starter

@@ -185,12 +185,24 @@ export async function assertTenantPlanPermission(
 ): Promise<void> {
   if (process.env.DEPLOYMENT_MODE === 'onprem') return;
   const result = await getPosPool().query(
-    `SELECT data->>'subscriptionPlanId' AS plan_id
+    `SELECT data->>'subscriptionPlanId' AS plan_id,
+            data->>'subscriptionStatus' AS subscription_status,
+            data->>'subscriptionRenewsAt' AS subscription_renews_at
      FROM pos_tenant_records
      WHERE tenant_id = $1 AND store_name = 'settings' AND record_id = 'settings'`,
     [tenantId]
   );
-  const plan = getSubscriptionPlan(result.rows[0]?.plan_id);
+  const row = result.rows[0];
+  const status = String(row?.subscription_status || '').toLowerCase();
+  const renewsAt = Date.parse(String(row?.subscription_renews_at || ''));
+  if (status !== 'active' || !Number.isFinite(renewsAt) || renewsAt <= Date.now()) {
+    throw new HttpError(
+      402,
+      'An active subscription is required to use this feature. Please subscribe to continue.',
+      'SUBSCRIPTION_REQUIRED'
+    );
+  }
+  const plan = getSubscriptionPlan(row?.plan_id);
   if (!plan.permissions.includes(permission)) {
     throw new HttpError(
       403,

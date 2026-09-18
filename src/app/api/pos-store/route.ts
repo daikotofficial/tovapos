@@ -732,7 +732,7 @@ export async function GET(request: NextRequest) {
     const storeName = getStoreName(request);
     await assertRetailOnlyFeature(auth, storeName);
     const planFeature = WRITE_PERMISSIONS[storeName];
-    if (planFeature && storeName !== 'users') {
+    if (planFeature && !['users', 'settings'].includes(storeName)) {
       await assertTenantPlanPermission(auth.tenantId, planFeature);
     }
     const permission = READ_PERMISSIONS[storeName];
@@ -811,7 +811,7 @@ export async function PUT(request: NextRequest) {
       );
     }
     const permission = WRITE_PERMISSIONS[storeName];
-    if (permission) {
+    if (permission && storeName !== 'settings') {
       assertPermission(auth, permission);
       await assertTenantPlanPermission(auth.tenantId, permission);
     }

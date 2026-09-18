@@ -29,7 +29,10 @@ interface SaleCommandItem {
   unitPrice: number;
 }
 
-function parsePaymentBreakdown(value: unknown, paymentMethod: string): PaymentBreakdown | undefined {
+function parsePaymentBreakdown(
+  value: unknown,
+  paymentMethod: string
+): PaymentBreakdown | undefined {
   if (paymentMethod !== 'split') return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new HttpError(400, 'Split payment amounts are required', 'VALIDATION_ERROR');
@@ -39,12 +42,20 @@ function parsePaymentBreakdown(value: unknown, paymentMethod: string): PaymentBr
   let count = 0;
   for (const method of allowed) {
     const amount = Number((value as Record<string, unknown>)[method] ?? 0);
-    if (!Number.isFinite(amount) || amount < 0 || Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-8) {
+    if (
+      !Number.isFinite(amount) ||
+      amount < 0 ||
+      Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-8
+    ) {
       throw new HttpError(400, 'Split payment amount is invalid', 'VALIDATION_ERROR');
     }
-    if (amount > 0) { breakdown[method] = money(amount); count += 1; }
+    if (amount > 0) {
+      breakdown[method] = money(amount);
+      count += 1;
+    }
   }
-  if (count < 2) throw new HttpError(400, 'Split payment requires at least two methods', 'VALIDATION_ERROR');
+  if (count < 2)
+    throw new HttpError(400, 'Split payment requires at least two methods', 'VALIDATION_ERROR');
   return breakdown;
 }
 
@@ -96,6 +107,7 @@ export async function POST(request: NextRequest) {
     const auth = await requireAuth(request);
     assertTenantActive(auth);
     assertPermission(auth, 'checkout');
+    await assertTenantPlanPermission(auth.tenantId, 'checkout');
     const body = (await request.json()) as Record<string, unknown>;
     const operationId =
       typeof body.operationId === 'string' && /^[A-Za-z0-9:_-]{8,160}$/.test(body.operationId)
@@ -228,9 +240,7 @@ export async function POST(request: NextRequest) {
             unitPrice: requested.unitPrice,
             quantity: requested.quantity,
             discount: requested.discount,
-            taxApplicable: Boolean(
-              productData.taxApplicable || Number(productData.taxRate) > 0
-            ),
+            taxApplicable: Boolean(productData.taxApplicable || Number(productData.taxRate) > 0),
             taxRate: Number(productData.taxRate) || 0,
             taxMode: productData.taxMode ?? settings.taxMode ?? 'exclusive',
           },
@@ -399,10 +409,16 @@ export async function POST(request: NextRequest) {
       }
 
       if (paymentMethod === 'split' && paymentBreakdown) {
-        const splitTotal = money(Object.values(paymentBreakdown).reduce((sum, amount) => sum + (amount ?? 0), 0));
+        const splitTotal = money(
+          Object.values(paymentBreakdown).reduce((sum, amount) => sum + (amount ?? 0), 0)
+        );
         const expected = Number(sale.amountPaid ?? grandTotal);
         if (splitTotal !== expected) {
-          throw new HttpError(400, 'Split payment amounts must equal the amount due', 'VALIDATION_ERROR');
+          throw new HttpError(
+            400,
+            'Split payment amounts must equal the amount due',
+            'VALIDATION_ERROR'
+          );
         }
       }
 

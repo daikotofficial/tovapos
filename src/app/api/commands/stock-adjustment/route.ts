@@ -4,6 +4,7 @@ import type { InventoryItem, StockMovement } from '@/lib/pos/types';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
+  assertTenantPlanPermission,
   assertSameOrigin,
   errorResponse,
   HttpError,
@@ -16,6 +17,7 @@ export async function POST(request: NextRequest) {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
     assertPermission(auth, 'adjust-stock');
+    await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
     const body = (await request.json()) as Record<string, unknown>;
     const product = body.product as InventoryItem | undefined;
     if (!product?.id || !product.name?.trim() || !product.sku?.trim()) {
