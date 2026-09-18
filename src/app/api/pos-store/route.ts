@@ -731,10 +731,6 @@ export async function GET(request: NextRequest) {
     const auth = await requireAuth(request);
     const storeName = getStoreName(request);
     await assertRetailOnlyFeature(auth, storeName);
-    const planFeature = WRITE_PERMISSIONS[storeName];
-    if (planFeature && !['users', 'settings'].includes(storeName)) {
-      await assertTenantPlanPermission(auth.tenantId, planFeature);
-    }
     const permission = READ_PERMISSIONS[storeName];
     if (storeName === 'users') {
       if (
@@ -1180,7 +1176,10 @@ export async function DELETE(request: NextRequest) {
     if (storeName === 'sales' || storeName === 'stockMovements' || storeName === 'inputVat') {
       throw new HttpError(405, 'Financial records cannot be directly deleted', 'DELETE_FORBIDDEN');
     }
-    if (storeName === 'inventory') assertPermission(auth, 'delete-product');
+    if (storeName === 'inventory') {
+      assertPermission(auth, 'delete-product');
+      await assertTenantPlanPermission(auth.tenantId, 'delete-product');
+    }
     const permission = WRITE_PERMISSIONS[storeName];
     if (permission && storeName !== 'inventory') {
       assertPermission(auth, permission);

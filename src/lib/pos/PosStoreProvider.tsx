@@ -995,21 +995,20 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         currentUser.role === 'super-admin' ||
         currentUser.role === 'owner' ||
         currentUser.permissions.includes(permission);
-      return (
-        roleAllows &&
-        hasActiveSubscription(settings) &&
-        planAllowsPermission(settings.subscriptionPlanId, permission)
-      );
+      return roleAllows && planAllowsPermission(settings.subscriptionPlanId, permission);
     },
-    [currentUser, isAuthenticated, settings]
+    [currentUser, isAuthenticated, settings.subscriptionPlanId]
   );
 
   const upsertInventoryItem = useCallback(
     async (item: InventoryItem) => {
-      if (!hasPermission('inventory')) {
+      if (!hasActiveSubscription(settings)) {
         throw new Error(
           'An active subscription is required to manage products. Please subscribe to continue.'
         );
+      }
+      if (!hasPermission('inventory')) {
+        throw new Error('Your role is not allowed to manage products.');
       }
       const existingItem = inventory.find((existing) => existing.id === item.id);
       const planUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
@@ -1156,7 +1155,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
       return normalized;
     },
-    [currentUser?.name, hasPermission, inventory, isOnline, settings.subscriptionPlanId]
+    [currentUser?.name, hasPermission, inventory, isOnline, settings]
   );
 
   const upsertUser = useCallback(async (user: TovaUser) => {
@@ -1368,6 +1367,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     async (input: CompleteSaleInput) => {
       if (!hasPermission('checkout')) {
         throw new Error('Your role is not allowed to complete sales.');
+      }
+      if (!hasActiveSubscription(settings)) {
+        throw new Error(
+          'An active subscription is required to complete sales. Please subscribe to continue.'
+        );
       }
       if (input.paymentMethod === 'credit' && !hasPermission('credit-sales')) {
         throw new Error('Credit sales require the Pro plan and credit-sales permission.');
