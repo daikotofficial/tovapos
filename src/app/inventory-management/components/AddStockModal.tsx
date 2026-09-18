@@ -580,20 +580,27 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
             <div>
               <label className={labelClass}>Profit Margin (%)</label>
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 step="0.01"
                 {...profitMarginRegistration}
                 onChange={(event) => {
+                  const cleaned = cleanAmount(event.target.value);
+                  event.target.value = cleaned;
                   profitMarginRegistration.onChange(event);
                   setPricingMode('margin');
                   setValue(
                     'sellingPrice',
-                    computeSellingPriceFromMargin(unitCost, Number(event.target.value) || 0),
+                    computeSellingPriceFromMargin(unitCost, Number(cleaned) || 0),
                     {
                       shouldDirty: true,
                       shouldValidate: true,
                     }
                   );
+                  event.target.value = formatAmountInput(cleaned);
+                }}
+                onBlur={(event) => {
+                  event.target.value = formatAmountInput(event.target.value);
                 }}
                 className={`${inputClass} font-tabular`}
                 placeholder="0"

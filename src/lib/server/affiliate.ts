@@ -62,6 +62,10 @@ export async function queueAffiliateSubscription(
   client: { query: Function },
   event: SubscriptionEvent
 ): Promise<string> {
+  const paymentReference = String(event.paymentReference || '')
+    .trim()
+    .slice(0, 180);
+  if (!paymentReference) throw new Error('Affiliate payment reference is required.');
   const id = randomUUID();
   const payload = {
     product: process.env.AFFILIATE_PRODUCT || 'tovapos',
@@ -73,19 +77,25 @@ export async function queueAffiliateSubscription(
     amountMinor: event.amountMinor,
     currency: event.currency,
     subscriptionExpiresAt: event.subscriptionExpiresAt,
-    paymentReference: event.paymentReference,
+    paymentReference,
   };
   const result = await client.query(
     `INSERT INTO pos_affiliate_events
-       (id, event_type, product, external_id, payload, status, next_attempt_at)
-     VALUES ($1, 'subscription', $2, $3, $4::jsonb, 'pending', now())
-     ON CONFLICT (event_type, product, external_id)
-     DO UPDATE SET payload = EXCLUDED.payload, status = 'pending', next_attempt_at = now(),
-       sent_at = NULL, last_error = NULL, updated_at = now()
+       (id, event_type, product, external_id, payment_reference, payload, status, next_attempt_at)
+     VALUES ($1, 'subscription', $2, $3, $5, $4::jsonb, 'pending', now())
+     ON CONFLICT DO NOTHING
      RETURNING id`,
-    [id, payload.product, payload.externalId, JSON.stringify(payload)]
+    [id, payload.product, payload.externalId, JSON.stringify(payload), paymentReference]
   );
-  return result.rows[0].id as string;
+  if (result.rows[0]?.id) return result.rows[0].id as string;
+  const existing = await client.query(
+    `SELECT id FROM pos_affiliate_events
+     WHERE event_type = 'subscription' AND product = $1 AND external_id = $2 AND payment_reference = $3
+     LIMIT 1`,
+    [payload.product, payload.externalId, paymentReference]
+  );
+  if (!existing.rows[0]?.id) throw new Error('Affiliate subscription event could not be queued.');
+  return existing.rows[0].id as string;
 }
 
 export async function deliverAffiliateEvent(eventId: string): Promise<void> {

@@ -9,6 +9,15 @@ export type BillingCycle = 'monthly' | 'yearly';
 export type PaidPlanId = Exclude<SubscriptionPlanId, 'delux'>;
 
 const PAYSTACK_URL = 'https://api.paystack.co';
+const PAYSTACK_CHANNELS = [
+  'card',
+  'bank',
+  'ussd',
+  'qr',
+  'mobile_money',
+  'bank_transfer',
+  'eft',
+] as const;
 
 function secret(): string {
   const value = process.env.PAYSTACK_SECRET_KEY?.trim();
@@ -30,7 +39,12 @@ export function planPriceMinor(planId: PaidPlanId, cycle: BillingCycle): number 
 function planCode(planId: PaidPlanId, cycle: BillingCycle): string {
   const key = `PAYSTACK_PLAN_CODE_${planId.toUpperCase()}_${cycle.toUpperCase()}`;
   const code = process.env[key]?.trim();
-  if (!code) throw new HttpError(503, `Paystack ${planId} ${cycle} plan is not configured.`, 'PLAN_NOT_CONFIGURED');
+  if (!code)
+    throw new HttpError(
+      503,
+      `Paystack ${planId} ${cycle} plan is not configured.`,
+      'PLAN_NOT_CONFIGURED'
+    );
   return code;
 }
 
@@ -44,9 +58,17 @@ async function paystackRequest<T>(path: string, init: RequestInit): Promise<T> {
     },
     signal: AbortSignal.timeout(10_000),
   });
-  const body = (await response.json().catch(() => null)) as { status?: boolean; message?: string; data?: T } | null;
+  const body = (await response.json().catch(() => null)) as {
+    status?: boolean;
+    message?: string;
+    data?: T;
+  } | null;
   if (!response.ok || !body?.status || !body.data) {
-    throw new HttpError(502, body?.message || 'Paystack could not complete the request.', 'PAYSTACK_ERROR');
+    throw new HttpError(
+      502,
+      body?.message || 'Paystack could not complete the request.',
+      'PAYSTACK_ERROR'
+    );
   }
   return body.data;
 }
@@ -73,6 +95,7 @@ export async function initializePaystackCheckout(input: {
       email: input.email,
       amount: amountMinor,
       currency: 'NGN',
+      channels: [...PAYSTACK_CHANNELS],
       reference,
       plan: code,
       callback_url: input.callbackUrl,
@@ -90,7 +113,14 @@ export async function initializePaystackCheckout(input: {
       (reference, tenant_id, plan_id, billing_cycle, amount_minor, metadata)
      VALUES ($1, $2, $3, $4, $5, $6::jsonb)
      ON CONFLICT (reference) DO NOTHING`,
-    [reference, input.tenantId, input.planId, input.billingCycle, amountMinor, JSON.stringify({ planCode: code })]
+    [
+      reference,
+      input.tenantId,
+      input.planId,
+      input.billingCycle,
+      amountMinor,
+      JSON.stringify({ planCode: code }),
+    ]
   );
   return { ...data, reference, amountMinor };
 }
@@ -119,9 +149,17 @@ function expiryForCycle(cycle: BillingCycle, paidAt: Date): Date {
 
 export async function finalizePaystackPayment(
   reference: string,
-  data: { status: string; amount: number; currency: string; paid_at?: string; customer?: { customer_code?: string }; subscription?: { subscription_code?: string } }
+  data: {
+    status: string;
+    amount: number;
+    currency: string;
+    paid_at?: string;
+    customer?: { customer_code?: string };
+    subscription?: { subscription_code?: string };
+  }
 ): Promise<{ tenantId: string; expiresAt: string; alreadyProcessed: boolean }> {
-  if (data.status !== 'success') throw new HttpError(400, 'Paystack payment was not successful.', 'PAYMENT_NOT_SUCCESSFUL');
+  if (data.status !== 'success')
+    throw new HttpError(400, 'Paystack payment was not successful.', 'PAYMENT_NOT_SUCCESSFUL');
   await ensureSecuritySchema();
   const client = await getPosPool().connect();
   try {
@@ -131,13 +169,25 @@ export async function finalizePaystackPayment(
       [reference]
     );
     const row = transaction.rows[0];
-    if (!row) throw new HttpError(404, 'Payment transaction was not found.', 'TRANSACTION_NOT_FOUND');
-    if (String(data.currency).toUpperCase() !== 'NGN' || Number(data.amount) !== Number(row.amount_minor)) {
-      throw new HttpError(400, 'The verified payment amount does not match this plan.', 'PAYMENT_MISMATCH');
+    if (!row)
+      throw new HttpError(404, 'Payment transaction was not found.', 'TRANSACTION_NOT_FOUND');
+    if (
+      String(data.currency).toUpperCase() !== 'NGN' ||
+      Number(data.amount) !== Number(row.amount_minor)
+    ) {
+      throw new HttpError(
+        400,
+        'The verified payment amount does not match this plan.',
+        'PAYMENT_MISMATCH'
+      );
     }
     if (row.status === 'success' && row.expires_at) {
       await client.query('COMMIT');
-      return { tenantId: row.tenant_id, expiresAt: new Date(row.expires_at).toISOString(), alreadyProcessed: true };
+      return {
+        tenantId: row.tenant_id,
+        expiresAt: new Date(row.expires_at).toISOString(),
+        alreadyProcessed: true,
+      };
     }
     const paidAt = data.paid_at ? new Date(data.paid_at) : new Date();
     const expiresAt = expiryForCycle(row.billing_cycle as BillingCycle, paidAt);
@@ -158,7 +208,8 @@ export async function finalizePaystackPayment(
       subscriptionBillingCycle: row.billing_cycle,
       subscriptionRenewsAt: expiresAt.toISOString(),
       paystackCustomerCode: data.customer?.customer_code || settings.paystackCustomerCode,
-      paystackSubscriptionCode: data.subscription?.subscription_code || settings.paystackSubscriptionCode,
+      paystackSubscriptionCode:
+        data.subscription?.subscription_code || settings.paystackSubscriptionCode,
       updatedAt: new Date().toISOString(),
     };
     await client.query(
@@ -171,9 +222,16 @@ export async function finalizePaystackPayment(
        SET status = 'success', customer_code = $2, subscription_code = $3,
            paid_at = $4, expires_at = $5, updated_at = now()
        WHERE reference = $1`,
-      [reference, data.customer?.customer_code || null, data.subscription?.subscription_code || null, paidAt, expiresAt]
+      [
+        reference,
+        data.customer?.customer_code || null,
+        data.subscription?.subscription_code || null,
+        paidAt,
+        expiresAt,
+      ]
     );
-    const referralCode = typeof settings.affiliateReferralCode === 'string' ? settings.affiliateReferralCode : '';
+    const referralCode =
+      typeof settings.affiliateReferralCode === 'string' ? settings.affiliateReferralCode : '';
     if (referralCode && owner) {
       const eventId = await queueAffiliateSubscription(client, {
         tenantId: row.tenant_id,
@@ -188,7 +246,11 @@ export async function finalizePaystackPayment(
       });
       await client.query('COMMIT');
       void deliverAffiliateEvent(eventId);
-      return { tenantId: row.tenant_id, expiresAt: expiresAt.toISOString(), alreadyProcessed: false };
+      return {
+        tenantId: row.tenant_id,
+        expiresAt: expiresAt.toISOString(),
+        alreadyProcessed: false,
+      };
     }
     await client.query('COMMIT');
     return { tenantId: row.tenant_id, expiresAt: expiresAt.toISOString(), alreadyProcessed: false };
