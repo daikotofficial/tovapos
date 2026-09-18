@@ -443,6 +443,9 @@ export interface BusinessSettings {
   subscriptionPlanId?: 'starter' | 'pro' | 'delux';
   subscriptionStatus?: 'trialing' | 'active' | 'past-due' | 'cancelled';
   subscriptionRenewsAt?: string;
+  subscriptionBillingCycle?: 'monthly' | 'yearly';
+  paystackCustomerCode?: string;
+  paystackSubscriptionCode?: string;
   allowOfflineSales: boolean;
   allowNegativeStock?: boolean;
   allowSellingBelowCost?: boolean;

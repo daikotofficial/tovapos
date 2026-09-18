@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Bell,
   Building2,
@@ -32,9 +33,20 @@ import {
 } from '@/lib/pos/subscription';
 
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={null}>
+      <SettingsPageContent />
+    </Suspense>
+  );
+}
+
+function SettingsPageContent() {
   const { settings, updateSettings, pendingSyncCount, inventory, isHydrated } = usePosStore();
   const [form, setForm] = useState<BusinessSettings>(settings);
   const [saved, setSaved] = useState(false);
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const [payingPlan, setPayingPlan] = useState<SubscriptionPlanId | null>(null);
+  const searchParams = useSearchParams();
   const isHospitality = settings.businessMode === 'hospitality';
   const isOnPremise = isOnPremiseDeployment();
   const productUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
@@ -43,6 +55,30 @@ export default function SettingsPage() {
   useEffect(() => {
     setForm(settings);
   }, [settings]);
+
+  useEffect(() => {
+    const reference = searchParams.get('reference') || searchParams.get('trxref');
+    if (!reference || searchParams.get('payment') !== 'callback') return;
+    let cancelled = false;
+    void fetch('/api/subscription/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reference }),
+    })
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (!response.ok) throw new Error(payload?.error || 'Payment verification failed.');
+        if (!cancelled) toast.success('Payment verified. Your subscription is now active.');
+        window.history.replaceState({}, '', '/settings');
+        window.location.reload();
+      })
+      .catch((error) => {
+        if (!cancelled) toast.error(error instanceof Error ? error.message : 'Payment verification failed.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -75,20 +111,29 @@ export default function SettingsPage() {
   };
 
   const changePlan = async (subscriptionPlanId: SubscriptionPlanId) => {
-    const nextSettings: BusinessSettings = {
-      ...form,
-      subscriptionPlanId,
-      subscriptionStatus: 'active',
-    };
-    setForm(nextSettings);
+    if (subscriptionPlanId === 'delux') {
+      toast.info('Delux is custom-priced. Please contact Tova for onboarding.');
+      return;
+    }
+    setPayingPlan(subscriptionPlanId);
     try {
-      await updateSettings(nextSettings);
-      setSaved(true);
-      toast.success('Plan updated successfully.');
+      const response = await fetch('/api/subscription/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId: subscriptionPlanId, billingCycle }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        authorization_url?: string;
+        error?: string;
+      } | null;
+      if (!response.ok || !payload?.authorization_url) {
+        throw new Error(payload?.error || 'Unable to start secure payment.');
+      }
+      window.location.assign(payload.authorization_url);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to update plan.');
+      setPayingPlan(null);
     }
-    window.setTimeout(() => setSaved(false), 1800);
   };
 
   return (
@@ -157,6 +202,20 @@ export default function SettingsPage() {
                   </p>
                 </div>
               </div>
+              <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-4">
+                <span className="text-xs font-semibold text-muted-foreground">Billing:</span>
+                {(['monthly', 'yearly'] as const).map((cycle) => (
+                  <button
+                    key={cycle}
+                    type="button"
+                    onClick={() => setBillingCycle(cycle)}
+                    className={`rounded-md px-3 py-1.5 text-xs font-bold capitalize ${billingCycle === cycle ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground'}`}
+                  >
+                    {cycle}
+                  </button>
+                ))}
+                <span className="text-xs text-muted-foreground">Yearly billing includes the published 5% discount.</span>
+              </div>
               <div className="grid grid-cols-1 gap-3 border-t border-border p-5 lg:grid-cols-3">
                 {planOptions.map((plan) => {
                   const active = (form.subscriptionPlanId ?? 'starter') === plan.id;
@@ -191,10 +250,10 @@ export default function SettingsPage() {
                       <button
                         type="button"
                         onClick={() => void changePlan(plan.id)}
-                        disabled={active}
+                        disabled={active || payingPlan !== null}
                         className="mt-4 rounded-lg border border-border px-3 py-2 text-sm font-semibold disabled:opacity-60"
                       >
-                        {active ? 'Current plan' : `Switch to ${plan.name}`}
+                        {active ? 'Current plan' : payingPlan === plan.id ? 'Opening Paystack…' : plan.id === 'delux' ? 'Contact sales' : `Subscribe to ${plan.name}`}
                       </button>
                     </div>
                   );

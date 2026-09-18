@@ -52,6 +52,20 @@ services:
         value: tovapos
       - key: AFFILIATE_INTEGRATION_KEY
         sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: PAYSTACK_CALLBACK_URL
+        sync: false
+      - key: PAYSTACK_PLAN_CODE_STARTER_MONTHLY
+        sync: false
+      - key: PAYSTACK_PLAN_CODE_STARTER_YEARLY
+        sync: false
+      - key: PAYSTACK_PLAN_CODE_PRO_MONTHLY
+        sync: false
+      - key: PAYSTACK_PLAN_CODE_PRO_YEARLY
+        sync: false
 
   - type: cron
     runtime: node

@@ -11,6 +11,7 @@ interface ModalProps {
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   footer?: React.ReactNode;
+  printTarget?: string;
 }
 
 const sizeMap = {
@@ -28,6 +29,7 @@ export default function Modal({
   children,
   size = 'md',
   footer,
+  printTarget,
 }: ModalProps) {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -45,6 +47,7 @@ export default function Modal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
+      data-print-target={printTarget}
     >
       <div className="absolute inset-0 bg-foreground/40 backdrop-blur-sm" onClick={onClose} />
       <div

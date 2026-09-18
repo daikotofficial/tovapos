@@ -51,6 +51,7 @@ export default function ReceiptModal({
       title="Transaction Complete"
       subtitle={`Receipt — ${sale.transactionId}`}
       size="md"
+      printTarget="receipt"
       footer={
         <>
           <button
@@ -69,9 +70,9 @@ export default function ReceiptModal({
         </>
       }
     >
-      <div className="space-y-4">
+      <div className="receipt-print-content space-y-4">
         {/* Success Banner */}
-        <div className="flex items-center gap-3 bg-success/10 border border-success/20 rounded-xl px-4 py-3">
+        <div className="receipt-print-hide flex items-center gap-3 bg-success/10 border border-success/20 rounded-xl px-4 py-3">
           <CheckCircle2 size={20} className="text-success shrink-0" />
           <div>
             <p className="text-sm font-semibold text-success">Payment Successful</p>
@@ -271,7 +272,7 @@ export default function ReceiptModal({
         </div>
 
         {/* Action Row */}
-        <div className="flex gap-2">
+        <div className="receipt-print-hide flex gap-2">
           <button className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium bg-secondary hover:bg-muted rounded-lg text-secondary-foreground transition-colors duration-150">
             <Download size={13} />
             Save PDF

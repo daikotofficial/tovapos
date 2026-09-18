@@ -151,6 +151,27 @@ export async function ensureSecuritySchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS pos_affiliate_events_retry_idx
           ON pos_affiliate_events (status, next_attempt_at);
 
+        CREATE TABLE IF NOT EXISTS pos_paystack_transactions (
+          reference text PRIMARY KEY,
+          tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
+          plan_id text NOT NULL CHECK (plan_id IN ('starter', 'pro', 'delux')),
+          billing_cycle text NOT NULL CHECK (billing_cycle IN ('monthly', 'yearly')),
+          amount_minor bigint NOT NULL CHECK (amount_minor > 0),
+          currency text NOT NULL DEFAULT 'NGN',
+          status text NOT NULL DEFAULT 'initialized'
+            CHECK (status IN ('initialized', 'success', 'failed')),
+          customer_code text,
+          subscription_code text,
+          paid_at timestamptz,
+          expires_at timestamptz,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE INDEX IF NOT EXISTS pos_paystack_transactions_tenant_idx
+          ON pos_paystack_transactions (tenant_id, created_at DESC);
+
         CREATE TABLE IF NOT EXISTS pos_platform_admins (
           id text PRIMARY KEY,
           name text NOT NULL,

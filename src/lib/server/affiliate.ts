@@ -11,7 +11,25 @@ export function normalizeAffiliateCode(value: unknown): string | null {
   return code;
 }
 
-type SignupEvent = { tenantId: string; referralCode: string };
+type SignupEvent = {
+  tenantId: string;
+  referralCode: string;
+  referredName: string;
+  email: string;
+  referredCompany: string;
+};
+
+type SubscriptionEvent = {
+  tenantId: string;
+  referralCode: string;
+  customerName: string;
+  companyName: string;
+  email: string;
+  amountMinor: number;
+  currency: string;
+  subscriptionExpiresAt: string;
+  paymentReference: string;
+};
 
 export async function queueAffiliateSignup(
   client: { query: Function },
@@ -22,6 +40,9 @@ export async function queueAffiliateSignup(
     product: process.env.AFFILIATE_PRODUCT || 'tovapos',
     externalId: event.tenantId,
     referralCode: event.referralCode,
+    referredName: event.referredName,
+    referredCompany: event.referredCompany,
+    email: event.email,
     source: 'signup-form',
   };
   const result = await client.query(
@@ -29,7 +50,38 @@ export async function queueAffiliateSignup(
        (id, event_type, product, external_id, payload, status, next_attempt_at)
      VALUES ($1, 'signup', $2, $3, $4::jsonb, 'pending', now())
      ON CONFLICT (event_type, product, external_id)
-     DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()
+     DO UPDATE SET payload = EXCLUDED.payload, status = 'pending', attempts = 0,
+       next_attempt_at = now(), sent_at = NULL, last_error = NULL, updated_at = now()
+     RETURNING id`,
+    [id, payload.product, payload.externalId, JSON.stringify(payload)]
+  );
+  return result.rows[0].id as string;
+}
+
+export async function queueAffiliateSubscription(
+  client: { query: Function },
+  event: SubscriptionEvent
+): Promise<string> {
+  const id = randomUUID();
+  const payload = {
+    product: process.env.AFFILIATE_PRODUCT || 'tovapos',
+    externalId: event.tenantId,
+    referralCode: event.referralCode,
+    customerName: event.customerName,
+    companyName: event.companyName,
+    email: event.email,
+    amountMinor: event.amountMinor,
+    currency: event.currency,
+    subscriptionExpiresAt: event.subscriptionExpiresAt,
+    paymentReference: event.paymentReference,
+  };
+  const result = await client.query(
+    `INSERT INTO pos_affiliate_events
+       (id, event_type, product, external_id, payload, status, next_attempt_at)
+     VALUES ($1, 'subscription', $2, $3, $4::jsonb, 'pending', now())
+     ON CONFLICT (event_type, product, external_id)
+     DO UPDATE SET payload = EXCLUDED.payload, status = 'pending', next_attempt_at = now(),
+       sent_at = NULL, last_error = NULL, updated_at = now()
      RETURNING id`,
     [id, payload.product, payload.externalId, JSON.stringify(payload)]
   );
@@ -70,7 +122,8 @@ export async function deliverAffiliateEvent(eventId: string): Promise<void> {
   if (!row) return;
 
   try {
-    const response = await fetch(`${destination.origin}/api/affiliate/track/signup`, {
+    const endpoint = row.event_type === 'subscription' ? 'subscription' : 'signup';
+    const response = await fetch(`${destination.origin}/api/affiliate/track/${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-tova-integration-key': key },
       body: JSON.stringify(row.payload),

@@ -198,7 +198,13 @@ export async function POST(request: NextRequest) {
         [tenantId, userId, JSON.stringify({ businessName, slug, ownerEmail: email })]
       );
       if (referralCode) {
-        affiliateEventId = await queueAffiliateSignup(client, { tenantId, referralCode });
+        affiliateEventId = await queueAffiliateSignup(client, {
+          tenantId,
+          referralCode,
+          referredName: ownerName,
+          email,
+          referredCompany: businessName,
+        });
       }
       await client.query('COMMIT');
     } catch (error) {

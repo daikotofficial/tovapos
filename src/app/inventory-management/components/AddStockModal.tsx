@@ -26,16 +26,17 @@ interface AddStockModalProps {
 type FormData = Omit<InventoryItem, 'id' | 'stockStatus'> & { id?: string };
 
 function cleanAmount(value: string): string {
-  return value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+  const cleaned = value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+  const [whole, fraction] = cleaned.split('.');
+  return fraction === undefined ? cleaned : `${whole}.${fraction.slice(0, 2)}`;
 }
 
-function formatAmountInput(value: string): void {
-  const numeric = Number(value.replace(/,/g, ''));
-  if (Number.isFinite(numeric) && value.trim() !== '') {
-    // Keep the form value numeric while showing thousands separators to the user.
-    const input = document.activeElement as HTMLInputElement | null;
-    if (input) input.value = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 }).format(numeric);
-  }
+function formatAmountInput(value: string): string {
+  const cleaned = cleanAmount(value);
+  if (!cleaned) return '';
+  const [whole, fraction] = cleaned.split('.');
+  const formattedWhole = Number(whole || 0).toLocaleString('en-NG');
+  return fraction === undefined ? formattedWhole : `${formattedWhole}.${fraction}`;
 }
 
 export default function AddStockModal({ open, onClose, editItem, onSave }: AddStockModalProps) {
@@ -81,6 +82,10 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const sellingPriceRegistration = register('sellingPrice', {
     required: 'Selling price is required',
     min: { value: 0.01, message: 'Must be greater than 0' },
+  });
+  const taxRateRegistration = register('taxRate', {
+    min: { value: 0, message: 'VAT cannot be negative' },
+    max: { value: 100, message: 'VAT cannot exceed 100%' },
   });
 
   useEffect(() => {
@@ -558,10 +563,14 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                   step="0.01"
                   {...unitCostRegistration}
                   onChange={(event) => {
-                    event.target.value = cleanAmount(event.target.value);
+                    const cleaned = cleanAmount(event.target.value);
+                    event.target.value = cleaned;
                     unitCostRegistration.onChange(event);
+                    event.target.value = formatAmountInput(cleaned);
                   }}
-                  onBlur={(event) => formatAmountInput(event.target.value)}
+                  onBlur={(event) => {
+                    event.target.value = formatAmountInput(event.target.value);
+                  }}
                   className={`${inputClass} pl-14 font-tabular`}
                   placeholder="0.00"
                 />
@@ -605,15 +614,19 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                   step="0.01"
                   {...sellingPriceRegistration}
                   onChange={(event) => {
-                    event.target.value = cleanAmount(event.target.value);
+                    const cleaned = cleanAmount(event.target.value);
+                    event.target.value = cleaned;
                     sellingPriceRegistration.onChange(event);
+                    event.target.value = formatAmountInput(cleaned);
                     setPricingMode('manual');
                     setValue('profitMargin', 0, {
                       shouldDirty: true,
                       shouldValidate: false,
                     });
                   }}
-                  onBlur={(event) => formatAmountInput(event.target.value)}
+                  onBlur={(event) => {
+                    event.target.value = formatAmountInput(event.target.value);
+                  }}
                   className={`${inputClass} pl-14 font-tabular`}
                   placeholder="0.00"
                 />
@@ -683,6 +696,28 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
               <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm font-tabular">
                 {selectedTaxRate}%
               </p>
+            </div>
+            <div>
+              <label className={labelClass}>VAT / Tax rate (%)</label>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min={0}
+                max={100}
+                {...taxRateRegistration}
+                onChange={(event) => {
+                  taxRateRegistration.onChange(event);
+                  setValue('taxId', '', { shouldDirty: true });
+                  setValue('taxApplicable', Number(event.target.value) > 0, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  });
+                }}
+                className={`${inputClass} font-tabular`}
+                placeholder="e.g. 7.5"
+              />
+              {errors.taxRate && <p className={errorClass}>{errors.taxRate.message}</p>}
             </div>
             <div>
               <label className={labelClass}>VAT Pricing Mode</label>
