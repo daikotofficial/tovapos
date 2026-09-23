@@ -265,19 +265,19 @@ export default function InventoryTable({
                   </td>
                   {/* Reorder */}
                   <td className="px-4 py-3">
-                    <span className="text-xs font-tabular text-muted-foreground">
+                    <span className="whitespace-nowrap text-xs font-tabular text-muted-foreground">
                       {item.reorderLevel}
                     </span>
                   </td>
                   {/* Cost */}
                   <td className="px-4 py-3">
-                    <span className="text-xs font-tabular text-muted-foreground">
+                    <span className="whitespace-nowrap text-xs font-tabular text-muted-foreground">
                       {formatMoney(item.unitCost)}
                     </span>
                   </td>
                   {/* Price */}
                   <td className="px-4 py-3">
-                    <span className="text-sm font-semibold font-tabular text-foreground">
+                    <span className="whitespace-nowrap text-sm font-semibold font-tabular text-foreground">
                       {formatMoney(item.sellingPrice)}
                     </span>
                     {item.profitMargin !== undefined && (
@@ -289,7 +289,7 @@ export default function InventoryTable({
                   {/* Expiry */}
                   <td className="px-4 py-3">
                     <span
-                      className={`text-xs font-tabular ${expiryClass(item.expiryDate, expiryAlertDays)}`}
+                      className={`whitespace-nowrap text-xs font-tabular ${expiryClass(item.expiryDate, expiryAlertDays)}`}
                     >
                       {item.expiryDate}
                     </span>

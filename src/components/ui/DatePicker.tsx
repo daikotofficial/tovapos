@@ -126,9 +126,11 @@ export default function DatePicker({
               commitInput();
             }
           }}
+          inputMode="numeric"
+          autoComplete="off"
           placeholder="YYYY-MM-DD"
           aria-label={placeholder}
-          className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground"
+          className="min-w-0 flex-1 select-text touch-manipulation bg-transparent text-base sm:text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground"
         />
         <button
           type="button"

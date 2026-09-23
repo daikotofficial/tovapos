@@ -110,7 +110,7 @@ export default function InventoryKPICards({
   ];
 
   return (
-    <div className="mb-4 grid min-w-0 grid-cols-2 gap-2 sm:mb-6 sm:gap-4 md:grid-cols-3 xl:grid-cols-6">
+    <div className="mb-4 grid min-w-0 grid-cols-2 gap-2 sm:mb-6 sm:gap-4 md:grid-cols-3 2xl:grid-cols-6">
       {cards.map((card) => {
         const Icon = card.icon;
         const clickable = Boolean(card.filter);
@@ -121,24 +121,24 @@ export default function InventoryKPICards({
             key={card.id}
             type={clickable ? 'button' : undefined}
             onClick={clickable ? () => onFilter(card.filter!) : undefined}
-            className={`min-w-0 rounded-lg border bg-card p-3 text-left shadow-card transition-all duration-200 sm:rounded-xl sm:p-4 ${card.color} ${
+            className={`min-h-[8.5rem] min-w-0 rounded-lg border bg-card p-3 text-left shadow-card transition-all duration-200 sm:rounded-xl sm:p-4 ${card.color} ${
               clickable
                 ? 'hover:-translate-y-0.5 hover:shadow-card-hover focus:outline-none focus:ring-2 focus:ring-primary/30'
                 : ''
             } ${active ? 'ring-2 ring-primary/35' : ''}`}
           >
             <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
-              <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
+              <span className="min-w-0 text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">
                 {card.label}
               </span>
               <Icon size={16} className={card.iconColor} />
             </div>
             <p
-              className={`mb-1 break-words text-xl font-bold leading-none font-tabular sm:text-2xl ${card.valueColor}`}
+              className={`mb-1 min-h-[2.5rem] whitespace-normal break-words text-[clamp(1.05rem,2vw,1.5rem)] font-bold leading-tight font-tabular ${card.valueColor}`}
             >
               {card.value}
             </p>
-            <p className="text-[10px] text-muted-foreground">{card.sub}</p>
+            <p className="text-[10px] leading-tight text-muted-foreground">{card.sub}</p>
           </Component>
         );
       })}
