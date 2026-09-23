@@ -34,6 +34,23 @@ function formatDisplay(value: string, placeholder: string): string {
   });
 }
 
+function normalizeTypedDate(value: string): string | null {
+  const trimmed = value.trim();
+  const iso = /^(\d{4})[-\/]?(\d{1,2})[-\/]?(\d{1,2})$/.exec(trimmed);
+  const dayFirst = /^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/.exec(trimmed);
+  const parts = iso
+    ? [Number(iso[1]), Number(iso[2]), Number(iso[3])]
+    : dayFirst
+      ? [Number(dayFirst[3]), Number(dayFirst[2]), Number(dayFirst[1])]
+      : null;
+  if (!parts) return null;
+  const [year, month, day] = parts;
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day)
+    return null;
+  return toIsoDate(date);
+}
+
 export default function DatePicker({
   value,
   onChange,
@@ -45,10 +62,23 @@ export default function DatePicker({
   const [cursor, setCursor] = useState(() => parseIsoDate(value));
   const ref = useRef<HTMLDivElement | null>(null);
   const selectedDate = value ? parseIsoDate(value) : null;
+  const [inputValue, setInputValue] = useState(value);
 
   useEffect(() => {
+    setInputValue(value);
     if (value) setCursor(parseIsoDate(value));
   }, [value]);
+
+  const commitInput = () => {
+    const next = normalizeTypedDate(inputValue);
+    if (!next) {
+      setInputValue(value);
+      return;
+    }
+    setInputValue(next);
+    setCursor(parseIsoDate(next));
+    onChange(next);
+  };
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
@@ -84,16 +114,31 @@ export default function DatePicker({
 
   return (
     <div ref={ref} className={`relative ${className}`}>
-      <button
-        type="button"
-        onClick={toggleOpen}
-        className="flex h-10 w-full items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 text-left text-sm font-semibold text-foreground shadow-sm transition-colors hover:border-primary/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
-      >
-        <span className={value ? 'truncate' : 'truncate text-muted-foreground'}>
-          {formatDisplay(value, placeholder)}
-        </span>
-        <Calendar size={16} className="shrink-0 text-muted-foreground" />
-      </button>
+      <div className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-background px-3 shadow-sm transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/25">
+        <input
+          type="text"
+          value={inputValue}
+          onChange={(event) => setInputValue(event.target.value)}
+          onBlur={commitInput}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commitInput();
+            }
+          }}
+          placeholder="YYYY-MM-DD"
+          aria-label={placeholder}
+          className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground"
+        />
+        <button
+          type="button"
+          onClick={toggleOpen}
+          className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+          aria-label="Open date calendar"
+        >
+          <Calendar size={16} />
+        </button>
+      </div>
 
       {open && (
         <div
@@ -108,9 +153,24 @@ export default function DatePicker({
             >
               <ChevronLeft size={16} />
             </button>
-            <p className="text-sm font-semibold text-foreground">
-              {cursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-            </p>
+            <div className="flex min-w-0 items-center justify-center gap-2">
+              <p className="text-sm font-semibold text-foreground">
+                {cursor.toLocaleDateString(undefined, { month: 'long' })}
+              </p>
+              <input
+                type="number"
+                value={cursor.getFullYear()}
+                min={1900}
+                max={2200}
+                onChange={(event) => {
+                  const year = Number(event.target.value);
+                  if (!Number.isInteger(year) || year < 1) return;
+                  setCursor((current) => new Date(year, current.getMonth(), 1));
+                }}
+                className="h-8 w-[4.5rem] rounded-md border border-border bg-background px-2 text-center text-sm font-semibold text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/25"
+                aria-label="Calendar year"
+              />
+            </div>
             <button
               type="button"
               onClick={() => moveMonth(1)}
@@ -141,6 +201,7 @@ export default function DatePicker({
                   type="button"
                   onClick={() => {
                     onChange(iso);
+                    setInputValue(iso);
                     setOpen(false);
                   }}
                   className={`flex h-9 items-center justify-center rounded-md text-sm font-semibold transition-colors ${

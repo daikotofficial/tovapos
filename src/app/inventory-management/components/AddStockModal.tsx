@@ -23,7 +23,11 @@ interface AddStockModalProps {
   onSave: (item: InventoryItem) => void | Promise<void>;
 }
 
-type FormData = Omit<InventoryItem, 'id' | 'stockStatus'> & { id?: string };
+type FormData = Omit<InventoryItem, 'id' | 'stockStatus'> & {
+  id?: string;
+  bulkPurchasePrice?: number | string;
+  bulkQuantity?: number | string;
+};
 
 function cleanAmount(value: string): string {
   const cleaned = value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
@@ -45,6 +49,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [pricingMode, setPricingMode] = useState<'manual' | 'margin'>('manual');
+  const [bulkPricingActive, setBulkPricingActive] = useState(false);
   const {
     register,
     handleSubmit,
@@ -54,6 +59,9 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
     formState: { errors, isSubmitting },
   } = useForm<FormData>();
   const unitCost = Number(watch('unitCost')) || 0;
+  const bulkPurchasePrice = Number(watch('bulkPurchasePrice')) || 0;
+  const bulkQuantity = Number(watch('bulkQuantity')) || 0;
+  const calculatedUnitCost = bulkQuantity > 0 ? bulkPurchasePrice / bulkQuantity : 0;
   const profitMargin = Number(watch('profitMargin')) || 0;
   const selectedCategory = watch('category') ?? '';
   const selectedUnit = watch('unitOfMeasurement') ?? 'unit';
@@ -70,6 +78,10 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
     [settings.productCategories]
   );
   const skuRegistration = register('sku', { required: 'SKU, barcode, or QR code is required' });
+  const bulkPurchasePriceRegistration = register('bulkPurchasePrice');
+  const bulkQuantityRegistration = register('bulkQuantity', {
+    min: { value: 0.01, message: 'Quantity must be greater than 0' },
+  });
   const unitCostRegistration = register('unitCost', {
     required: 'Unit cost is required',
     min: { value: 0.01, message: 'Must be greater than 0' },
@@ -91,6 +103,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   useEffect(() => {
     if (editItem) {
       setPricingMode('manual');
+      setBulkPricingActive(false);
       reset({
         name: editItem.name,
         genericName: editItem.genericName,
@@ -104,6 +117,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         reorderLevel: editItem.reorderLevel,
         maxStock: editItem.maxStock,
         unitCost: editItem.unitCost,
+        bulkPurchasePrice: '',
+        bulkQuantity: '',
         sellingPrice: editItem.sellingPrice,
         profitMargin: editItem.profitMargin,
         discountType: editItem.discountType ?? 'none',
@@ -125,6 +140,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       });
     } else {
       setPricingMode('manual');
+      setBulkPricingActive(false);
       const today = getTodayIso();
       const nextYear = new Date();
       nextYear.setFullYear(nextYear.getFullYear() + 1);
@@ -134,6 +150,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         reorderLevel: 20,
         maxStock: 200,
         unitCost: 0,
+        bulkPurchasePrice: '',
+        bulkQuantity: '',
         sellingPrice: 0,
         profitMargin: 0,
         discountType: 'none',
@@ -154,6 +172,12 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   }, [editItem, reset, open, settings.taxMode, settings.taxRate]);
 
   useEffect(() => {
+    if (bulkPricingActive && calculatedUnitCost > 0) {
+      setValue('unitCost', calculatedUnitCost, { shouldDirty: true, shouldValidate: true });
+    }
+  }, [bulkPricingActive, calculatedUnitCost, setValue]);
+
+  useEffect(() => {
     if (pricingMode !== 'margin' || unitCost <= 0 || profitMargin <= 0) return;
     setValue('sellingPrice', computeSellingPriceFromMargin(unitCost, profitMargin), {
       shouldDirty: true,
@@ -168,6 +192,11 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   }, [selectedTaxRate, setValue]);
 
   const onSubmit = async (data: FormData) => {
+    const {
+      bulkPurchasePrice: _bulkPurchasePrice,
+      bulkQuantity: _bulkQuantity,
+      ...inventoryData
+    } = data;
     const expiryDate = data.expiryDate || '2099-12-31';
     const status: StockStatus = computeStockStatus(
       Number(data.currentQty),
@@ -175,7 +204,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       expiryDate
     );
     const saved: InventoryItem = {
-      ...data,
+      ...inventoryData,
       id: editItem?.id ?? `inv-${Date.now()}`,
       sku: data.sku.trim(),
       barcode: data.barcode?.trim() || data.sku.trim(),
@@ -549,6 +578,71 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
             Pricing
           </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="md:col-span-2 rounded-lg border border-border bg-muted/20 p-3">
+              <p className="text-xs font-semibold text-foreground">
+                Bulk / Carton / Pack Purchase Price{' '}
+                <span className="font-normal text-muted-foreground">(Optional)</span>
+              </p>
+              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                Enter the total price and the number of units inside it. Unit cost will be
+                calculated automatically. Leave these blank to enter unit cost manually.
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={labelClass}>Bulk / Carton / Pack Price</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                      {settings.currency}
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      {...bulkPurchasePriceRegistration}
+                      onChange={(event) => {
+                        const cleaned = cleanAmount(event.target.value);
+                        event.target.value = cleaned;
+                        bulkPurchasePriceRegistration.onChange(event);
+                        setBulkPricingActive(true);
+                        event.target.value = formatAmountInput(cleaned);
+                      }}
+                      onBlur={(event) => {
+                        event.target.value = formatAmountInput(event.target.value);
+                      }}
+                      className={`${inputClass} pl-14 font-tabular`}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelClass}>Quantity in Bulk Pack</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0.01"
+                    step="0.01"
+                    {...bulkQuantityRegistration}
+                    onChange={(event) => {
+                      bulkQuantityRegistration.onChange(event);
+                      setBulkPricingActive(true);
+                    }}
+                    className={`${inputClass} font-tabular`}
+                    placeholder="e.g. 12"
+                  />
+                  {errors.bulkQuantity && (
+                    <p className={errorClass}>{errors.bulkQuantity.message}</p>
+                  )}
+                </div>
+              </div>
+              {bulkPricingActive && calculatedUnitCost > 0 && (
+                <p className="mt-2 text-xs font-semibold text-primary">
+                  Unit cost calculated: {settings.currency}{' '}
+                  {calculatedUnitCost.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </p>
+              )}
+            </div>
             <div>
               <label className={labelClass}>
                 Unit Cost (Purchase Price) <span className="text-danger">*</span>
@@ -566,6 +660,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                     const cleaned = cleanAmount(event.target.value);
                     event.target.value = cleaned;
                     unitCostRegistration.onChange(event);
+                    setBulkPricingActive(false);
                     event.target.value = formatAmountInput(cleaned);
                   }}
                   onBlur={(event) => {
