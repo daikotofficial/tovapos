@@ -24,14 +24,9 @@ function parseIsoDate(value: string): Date {
   const [year, month, day] = value.split('-').map(Number);
   return new Date(year, (month || 1) - 1, day || 1);
 }
-
-function formatDisplay(value: string, placeholder: string): string {
-  if (!value) return placeholder;
-  return parseIsoDate(value).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+function formatInputDate(value: string): string {
+  const [year, month, day] = value.split('-');
+  return year?.length === 4 && month && day ? `${day}/${month}/${year}` : value;
 }
 
 function normalizeTypedDate(value: string): string | null {
@@ -62,20 +57,20 @@ export default function DatePicker({
   const [cursor, setCursor] = useState(() => parseIsoDate(value));
   const ref = useRef<HTMLDivElement | null>(null);
   const selectedDate = value ? parseIsoDate(value) : null;
-  const [inputValue, setInputValue] = useState(value);
+  const [inputValue, setInputValue] = useState(formatInputDate(value));
 
   useEffect(() => {
-    setInputValue(value);
+    setInputValue(formatInputDate(value));
     if (value) setCursor(parseIsoDate(value));
   }, [value]);
 
   const commitInput = () => {
     const next = normalizeTypedDate(inputValue);
     if (!next) {
-      setInputValue(value);
+      setInputValue(formatInputDate(value));
       return;
     }
-    setInputValue(next);
+    setInputValue(formatInputDate(next));
     setCursor(parseIsoDate(next));
     onChange(next);
   };
@@ -128,7 +123,7 @@ export default function DatePicker({
           }}
           inputMode="numeric"
           autoComplete="off"
-          placeholder="YYYY-MM-DD"
+          placeholder="DD/MM/YYYY"
           aria-label={placeholder}
           className="min-w-0 flex-1 select-text touch-manipulation bg-transparent text-base sm:text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground"
         />
@@ -203,7 +198,7 @@ export default function DatePicker({
                   type="button"
                   onClick={() => {
                     onChange(iso);
-                    setInputValue(iso);
+                    setInputValue(formatInputDate(iso));
                     setOpen(false);
                   }}
                   className={`flex h-9 items-center justify-center rounded-md text-sm font-semibold transition-colors ${
