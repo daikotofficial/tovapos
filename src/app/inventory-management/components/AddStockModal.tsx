@@ -327,7 +327,21 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         </>
       }
     >
-      <form id="add-stock-form" onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+      <form
+        id="add-stock-form"
+        onSubmit={handleSubmit(onSubmit)}
+        onWheel={(event) => {
+          const target = event.target as HTMLInputElement;
+          if (target?.type === 'number') target.blur();
+        }}
+        onKeyDown={(event) => {
+          const target = event.target as HTMLInputElement;
+          if (target?.type === 'number' && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+            event.preventDefault();
+          }
+        }}
+        className="space-y-5"
+      >
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3 pb-2 border-b border-border">
             Product Identity

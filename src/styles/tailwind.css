@@ -117,6 +117,17 @@
     color-scheme: light;
   }
 
+  #add-stock-form input[type='number'] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  #add-stock-form input[type='number']::-webkit-outer-spin-button,
+  #add-stock-form input[type='number']::-webkit-inner-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+
   select {
     min-height: 2.5rem;
     cursor: pointer;
