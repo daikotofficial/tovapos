@@ -40,7 +40,7 @@ export default function PricingSection() {
             Simple pricing for different retail stages.
           </h2>
           <p className="mt-4 text-sm leading-7 text-[#596662] sm:text-base">
-            Pay monthly, or choose yearly billing and get 5% off the accumulated annual amount.
+            Pay monthly, or choose yearly billing and get 5% off the accumulated annual amount. Payments are processed securely through Paystack.
           </p>
 
           <div className="mt-7 inline-flex items-center gap-1 rounded-md border border-[#d4dfdc] bg-[#f5f7f7] p-1">

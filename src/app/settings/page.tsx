@@ -214,7 +214,9 @@ function SettingsPageContent() {
                     {cycle}
                   </button>
                 ))}
-                <span className="text-xs text-muted-foreground">Yearly billing includes the published 5% discount.</span>
+                <span className="text-xs text-muted-foreground">
+                  Yearly billing includes the published 5% discount. Payment is renewed manually.
+                </span>
               </div>
               <div className="grid grid-cols-1 gap-3 border-t border-border p-5 lg:grid-cols-3">
                 {planOptions.map((plan) => {
@@ -239,9 +241,6 @@ function SettingsPageContent() {
                         {plan.monthlyPrice
                           ? `NGN ${plan.monthlyPrice.toLocaleString()} / month`
                           : 'Custom'}
-                        <span className="ml-2 rounded-full bg-success/10 px-2 py-1 text-[10px] font-black uppercase text-success">
-                          Free now
-                        </span>
                       </p>
                       <p className="mt-2 text-xs text-muted-foreground">
                         Product limit:{' '}

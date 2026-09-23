@@ -735,7 +735,7 @@ export default function AdminPage() {
                     ['Products', totals.products.toLocaleString()],
                     ['Active Items', totals.activeItems.toLocaleString()],
                     ['Open Tickets', totals.openTickets.toLocaleString()],
-                    ['Free Access', totals.freeAccess.toLocaleString()],
+                    ['Active Accounts', totals.freeAccess.toLocaleString()],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-lg border border-border bg-card px-4 py-3">
                       <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
@@ -785,8 +785,8 @@ export default function AdminPage() {
                         <p className="text-sm text-muted-foreground">No plan data yet.</p>
                       )}
                       <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
-                        Paystack collection is intentionally disabled. Businesses can choose plans
-                        while access remains free during market rollout.
+                        Paid plan checkout is available through Paystack. Subscription payments are
+                        verified before access is activated.
                       </div>
                     </div>
                   </section>
@@ -1316,11 +1316,10 @@ export default function AdminPage() {
                   </div>
                   <div className="space-y-4 p-4">
                     <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
-                      <p className="text-sm font-bold text-foreground">Free rollout is active</p>
+                      <p className="text-sm font-bold text-foreground">Paid billing is active</p>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Paystack billing hooks can be added later without changing the account
-                        control model. For now, businesses can select Starter, Pro, or Delux while
-                        subscription collection remains disabled.
+                        Businesses can select Starter or Pro and complete payment securely through
+                        Paystack. Delux remains available as a custom-priced plan through sales.
                       </p>
                     </div>
                     <div className="grid gap-3 md:grid-cols-3">
@@ -1330,9 +1329,6 @@ export default function AdminPage() {
                           <p className="mt-1 text-xs text-muted-foreground">
                             {planSummary[plan] ?? 0} businesses selected
                           </p>
-                          <span className="mt-3 inline-block rounded-full bg-success/10 px-2 py-1 text-[10px] font-black uppercase text-success">
-                            Free access
-                          </span>
                         </div>
                       ))}
                     </div>
@@ -1342,9 +1338,10 @@ export default function AdminPage() {
                 <section className="rounded-lg border border-border bg-card p-4">
                   <p className="text-sm font-semibold">Payment Gateway</p>
                   <div className="mt-3 rounded-lg border border-dashed border-border p-4">
-                    <p className="text-sm font-bold">Paystack disabled</p>
+                    <p className="text-sm font-bold">Paystack enabled</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Keep live charging off until the product is ready to enforce paid access.
+                      Starter and Pro payments are verified through Paystack before access is
+                      activated.
                     </p>
                   </div>
                 </section>

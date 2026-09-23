@@ -36,18 +36,6 @@ export function planPriceMinor(planId: PaidPlanId, cycle: BillingCycle): number 
   return naira * 100;
 }
 
-function planCode(planId: PaidPlanId, cycle: BillingCycle): string {
-  const key = `PAYSTACK_PLAN_CODE_${planId.toUpperCase()}_${cycle.toUpperCase()}`;
-  const code = process.env[key]?.trim();
-  if (!code)
-    throw new HttpError(
-      503,
-      `Paystack ${planId} ${cycle} plan is not configured.`,
-      'PLAN_NOT_CONFIGURED'
-    );
-  return code;
-}
-
 async function paystackRequest<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(`${PAYSTACK_URL}${path}`, {
     ...init,
@@ -84,7 +72,6 @@ export async function initializePaystackCheckout(input: {
   await ensureSecuritySchema();
   const reference = `tovapos-${input.tenantId}-${randomUUID()}`;
   const amountMinor = planPriceMinor(input.planId, input.billingCycle);
-  const code = planCode(input.planId, input.billingCycle);
   const data = await paystackRequest<{
     authorization_url: string;
     access_code: string;
@@ -97,7 +84,6 @@ export async function initializePaystackCheckout(input: {
       currency: 'NGN',
       channels: [...PAYSTACK_CHANNELS],
       reference,
-      plan: code,
       callback_url: input.callbackUrl,
       metadata: {
         product: 'tovapos',
@@ -105,6 +91,7 @@ export async function initializePaystackCheckout(input: {
         planId: input.planId,
         billingCycle: input.billingCycle,
         businessName: input.businessName,
+        paymentType: 'one_time_subscription_payment',
       },
     }),
   });
@@ -119,7 +106,7 @@ export async function initializePaystackCheckout(input: {
       input.planId,
       input.billingCycle,
       amountMinor,
-      JSON.stringify({ planCode: code }),
+      JSON.stringify({ paymentType: 'one_time_subscription_payment' }),
     ]
   );
   return { ...data, reference, amountMinor };
