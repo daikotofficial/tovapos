@@ -147,7 +147,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       reset({
         category: 'General',
         currentQty: 0,
-        reorderLevel: 20,
+        reorderLevel: Math.max(1, Number(settings.lowStockAlertDays) || 20),
         maxStock: 200,
         unitCost: 0,
         bulkPurchasePrice: '',
@@ -169,7 +169,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         lastRestocked: today,
       });
     }
-  }, [editItem, reset, open, settings.taxMode, settings.taxRate]);
+  }, [editItem, reset, open, settings.taxMode, settings.taxRate, settings.lowStockAlertDays]);
 
   useEffect(() => {
     if (bulkPricingActive && calculatedUnitCost > 0) {
