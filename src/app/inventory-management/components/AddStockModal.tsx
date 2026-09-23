@@ -46,6 +46,7 @@ function formatAmountInput(value: string): string {
 export default function AddStockModal({ open, onClose, editItem, onSave }: AddStockModalProps) {
   const { settings, updateSettings } = usePosStore();
   const skuInputRef = useRef<HTMLInputElement | null>(null);
+  const productNameInputRef = useRef<HTMLInputElement | null>(null);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [pricingMode, setPricingMode] = useState<'manual' | 'margin'>('manual');
@@ -77,6 +78,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
     () => Array.from(new Set([...(settings.productCategories ?? []), 'General'])).sort(),
     [settings.productCategories]
   );
+  const productNameRegistration = register('name', { required: 'Product name is required' });
   const skuRegistration = register('sku', { required: 'SKU, barcode, or QR code is required' });
   const bulkPurchasePriceRegistration = register('bulkPurchasePrice');
   const bulkQuantityRegistration = register('bulkQuantity', {
@@ -99,6 +101,12 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
     min: { value: 0, message: 'VAT cannot be negative' },
     max: { value: 100, message: 'VAT cannot exceed 100%' },
   });
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => productNameInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
 
   useEffect(() => {
     if (editItem) {
@@ -172,10 +180,22 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   }, [editItem, reset, open, settings.taxMode, settings.taxRate, settings.lowStockAlertDays]);
 
   useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => productNameInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  useEffect(() => {
     if (bulkPricingActive && calculatedUnitCost > 0) {
       setValue('unitCost', calculatedUnitCost, { shouldDirty: true, shouldValidate: true });
     }
   }, [bulkPricingActive, calculatedUnitCost, setValue]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => productNameInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
 
   useEffect(() => {
     if (pricingMode !== 'margin' || unitCost <= 0 || profitMargin <= 0) return;
@@ -184,6 +204,12 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       shouldValidate: true,
     });
   }, [pricingMode, profitMargin, setValue, unitCost]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => productNameInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
 
   useEffect(() => {
     if (selectedTaxRate > 0) {
@@ -312,7 +338,11 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 Product Name <span className="text-danger">*</span>
               </label>
               <input
-                {...register('name', { required: 'Product name is required' })}
+                {...productNameRegistration}
+                ref={(element) => {
+                  productNameRegistration.ref(element);
+                  productNameInputRef.current = element;
+                }}
                 className={inputClass}
                 placeholder="Product name"
               />
@@ -533,14 +563,17 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-              <label className={labelClass}>Current Qty</label>
+              <label className={labelClass}>
+                Current Qty <span className="text-danger">*</span>
+              </label>
               <input
                 type="number"
                 {...register('currentQty', {
-                  min: { value: 0, message: 'Cannot be negative' },
+                  required: 'Current quantity is required',
+                  min: { value: 1, message: 'Must be greater than 0' },
                 })}
                 className={`${inputClass} font-tabular`}
-                min={0}
+                min={1}
               />
               {errors.currentQty && <p className={errorClass}>{errors.currentQty.message}</p>}
             </div>
