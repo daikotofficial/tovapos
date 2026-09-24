@@ -58,7 +58,16 @@ $listener.Start()
 while ($listener.IsListening) {
   try {
     $context = $listener.GetContext()
-    if ($context.Request.HttpMethod -eq 'OPTIONS') { $context.Response.StatusCode = 204; $context.Response.Close(); continue }
+    if ($context.Request.HttpMethod -eq 'OPTIONS') {
+      $origin = $context.Request.Headers['Origin']
+      if ($origin) { $context.Response.Headers.Add('Access-Control-Allow-Origin', $origin) }
+      $context.Response.Headers.Add('Vary', 'Origin')
+      $context.Response.Headers.Add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+      $context.Response.Headers.Add('Access-Control-Allow-Headers', 'Content-Type')
+      $context.Response.StatusCode = 204
+      $context.Response.Close()
+      continue
+    }
     if ($context.Request.HttpMethod -eq 'GET' -and $context.Request.Url.AbsolutePath -eq '/health') { Send-Json $context 200 @{ ok = $true; printer = Default-Printer; platform = 'win32' }; continue }
     if ($context.Request.HttpMethod -ne 'POST' -or $context.Request.Url.AbsolutePath -ne '/print') { Send-Json $context 404 @{ ok = $false; error = 'Not found' }; continue }
     $reader = [IO.StreamReader]::new($context.Request.InputStream)
