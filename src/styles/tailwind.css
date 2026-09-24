@@ -17,8 +17,11 @@
     overflow: visible !important;
     background: #fff !important;
   }
+  body > *:not(:has([data-print-target='receipt'])) {
+    display: none !important;
+  }
   body * {
-    visibility: hidden !important;
+    visibility: visible !important;
   }
   [data-print-target='receipt'],
   [data-print-target='receipt'] .print-modal-shell,
