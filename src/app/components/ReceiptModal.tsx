@@ -6,6 +6,7 @@ import { Printer, Download, Share2, CheckCircle2 } from 'lucide-react';
 import { SaleTransaction } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
 import AppImage from '@/components/ui/AppImage';
+import { toast } from 'sonner';
 
 interface ReceiptModalProps {
   open: boolean;
@@ -78,8 +79,13 @@ export default function ReceiptModal({
     const payload = { businessName, businessAddress, businessPhone, transactionId: sale.transactionId, timestamp: sale.timestamp, cashier: sale.cashier, paymentMethod: sale.paymentMethod, customerName: sale.customerName, items: sale.items, subtotal: sale.subtotal, discountTotal: sale.discountTotal, taxAmount: sale.taxAmount, taxLabel, grandTotal: sale.grandTotal, amountPaid: sale.amountPaid, cashTendered: sale.cashTendered, changeGiven: sale.changeGiven, footer: receiptFooter };
     try {
       const response = await fetch('http://127.0.0.1:4318/print', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!response.ok) throw new Error('Local print bridge failed');
-    } catch { await handlePrint(); }
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || 'Local printer helper failed to print.');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Local printer helper is unavailable.');
+    }
   };
 
   return (

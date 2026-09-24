@@ -29,6 +29,28 @@ function Send-Json($context, $status, $body) {
   $context.Response.Close()
 }
 
+function Send-RawReceipt($printerName, $text) {
+  if (-not ("TovaRawPrinter" -as [type])) {
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class TovaRawPrinter {
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public class DocInfo { public string pDocName; public string pOutputFile; public string pDataType; }
+  [DllImport("winspool.drv", CharSet=CharSet.Unicode)] static extern bool OpenPrinter(string name, out IntPtr handle, IntPtr defaults);
+  [DllImport("winspool.drv")] static extern bool ClosePrinter(IntPtr handle);
+  [DllImport("winspool.drv", CharSet=CharSet.Unicode)] static extern int StartDocPrinter(IntPtr handle, int level, DocInfo doc);
+  [DllImport("winspool.drv")] static extern bool EndDocPrinter(IntPtr handle);
+  [DllImport("winspool.drv")] static extern bool StartPagePrinter(IntPtr handle);
+  [DllImport("winspool.drv")] static extern bool EndPagePrinter(IntPtr handle);
+  [DllImport("winspool.drv")] static extern bool WritePrinter(IntPtr handle, byte[] bytes, int count, out int written);
+  public static bool Send(string name, byte[] bytes) { IntPtr h; if (!OpenPrinter(name, out h, IntPtr.Zero)) return false; var d = new DocInfo { pDocName = "TOVAPOS Receipt", pDataType = "RAW" }; bool ok = StartDocPrinter(h, 1, d) > 0 && StartPagePrinter(h); int written; if (ok) ok = WritePrinter(h, bytes, bytes.Length, out written) && written == bytes.Length; EndPagePrinter(h); EndDocPrinter(h); ClosePrinter(h); return ok; }
+}
+"@
+  }
+  $payload = [Text.Encoding]::UTF8.GetBytes(([char]27 + [char]64) + $text + (([char]13 + [char]10) * 3) + [char]29 + [char]86 + [char]0)
+  if (-not [TovaRawPrinter]::Send($printerName, $payload)) { throw 'Windows printer rejected the raw receipt.' }
+}
+
 function Default-Printer { (Get-Printer | Where-Object Default -eq $true | Select-Object -First 1).Name }
 $listener = [Net.HttpListener]::new()
 $listener.Prefixes.Add("http://127.0.0.1:$port/")
@@ -46,7 +68,7 @@ while ($listener.IsListening) {
     $lines = @('TOVAPOS', $receipt.businessName, $receipt.transactionId, $receipt.timestamp, ('Cashier: ' + $receipt.cashier), ('Payment: ' + $receipt.paymentMethod), ('-' * 48))
     $footer = if ($receipt.footer) { $receipt.footer } else { 'Thank you.' }
     $lines += ('-' * 48), ('Subtotal: ' + ([decimal]$receipt.subtotal).ToString('0.00')), ('Tax: ' + ([decimal]$receipt.taxAmount).ToString('0.00')), ('TOTAL: ' + ([decimal]$receipt.grandTotal).ToString('0.00')), '', $footer
-    ($lines -join [Environment]::NewLine) | Out-Printer -Name $printer
+    Send-RawReceipt $printer ($lines -join [Environment]::NewLine)
     Send-Json $context 200 @{ ok = $true; printer = $printer }
   } catch { Send-Json $context 500 @{ ok = $false; error = $_.Exception.Message } }
 }
