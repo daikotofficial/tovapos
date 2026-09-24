@@ -62,28 +62,53 @@ export default function ReceiptModal({
     printWindow.document.write(
       '<!doctype html><html><head><meta charset="utf-8"><title>Receipt</title>' +
         styles +
-        '<style>html,body{margin:0;padding:0;width:80mm;background:#fff}body{overflow:visible}.receipt-print-root{display:block!important;width:80mm!important;min-width:80mm!important;margin:0!important;padding:0!important}.receipt-paper{display:block!important;width:80mm!important;max-width:80mm!important;min-height:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important;color:#000!important;background:#fff!important}@media print{body>*{display:none!important}body>.receipt-print-root{display:block!important}}</style></head><body><div class="receipt-print-root">' +
+        '<style>html,body{margin:0!important;padding:0!important;width:80mm!important;min-width:80mm!important;height:auto!important;min-height:0!important;background:#fff!important}body{display:block!important;overflow:visible!important}.receipt-print-root{display:block!important;width:80mm!important;min-width:80mm!important;height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:visible!important}.receipt-paper{display:block!important;width:80mm!important;max-width:80mm!important;min-height:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important;box-sizing:border-box!important;color:#000!important;background:#fff!important}@media print{body>*{display:none!important}body>.receipt-print-root{display:block!important}}</style></head><body><div class="receipt-print-root">' +
         receiptPaper.outerHTML +
         '</div></body></html>'
     );
     printWindow.document.close();
 
-    window.setTimeout(() => {
+    window.setTimeout(async () => {
+      if (printWindow.closed) {
+        return;
+      }
+
+      await printWindow.document.fonts.ready;
+      const images = Array.from(printWindow.document.images);
+      await Promise.all(
+        images.map((image) =>
+          image.complete
+            ? Promise.resolve()
+            : new Promise<void>((resolve) => {
+                image.addEventListener('load', () => resolve(), { once: true });
+                image.addEventListener('error', () => resolve(), { once: true });
+              })
+        )
+      );
+
       const printRoot = printWindow.document.querySelector<HTMLElement>('.receipt-print-root');
-      if (!printRoot) {
+      const printPaper = printWindow.document.querySelector<HTMLElement>('.receipt-paper');
+      if (!printRoot || !printPaper) {
         printWindow.close();
         return;
       }
 
-      const receiptHeightPx = Math.ceil(printRoot.getBoundingClientRect().height);
-      const receiptHeightMm = Math.max(20, (receiptHeightPx * 25.4) / 96);
+      const receiptHeightPx = Math.ceil(
+        Math.max(
+          printRoot.scrollHeight,
+          printPaper.scrollHeight,
+          printRoot.getBoundingClientRect().height,
+          printPaper.getBoundingClientRect().height
+        ) + 2
+      );
+      const receiptHeightMm = Math.max(30, (receiptHeightPx * 25.4) / 96 + 2);
       const pageStyle = printWindow.document.createElement('style');
       pageStyle.textContent =
         '@page { size: 80mm ' + receiptHeightMm.toFixed(2) + 'mm; margin: 0; }';
       printWindow.document.head.appendChild(pageStyle);
       printWindow.focus();
       printWindow.print();
-    }, 150);
+    }, 250);
   };
 
   return (
@@ -173,11 +198,11 @@ export default function ReceiptModal({
           </div>
 
           {/* Items */}
-          <div className="px-4 py-3 border-b border-dashed border-border">
+          <div className="px-3 py-3 border-b border-dashed border-border">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
               Items Sold
             </p>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-2 border-b border-border pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="grid grid-cols-[minmax(0,1fr)_8mm_18mm_20mm] gap-x-2 border-b border-border pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
               <span>Description</span>
               <span className="text-right">Qty</span>
               <span className="text-right">Price</span>
@@ -190,7 +215,7 @@ export default function ReceiptModal({
                 return (
                   <div
                     key={`receipt-${item.id}`}
-                    className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-start gap-x-2 text-[10px]"
+                    className="grid grid-cols-[minmax(0,1fr)_8mm_18mm_20mm] items-start gap-x-2 text-[10px]"
                   >
                     <div className="min-w-0">
                       <p className="font-medium leading-tight text-foreground break-words">
