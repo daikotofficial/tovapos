@@ -41,6 +41,25 @@ export default function ReceiptModal({
   taxLabel,
 }: ReceiptModalProps) {
   const handlePrint = () => {
+    const receiptPaper = document.querySelector<HTMLElement>(
+      '[data-print-target="receipt"] .receipt-paper'
+    );
+
+    if (!receiptPaper) {
+      window.print();
+      return;
+    }
+
+    const printRoot = document.createElement('div');
+    printRoot.className = 'receipt-print-root';
+    printRoot.appendChild(receiptPaper.cloneNode(true));
+    document.body.appendChild(printRoot);
+
+    const cleanup = () => {
+      printRoot.remove();
+    };
+
+    window.addEventListener('afterprint', cleanup, { once: true });
     window.print();
   };
 
@@ -198,12 +217,16 @@ export default function ReceiptModal({
               {sale.paymentMethod === 'split' && sale.paymentBreakdown && (
                 <div className="mt-2 border-t border-dashed border-border pt-2">
                   <p className="text-muted-foreground">Payment split</p>
-                  {Object.entries(sale.paymentBreakdown).filter(([, amount]) => Number(amount) > 0).map(([method, amount]) => (
-                    <div key={method} className="flex justify-between">
-                      <span className="capitalize">{method.replace('-', ' ')}</span>
-                      <span className="font-tabular">{formatMoney(Number(amount), currency)}</span>
-                    </div>
-                  ))}
+                  {Object.entries(sale.paymentBreakdown)
+                    .filter(([, amount]) => Number(amount) > 0)
+                    .map(([method, amount]) => (
+                      <div key={method} className="flex justify-between">
+                        <span className="capitalize">{method.replace('-', ' ')}</span>
+                        <span className="font-tabular">
+                          {formatMoney(Number(amount), currency)}
+                        </span>
+                      </div>
+                    ))}
                 </div>
               )}
               {sale.discountTotal > 0 && (
