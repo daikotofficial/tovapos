@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { useSearchParams } from 'next/navigation';
 import InventoryKPICards from './InventoryKPICards';
 import InventoryFilters from './InventoryFilters';
@@ -23,7 +24,9 @@ export default function InventoryScreen() {
     stockMovements,
     isHydrated,
     upsertInventoryItem,
+    deleteInventoryItem,
     pendingSyncCount,
+    currentUser,
     hasPermission,
     settings,
   } = usePosStore();
@@ -149,6 +152,21 @@ export default function InventoryScreen() {
     else setSelectedIds(new Set(paginated.map((i) => i.id)));
   };
 
+  const canDeleteProducts = ['owner', 'super-admin', 'manager'].includes(currentUser?.role ?? '');
+  const handleDeleteSelected = async () => {
+    if (!canDeleteProducts) { toast.error('Only an admin or manager can delete products.'); return; }
+    if (!selectedIds.size) return;
+    if (!window.confirm(`Delete ${selectedIds.size} selected product(s)? This cannot be undone.`)) return;
+    try {
+      for (const id of selectedIds) await deleteInventoryItem(id);
+      setSelectedIds(new Set());
+      toast.success('Selected products deleted.');
+      setPage((value) => Math.min(value, Math.max(1, Math.ceil((totalItems - selectedIds.size) / perPage))));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to delete products');
+    }
+  };
+
   const exportInventory = () => {
     const headers = [
       'Product',
@@ -260,6 +278,8 @@ export default function InventoryScreen() {
         onExport={exportInventory}
         selectedCount={selectedIds.size}
         onClearSelection={() => setSelectedIds(new Set())}
+        onDeleteSelected={handleDeleteSelected}
+        canDeleteProducts={canDeleteProducts}
       />
 
       {/* Table */}

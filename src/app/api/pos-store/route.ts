@@ -1177,7 +1177,9 @@ export async function DELETE(request: NextRequest) {
       throw new HttpError(405, 'Financial records cannot be directly deleted', 'DELETE_FORBIDDEN');
     }
     if (storeName === 'inventory') {
-      assertPermission(auth, 'delete-product');
+      if (!['owner', 'super-admin', 'manager'].includes(auth.user.role)) {
+        throw new HttpError(403, 'Only an admin or manager can delete products', 'PRODUCT_DELETE_FORBIDDEN');
+      }
       await assertTenantPlanPermission(auth.tenantId, 'delete-product');
     }
     const permission = WRITE_PERMISSIONS[storeName];

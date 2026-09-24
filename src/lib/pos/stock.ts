@@ -50,11 +50,28 @@ export function getDiscountedSellingPrice(item: InventoryItem): number {
   return sellingPrice;
 }
 
+function packPricingEnabledValue(
+  enabled: boolean | undefined,
+  price: number,
+  quantity: number
+): number | undefined {
+  return enabled && price > 0 && quantity >= 1 ? price : undefined;
+}
+
+/** Round bulk-derived costs up to practical cash denominations. */
+export function roundBulkUnitCost(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const step = value < 1000 ? 50 : 100;
+  return Math.ceil(value / step) * step;
+}
+
 export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
   const currentQty = Number(item.currentQty) || 0;
   const reorderLevel = Number(item.reorderLevel) || 1;
   const unitCost = Number(item.unitCost) || 0;
   const sellingPrice = Number(item.sellingPrice) || 0;
+  const packPrice = Number(item.packPrice) || 0;
+  const packQuantity = Number(item.packQuantity) || 0;
   const taxRate = Number(item.taxRate) || 0;
 
   return {
@@ -64,6 +81,10 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     maxStock: Number(item.maxStock) || Math.max(currentQty, reorderLevel),
     unitCost,
     sellingPrice,
+    packPricingEnabled: Boolean(item.packPricingEnabled && packPrice > 0 && packQuantity >= 1),
+    packPrice: packPricingEnabledValue(item.packPricingEnabled, packPrice, packQuantity),
+    packQuantity: packQuantity >= 1 ? Math.floor(packQuantity) : undefined,
+    packUnit: item.packUnit === 'carton' ? 'carton' : 'pack',
     profitMargin: computeProfitMargin(unitCost, sellingPrice),
     discountType: item.discountType ?? 'none',
     discountValue: Number(item.discountValue) || 0,

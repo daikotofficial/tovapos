@@ -13,6 +13,7 @@ import {
   computeSellingPriceFromMargin,
   computeStockStatus,
   getTodayIso,
+  roundBulkUnitCost,
 } from '@/lib/pos/stock';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 
@@ -23,10 +24,14 @@ interface AddStockModalProps {
   onSave: (item: InventoryItem) => void | Promise<void>;
 }
 
-type FormData = Omit<InventoryItem, 'id' | 'stockStatus'> & {
+type FormData = Omit<InventoryItem, 'id' | 'stockStatus' | 'packPricingEnabled' | 'packPrice' | 'packQuantity' | 'packUnit'> & {
   id?: string;
   bulkPurchasePrice?: number | string;
   bulkQuantity?: number | string;
+  packPricingEnabled?: boolean;
+  packPrice?: number | string;
+  packQuantity?: number | string;
+  packUnit?: 'pack' | 'carton';
 };
 
 function cleanAmount(value: string): string {
@@ -51,6 +56,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const [newCategory, setNewCategory] = useState('');
   const [pricingMode, setPricingMode] = useState<'manual' | 'margin'>('manual');
   const [bulkPricingActive, setBulkPricingActive] = useState(false);
+  const [packPricingActive, setPackPricingActive] = useState(false);
   const {
     register,
     handleSubmit,
@@ -62,7 +68,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const unitCost = Number(watch('unitCost')) || 0;
   const bulkPurchasePrice = Number(watch('bulkPurchasePrice')) || 0;
   const bulkQuantity = Number(watch('bulkQuantity')) || 0;
-  const calculatedUnitCost = bulkQuantity > 0 ? bulkPurchasePrice / bulkQuantity : 0;
+  const calculatedUnitCost = bulkQuantity > 0 ? roundBulkUnitCost(bulkPurchasePrice / bulkQuantity) : 0;
   const profitMargin = Number(watch('profitMargin')) || 0;
   const selectedCategory = watch('category') ?? '';
   const selectedUnit = watch('unitOfMeasurement') ?? 'unit';
@@ -81,6 +87,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const productNameRegistration = register('name', { required: 'Product name is required' });
   const skuRegistration = register('sku', { required: 'SKU, barcode, or QR code is required' });
   const bulkPurchasePriceRegistration = register('bulkPurchasePrice');
+  const packPriceRegistration = register('packPrice', { validate: (value) => !packPricingActive || Number(value) > 0 || 'Pack/carton price is required' });
+  const packQuantityRegistration = register('packQuantity', { validate: (value) => !packPricingActive || Number(value) >= 1 || 'Pack/carton quantity is required' });
   const bulkQuantityRegistration = register('bulkQuantity', {
     min: { value: 0.01, message: 'Quantity must be greater than 0' },
   });
@@ -112,6 +120,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
     if (editItem) {
       setPricingMode('manual');
       setBulkPricingActive(false);
+      setPackPricingActive(Boolean(editItem.packPricingEnabled));
       reset({
         name: editItem.name,
         genericName: editItem.genericName,
@@ -127,6 +136,10 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         unitCost: editItem.unitCost,
         bulkPurchasePrice: '',
         bulkQuantity: '',
+        packPricingEnabled: Boolean(editItem.packPricingEnabled),
+        packPrice: editItem.packPrice ?? '',
+        packQuantity: editItem.packQuantity ?? '',
+        packUnit: editItem.packUnit ?? 'pack',
         sellingPrice: editItem.sellingPrice,
         profitMargin: editItem.profitMargin,
         discountType: editItem.discountType ?? 'none',
@@ -149,6 +162,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
     } else {
       setPricingMode('manual');
       setBulkPricingActive(false);
+      setPackPricingActive(false);
       const today = getTodayIso();
       const nextYear = new Date();
       nextYear.setFullYear(nextYear.getFullYear() + 1);
@@ -160,6 +174,10 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         unitCost: 0,
         bulkPurchasePrice: '',
         bulkQuantity: '',
+        packPricingEnabled: false,
+        packPrice: '',
+        packQuantity: '',
+        packUnit: 'pack',
         sellingPrice: 0,
         profitMargin: 0,
         discountType: 'none',
@@ -241,12 +259,16 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       currentQty: Number(data.currentQty) || 0,
       reorderLevel: Number(data.reorderLevel) || 1,
       maxStock: Number(data.maxStock) || Math.max(Number(data.currentQty) || 0, 1),
-      unitCost: Number(data.unitCost),
+      unitCost: bulkPricingActive && calculatedUnitCost > 0 ? calculatedUnitCost : Number(data.unitCost),
+      packPricingEnabled: packPricingActive,
+      packPrice: packPricingActive ? Number(data.packPrice) : undefined,
+      packQuantity: packPricingActive ? Math.floor(Number(data.packQuantity)) : undefined,
+      packUnit: data.packUnit === 'carton' ? 'carton' : 'pack',
       sellingPrice: Number(data.sellingPrice),
       profitMargin:
         pricingMode === 'margin' && Number(data.profitMargin) > 0
           ? Number(data.profitMargin)
-          : computeProfitMargin(Number(data.unitCost), Number(data.sellingPrice)),
+          : computeProfitMargin(bulkPricingActive && calculatedUnitCost > 0 ? calculatedUnitCost : Number(data.unitCost), Number(data.sellingPrice)),
       discountType: data.discountType ?? 'none',
       discountValue: Number(data.discountValue) || 0,
       taxApplicable: Boolean(data.taxApplicable || Number(data.taxRate) > 0),
@@ -688,6 +710,19 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                     maximumFractionDigits: 2,
                   })}
                 </p>
+              )}
+            </div>
+            <div className="md:col-span-2 rounded-lg border border-border bg-muted/10 p-3">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-foreground">
+                <input type="checkbox" checked={packPricingActive} onChange={(event) => setPackPricingActive(event.target.checked)} className="accent-primary" />
+                Set Pack/Carton Price
+              </label>
+              {packPricingActive && (
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <NiceSelect value={watch("packUnit") ?? "pack"} onChange={(value) => setValue("packUnit", value as "pack" | "carton", { shouldDirty: true })} options={[{ value: "pack", label: "Pack" }, { value: "carton", label: "Carton" }]} />
+                  <input type="text" inputMode="decimal" {...packPriceRegistration} className={`${inputClass} font-tabular`} placeholder="Pack/carton price" />
+                  <input type="text" inputMode="numeric" {...packQuantityRegistration} className={`${inputClass} font-tabular`} placeholder="Pieces per pack/carton" />
+                </div>
               )}
             </div>
             <div>

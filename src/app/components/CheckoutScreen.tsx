@@ -10,6 +10,7 @@ import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { InventoryItem, PaymentBreakdown, PaymentMethod, SaleTransaction } from '@/lib/pos/types';
 import { loadInventoryByIds, loadInventoryPage, lookupInventoryItem } from '@/lib/pos/local-store';
 import { assertSellable, getDaysUntilExpiry } from '@/lib/pos/stock';
+import { getSaleUnitPrice, getUnitsPerSale, hasPackPricing, type SaleUnit } from '@/lib/pos/sale-units';
 import { formatMoney } from '@/lib/pos/money';
 import { getProductDiscountPercent, money, resolveTaxRate } from '@/lib/pos/sale-calculations';
 import { loyaltyRedemption } from '@/lib/pos/loyalty';
@@ -38,6 +39,9 @@ export interface CartItem {
   isControlled: boolean;
   category: string;
   availableQty: number;
+  saleUnit: SaleUnit;
+  unitsPerSale: number;
+  packUnit?: 'pack' | 'carton';
 }
 
 function getErrorMessage(error: unknown): string {
@@ -234,10 +238,8 @@ export default function CheckoutScreen() {
           return;
         }
 
-        const currentCartQty =
-          cartRef.current.find((item) => item.inventoryItemId === product.id)?.quantity ?? 0;
-
-        assertSellable(product, currentCartQty + 1);
+        const existingCartItem = cartRef.current.find((item) => item.inventoryItemId === product.id);
+        assertSellable(product, (existingCartItem?.quantity ?? 0) + 1);
 
         const daysUntilExpiry = getDaysUntilExpiry(product.expiryDate);
         if (daysUntilExpiry <= 30) {
@@ -286,7 +288,10 @@ export default function CheckoutScreen() {
             batchLot: product.batchLot,
             expiryDate: product.expiryDate,
             quantity: 1,
-            unitPrice: product.sellingPrice,
+            unitPrice: getSaleUnitPrice(product, 'piece'),
+            saleUnit: 'piece',
+            unitsPerSale: 1,
+            packUnit: hasPackPricing(product) ? product.packUnit : undefined,
             unitCost: product.unitCost,
             discount: rule ? customerDiscount : getProductDiscountPercent(product),
             baseDiscount: getProductDiscountPercent(product),
@@ -405,7 +410,7 @@ export default function CheckoutScreen() {
     }
 
     try {
-      assertSellable(inventoryItem, qty);
+      assertSellable(inventoryItem, qty * cartItem.unitsPerSale);
     } catch (error) {
       toast.error(getErrorMessage(error));
       return;
@@ -416,6 +421,21 @@ export default function CheckoutScreen() {
         item.id === id ? { ...item, quantity: qty, availableQty: inventoryItem.currentQty } : item
       )
     );
+  };
+
+  const updateSaleUnit = async (id: string, saleUnit: SaleUnit) => {
+    const cartItem = cart.find((item) => item.id === id);
+    if (!cartItem) return;
+    const [inventoryItem] = await loadInventoryByIds([cartItem.inventoryItemId]);
+    if (!inventoryItem) { toast.error('This item no longer exists in inventory'); return; }
+    if (saleUnit !== 'piece' && !hasPackPricing(inventoryItem)) {
+      toast.error('This product has no pack/carton price configured');
+      return;
+    }
+    const unitsPerSale = getUnitsPerSale(inventoryItem, saleUnit);
+    try { assertSellable(inventoryItem, cartItem.quantity * unitsPerSale); }
+    catch (error) { toast.error(getErrorMessage(error)); return; }
+    setCart((prev) => prev.map((item) => item.id === id ? { ...item, saleUnit, unitsPerSale, unitPrice: getSaleUnitPrice(inventoryItem, saleUnit), availableQty: inventoryItem.currentQty } : item));
   };
 
   const updateItemDiscount = (id: string, discount: number) => {
@@ -497,6 +517,7 @@ export default function CheckoutScreen() {
             ? item.discount
             : 100 * (1 - (1 - item.discount / 100) * (1 - globalDiscount / 100)),
           unitPrice: item.unitPrice,
+          saleUnit: item.saleUnit,
         })),
         subtotal,
         discountTotal,
@@ -544,6 +565,7 @@ export default function CheckoutScreen() {
           scanRef={scanRef}
           searchSuggestions={searchSuggestions}
           onUpdateQuantity={updateQuantity}
+          onUpdateSaleUnit={updateSaleUnit}
           onUpdateDiscount={updateItemDiscount}
           onRemoveItem={removeItem}
           removingIds={removingIds}

@@ -27,6 +27,7 @@ interface SaleCommandItem {
   quantity: number;
   discount: number;
   unitPrice: number;
+  saleUnit: 'piece' | 'pack' | 'carton';
 }
 
 function parsePaymentBreakdown(
@@ -77,6 +78,7 @@ function parseItems(value: unknown): SaleCommandItem[] {
     const quantity = Number(item.quantity);
     const discount = Number(item.discount ?? 0);
     const unitPrice = Number(item.unitPrice);
+    const saleUnit = item.saleUnit === 'carton' ? 'carton' : item.saleUnit === 'pack' ? 'pack' : 'piece';
     if (
       !inventoryItemId ||
       !Number.isFinite(quantity) ||
@@ -95,8 +97,12 @@ function parseItems(value: unknown): SaleCommandItem[] {
       );
     }
     const existing = aggregated.get(inventoryItemId);
-    if (existing) existing.quantity += quantity;
-    else aggregated.set(inventoryItemId, { inventoryItemId, quantity, discount, unitPrice });
+    if (existing) {
+      if (existing.saleUnit !== saleUnit || existing.unitPrice !== unitPrice) {
+        throw new HttpError(400, 'A product cannot be sold with mixed units in one sale', 'VALIDATION_ERROR');
+      }
+      existing.quantity += quantity;
+    } else aggregated.set(inventoryItemId, { inventoryItemId, quantity, discount, unitPrice, saleUnit });
   }
   return [...aggregated.values()];
 }
@@ -190,7 +196,7 @@ export async function POST(request: NextRequest) {
          ORDER BY id FOR UPDATE`,
         [auth.tenantId, items.map((item) => item.inventoryItemId)]
       );
-      if (inventoryResult.rows.length !== items.length) {
+      if (inventoryResult.rows.length !== new Set(items.map((item) => item.inventoryItemId)).size) {
         throw new HttpError(409, 'One or more products no longer exist', 'INVENTORY_CONFLICT');
       }
       const inventoryById = new Map(inventoryResult.rows.map((row) => [row.id as string, row]));
@@ -212,28 +218,30 @@ export async function POST(request: NextRequest) {
         ) {
           throw new HttpError(409, `${row.name} is expired`, 'PRODUCT_EXPIRED');
         }
-        if (Number(row.current_qty) < requested.quantity) {
-          throw new HttpError(409, `${row.name} has insufficient stock`, 'INSUFFICIENT_STOCK');
-        }
-        const canOverridePrice = ['owner', 'super-admin', 'manager'].includes(auth.user.role);
-        const canonicalPrice = Number(row.selling_price);
-        if (!canOverridePrice && requested.unitPrice !== canonicalPrice) {
-          throw new HttpError(
-            403,
-            'Price override requires manager access',
-            'PRICE_OVERRIDE_FORBIDDEN'
-          );
-        }
         if (requested.discount > 0 && settings.allowCashierDiscounts === false) {
           assertPermission(auth, 'give-discount');
         }
         if (
           settings.allowSellingBelowCost === false &&
-          requested.unitPrice < Number(row.unit_cost)
+          requested.unitPrice < Number(row.unit_cost) * (requested.saleUnit === 'piece' ? 1 : Math.max(1, Number((row.data as InventoryItem).packQuantity) || 1))
         ) {
           throw new HttpError(409, `${row.name} cannot be sold below cost`, 'BELOW_COST_FORBIDDEN');
         }
         const productData = row.data as InventoryItem;
+        const packConfigured = Boolean(productData.packPricingEnabled && Number(productData.packPrice) > 0 && Number(productData.packQuantity) >= 1);
+        if (requested.saleUnit !== 'piece' && !packConfigured) {
+          throw new HttpError(409, `${row.name} has no ${requested.saleUnit} price configured`, 'PACK_PRICE_NOT_CONFIGURED');
+        }
+        const unitsPerSale = requested.saleUnit === 'piece' ? 1 : Math.floor(Number(productData.packQuantity));
+        const canonicalPrice = requested.saleUnit === 'piece' ? Number(row.selling_price) : Number(productData.packPrice);
+        const canOverridePrice = ['owner', 'super-admin', 'manager'].includes(auth.user.role);
+        if (!canOverridePrice && requested.unitPrice !== canonicalPrice) {
+          throw new HttpError(403, 'The selected unit price is no longer valid', 'PRICE_MISMATCH');
+        }
+        const stockQuantity = requested.quantity * unitsPerSale;
+        if (Number(row.current_qty) < stockQuantity) {
+          throw new HttpError(409, `${row.name} has insufficient stock`, 'INSUFFICIENT_STOCK');
+        }
         const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
         const calculated = calculateSaleLine(
           {
@@ -249,7 +257,7 @@ export async function POST(request: NextRequest) {
         subtotal = money(subtotal + calculated.gross);
         discountTotal = money(discountTotal + calculated.discountAmount);
         taxAmount = money(taxAmount + calculated.taxAmount);
-        const nextQuantity = Number(row.current_qty) - requested.quantity;
+        const nextQuantity = Number(row.current_qty) - stockQuantity;
         updatedInventory.push({
           ...productData,
           currentQty: nextQuantity,
@@ -328,7 +336,7 @@ export async function POST(request: NextRequest) {
           barcode: updated.barcode,
           batchLot: updated.batchLot,
           type: 'sale',
-          quantityDelta: -requested.quantity,
+          quantityDelta: -(requested.quantity * (requested.saleUnit === 'piece' ? 1 : Math.max(1, Math.floor(Number((inventoryById.get(updated.id).data as InventoryItem).packQuantity) || 1)))),
           quantityBefore: before,
           quantityAfter: updated.currentQty,
           unitCost: updated.unitCost,

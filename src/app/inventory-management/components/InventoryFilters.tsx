@@ -20,6 +20,8 @@ interface InventoryFiltersProps {
   onExport: () => void;
   selectedCount: number;
   onClearSelection: () => void;
+  onDeleteSelected: () => void;
+  canDeleteProducts: boolean;
 }
 
 const statuses = [
@@ -57,6 +59,8 @@ export default function InventoryFilters({
   onExport,
   selectedCount,
   onClearSelection,
+  onDeleteSelected,
+  canDeleteProducts,
 }: InventoryFiltersProps) {
   const { settings } = usePosStore();
   const suppliers = Array.from(new Set(items.map((i) => i.supplier)));
@@ -86,13 +90,13 @@ export default function InventoryFilters({
           )}
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-          {selectedCount > 0 && (
+          {selectedCount > 0 && canDeleteProducts && (
             <>
               <span className="col-span-2 text-xs text-muted-foreground sm:col-span-1">
                 {selectedCount} selected
               </span>
               <button
-                onClick={onClearSelection}
+                onClick={onDeleteSelected}
                 className="flex min-h-9 items-center justify-center gap-1 rounded-lg bg-danger/10 px-3 py-1.5 text-xs font-medium text-danger transition-colors duration-150 hover:bg-danger/20"
               >
                 <Trash2 size={11} />

@@ -40,7 +40,7 @@ export default function ReceiptModal({
   receiptFooter,
   taxLabel,
 }: ReceiptModalProps) {
-  const handlePrint = () => {
+  const handlePrint = async () => {
     const receiptPaper = document.querySelector<HTMLElement>(
       '[data-print-target="receipt"] .receipt-paper'
     );
@@ -49,70 +49,38 @@ export default function ReceiptModal({
       return;
     }
 
-    const printWindow = window.open('', '_blank', 'width=420,height=900');
-    if (!printWindow) {
-      return;
-    }
+    document.querySelectorAll('.receipt-print-root').forEach((node) => node.remove());
+    document.getElementById('receipt-print-page-style')?.remove();
 
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((style) => style.outerHTML)
-      .join('');
+    const printRoot = document.createElement('div');
+    printRoot.className = 'receipt-print-root';
+    printRoot.style.cssText =
+      'display:block;position:fixed;left:-100000px;top:0;width:80mm;min-width:80mm;visibility:visible;';
+    printRoot.appendChild(receiptPaper.cloneNode(true));
+    document.body.appendChild(printRoot);
 
-    printWindow.document.open();
-    printWindow.document.write(
-      '<!doctype html><html><head><meta charset="utf-8"><title>Receipt</title>' +
-        styles +
-        '<style>@page{size:80mm auto;margin:0}html,body{margin:0!important;padding:0!important;width:80mm!important;min-width:80mm!important;height:auto!important;min-height:0!important;background:#fff!important}body{display:block!important;overflow:visible!important;font-family:Arial,Helvetica,sans-serif!important;line-height:1.25!important}*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.receipt-print-root{display:block!important;width:80mm!important;min-width:80mm!important;height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:visible!important;vertical-align:top!important}.receipt-paper{display:block!important;width:80mm!important;max-width:80mm!important;min-height:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important;box-sizing:border-box!important;color:#000!important;background:#fff!important;font-family:Arial,Helvetica,sans-serif!important;font-size:11px!important;line-height:1.25!important}.receipt-paper *{color:#000!important}.receipt-paper .text-base{font-size:14px!important}.receipt-paper .text-sm{font-size:12px!important}.receipt-paper .text-xs{font-size:11px!important}.receipt-paper>div{padding-top:8px!important;padding-bottom:8px!important;padding-left:12px!important;padding-right:12px!important}.receipt-paper>div:first-child{padding-top:10px!important;padding-bottom:10px!important}@media print{body>*{display:none!important}body>.receipt-print-root{display:block!important}}</style></head><body><div class="receipt-print-root">' +
-        receiptPaper.outerHTML +
-        '</div></body></html>'
+    await document.fonts.ready;
+    const receiptHeightPx = Math.ceil(
+      Math.max(
+        printRoot.scrollHeight,
+        printRoot.getBoundingClientRect().height,
+        printRoot.firstElementChild?.scrollHeight ?? 0
+      ) + 2
     );
-    printWindow.document.close();
+    const receiptHeightMm = Math.max(10, (receiptHeightPx * 25.4) / 96 + 1);
+    const pageStyle = document.createElement('style');
+    pageStyle.id = 'receipt-print-page-style';
+    pageStyle.textContent =
+      '@media print { @page { size: 80mm ' +
+      receiptHeightMm.toFixed(2) +
+      'mm; margin: 0; } html, body { width: 80mm !important; height: ' +
+      receiptHeightPx +
+      'px !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; } body > * { display: none !important; } body > .receipt-print-root { display: block !important; width: 80mm !important; height: ' +
+      receiptHeightPx +
+      'px !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; } .receipt-print-root .receipt-paper { display: block !important; width: 80mm !important; max-width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; color: #000 !important; background: #fff !important; font-family: Arial, Helvetica, sans-serif !important; font-size: 11px !important; line-height: 1.25 !important; } .receipt-print-root .receipt-paper * { color: #000 !important; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }';
+    document.head.appendChild(pageStyle);
 
-    window.setTimeout(async () => {
-      if (printWindow.closed) {
-        return;
-      }
-
-      await printWindow.document.fonts.ready;
-      const images = Array.from(printWindow.document.images);
-      await Promise.all(
-        images.map((image) =>
-          image.complete
-            ? Promise.resolve()
-            : new Promise<void>((resolve) => {
-                image.addEventListener('load', () => resolve(), { once: true });
-                image.addEventListener('error', () => resolve(), { once: true });
-              })
-        )
-      );
-
-      const printRoot = printWindow.document.querySelector<HTMLElement>('.receipt-print-root');
-      const printPaper = printWindow.document.querySelector<HTMLElement>('.receipt-paper');
-      if (!printRoot || !printPaper) {
-        printWindow.close();
-        return;
-      }
-
-      const receiptHeightPx = Math.ceil(
-        Math.max(
-          printRoot.scrollHeight,
-          printPaper.scrollHeight,
-          printRoot.getBoundingClientRect().height,
-          printPaper.getBoundingClientRect().height
-        ) + 2
-      );
-      const receiptHeightMm = Math.max(10, (receiptHeightPx * 25.4) / 96 + 1);
-      printRoot.style.height = receiptHeightPx + 'px';
-      printPaper.style.height = 'auto';
-      printWindow.document.documentElement.style.height = receiptHeightPx + 'px';
-      printWindow.document.body.style.height = receiptHeightPx + 'px';
-      const pageStyle = printWindow.document.createElement('style');
-      pageStyle.textContent =
-        '@page { size: 80mm ' + receiptHeightMm.toFixed(2) + 'mm; margin: 0; }';
-      printWindow.document.head.appendChild(pageStyle);
-      printWindow.focus();
-      printWindow.print();
-    }, 250);
+    window.print();
   };
 
   return (

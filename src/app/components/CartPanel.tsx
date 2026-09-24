@@ -19,6 +19,7 @@ import { CartItem } from './CheckoutScreen';
 import { InventoryItem } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
 import { getDaysUntilExpiry } from '@/lib/pos/stock';
+import type { SaleUnit } from '@/lib/pos/sale-units';
 
 interface CartPanelProps {
   cart: CartItem[];
@@ -30,6 +31,7 @@ interface CartPanelProps {
   scanRef: React.RefObject<HTMLInputElement | null>;
   searchSuggestions: InventoryItem[];
   onUpdateQuantity: (id: string, qty: number) => Promise<void>;
+  onUpdateSaleUnit: (id: string, unit: SaleUnit) => Promise<void>;
   onUpdateDiscount: (id: string, discount: number) => void;
   onRemoveItem: (id: string) => void;
   removingIds: Set<string>;
@@ -50,6 +52,7 @@ export default function CartPanel({
   scanRef,
   searchSuggestions,
   onUpdateQuantity,
+  onUpdateSaleUnit,
   onUpdateDiscount,
   onRemoveItem,
   removingIds,
@@ -284,6 +287,17 @@ export default function CartPanel({
                     >
                       <Plus size={11} />
                     </button>
+                    {item.packUnit && (
+                      <select
+                        value={item.saleUnit}
+                        onChange={(event) => void onUpdateSaleUnit(item.id, event.target.value as SaleUnit)}
+                        className="rounded-md border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+                        aria-label={`Selling unit for ${item.name}`}
+                      >
+                        <option value="piece">Piece</option>
+                        <option value={item.packUnit}>{item.packUnit === 'carton' ? 'Carton' : 'Pack'}</option>
+                      </select>
+                    )}
                     <span className="text-xs text-muted-foreground">
                       x {formatMoney(item.unitPrice, currency)}
                     </span>

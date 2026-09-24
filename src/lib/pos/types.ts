@@ -17,6 +17,10 @@ export interface InventoryItem {
   maxStock: number;
   unitCost: number;
   sellingPrice: number;
+  packPricingEnabled?: boolean;
+  packPrice?: number;
+  packQuantity?: number;
+  packUnit?: 'pack' | 'carton';
   profitMargin?: number;
   discountType?: 'none' | 'percentage' | 'fixed';
   discountValue?: number;
@@ -69,6 +73,8 @@ export interface SaleLineItem {
   quantity: number;
   unitPrice: number;
   unitCost: number;
+  saleUnit?: 'piece' | 'pack' | 'carton';
+  unitsPerSale?: number;
   discount: number;
   lineTotal: number;
   discountAmount?: number;
@@ -218,6 +224,7 @@ export interface SaleInputItem {
   quantity: number;
   discount: number;
   unitPrice: number;
+  saleUnit?: 'piece' | 'pack' | 'carton';
 }
 
 export interface CompleteSaleInput {

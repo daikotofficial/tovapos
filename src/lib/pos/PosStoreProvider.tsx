@@ -27,6 +27,7 @@ import {
   Vendor,
 } from './types';
 import { assertSellable, normalizeInventoryItem } from './stock';
+import { getSaleUnitPrice, getUnitsPerSale, hasPackPricing, type SaleUnit } from './sale-units';
 import { calculateSaleLine, calculateSaleTotals, money } from './sale-calculations';
 import { loyaltyEarnedForSale, loyaltyRedemption } from './loyalty';
 import {
@@ -37,6 +38,7 @@ import {
   cacheStockMovementsLocally,
   cacheSyncQueueLocally,
   deleteUser as deleteStoredUser,
+  deleteInventoryItem as deleteStoredInventory,
   deleteCustomer as deleteStoredCustomer,
   deleteVendor as deleteStoredVendor,
   ensureCleanLocalDatabase,
@@ -109,6 +111,7 @@ interface PosStoreValue {
   }>;
   hasPermission: (permission: Permission) => boolean;
   upsertInventoryItem: (item: InventoryItem) => Promise<InventoryItem>;
+  deleteInventoryItem: (inventoryId: string) => Promise<void>;
   upsertUser: (user: TovaUser) => Promise<TovaUser>;
   deleteUser: (userId: string) => Promise<void>;
   upsertCustomer: (customer: Customer) => Promise<Customer>;
@@ -575,6 +578,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                       quantity: item.quantity,
                       discount: item.discount,
                       unitPrice: item.unitPrice,
+                      saleUnit: item.saleUnit ?? 'piece',
                     })),
                     paymentMethod: payload.sale.paymentMethod,
                     cashTendered: payload.sale.cashTendered,
@@ -622,7 +626,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     )
                   );
                 }
-              } else if (inventoryQueueItem) {
+              } else if (inventoryQueueItem && inventoryQueueItem.action !== 'delete') {
                 const movementQueueItem = group.find((item) => item.entity === 'stockMovement');
                 const movementPayload = movementQueueItem?.payload as
                   StockMovement | StockMovement[] | undefined;
@@ -680,6 +684,10 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     } | null;
                     if (!response.ok)
                       throw new Error(result?.error ?? 'Delete could not be synchronized');
+                    if (item.entity === 'inventory') {
+                      await deleteStoredInventory(item.entityId);
+                      setInventory((prev) => prev.filter((entry) => entry.id !== item.entityId));
+                    }
                     if (item.entity === 'customer') await deleteStoredCustomer(item.entityId);
                     if (item.entity === 'vendor') await deleteStoredVendor(item.entityId);
                     if (item.entity === 'user') await deleteStoredUser(item.entityId);
@@ -1158,6 +1166,43 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     [currentUser?.name, hasPermission, inventory, isOnline, settings]
   );
 
+  const deleteInventoryItem = useCallback(
+    async (inventoryId: string) => {
+      const allowedRoles: UserRole[] = ['owner', 'super-admin', 'manager'];
+      if (!currentUser || !allowedRoles.includes(currentUser.role)) {
+        throw new Error('Only an admin or manager can delete products.');
+      }
+      if (!hasActiveSubscription(settings)) {
+        throw new Error('An active subscription is required to delete products.');
+      }
+      if (!inventory.some((item) => item.id === inventoryId)) {
+        throw new Error('Product no longer exists in inventory.');
+      }
+      const operationId = createOperationId('inventory-delete');
+      const queueItem = {
+        ...createSyncQueueItem({
+          operationId, entity: 'inventory', entityId: inventoryId, action: 'delete',
+          payload: { id: inventoryId }, conflictStrategy: 'server-wins',
+        }),
+        idempotencyKey: `inventory-delete:${operationId}`,
+      };
+      if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' && typeof navigator !== 'undefined' && isOnline) {
+        const response = await fetch('/api/pos-store?store=inventory', {
+          method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: inventoryId }),
+        });
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (!response.ok) throw new Error(payload?.error ?? 'Unable to delete product');
+      } else {
+        await saveSyncQueueItem(queueItem);
+        setSyncQueue((prev) => [queueItem, ...prev]);
+      }
+      await deleteStoredInventory(inventoryId);
+      setInventory((prev) => prev.filter((item) => item.id !== inventoryId));
+    },
+    [currentUser, inventory, isOnline, settings]
+  );
+
   const upsertUser = useCallback(async (user: TovaUser) => {
     const transport = { ...user, updatedAt: new Date().toISOString() };
     await saveUser(transport);
@@ -1465,13 +1510,15 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             quantity: 0,
             discount: line.discount,
             unitPrice: line.unitPrice,
+            saleUnit: line.saleUnit ?? 'piece',
           };
+          if (current.saleUnit !== (line.saleUnit ?? 'piece')) throw new Error('A product cannot be sold with mixed units in one sale');
           current.quantity += line.quantity;
           current.discount = line.discount;
           current.unitPrice = line.unitPrice;
           map.set(line.inventoryItemId, current);
           return map;
-        }, new Map<string, { quantity: number; discount: number; unitPrice: number }>());
+        }, new Map<string, { quantity: number; discount: number; unitPrice: number; saleUnit: SaleUnit }>());
 
         const updatedInventory: VersionedInventoryItem[] = [];
 
@@ -1495,11 +1542,17 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           const item = inventoryById.get(inventoryItemId);
           if (!item) throw new Error('One of the scanned products no longer exists in inventory');
 
-          assertSellable(item, line.quantity);
+          const saleUnit = line.saleUnit ?? 'piece';
+          if (saleUnit !== 'piece' && !hasPackPricing(item)) throw new Error(`${item.name} has no pack/carton price configured`);
+          const unitsPerSale = getUnitsPerSale(item, saleUnit);
+          const stockQuantity = line.quantity * unitsPerSale;
+          const canonicalPrice = getSaleUnitPrice(item, saleUnit);
+          if (Math.abs(line.unitPrice - canonicalPrice) > 0.001) throw new Error(`${item.name} price changed; please refresh and try again`);
+          assertSellable(item, stockQuantity);
 
           const updated = normalizeInventoryItem({
             ...item,
-            currentQty: item.currentQty - line.quantity,
+            currentQty: item.currentQty - stockQuantity,
             updatedAt: now,
           });
           updatedInventory.push({ ...updated, _expectedUpdatedAt: item.updatedAt });
@@ -1527,7 +1580,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             expiryDate: item.expiryDate,
             quantity: line.quantity,
             unitPrice: line.unitPrice,
-            unitCost: item.unitCost,
+            unitCost: item.unitCost * unitsPerSale,
+            saleUnit,
+            unitsPerSale,
             discount: line.discount,
             lineTotal: calculated.lineTotal,
             discountAmount: calculated.discountAmount,
@@ -1580,7 +1635,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               barcode: updated.barcode,
               batchLot: updated.batchLot,
               type: 'sale' as const,
-              quantityDelta: -soldLine.quantity,
+              quantityDelta: -(soldLine.quantity * (soldLine.unitsPerSale ?? 1)),
               quantityBefore: original.currentQty,
               quantityAfter: updated.currentQty,
               unitCost: updated.unitCost,
@@ -2020,6 +2075,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       registerBusiness,
       hasPermission,
       upsertInventoryItem,
+      deleteInventoryItem,
       upsertUser,
       deleteUser,
       upsertCustomer,
@@ -2060,6 +2116,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       registerBusiness,
       hasPermission,
       upsertInventoryItem,
+      deleteInventoryItem,
       upsertUser,
       deleteUser,
       upsertCustomer,

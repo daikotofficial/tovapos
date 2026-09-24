@@ -878,6 +878,10 @@ function normalizeSettings(settings: BusinessSettings, seed: BusinessSettings): 
   };
 }
 
+export async function deleteInventoryItem(inventoryId: string): Promise<void> {
+  await deleteOne('inventory', inventoryId);
+}
+
 export async function saveInventoryItem(item: InventoryItem): Promise<void> {
   await putOne('inventory', normalizeInventoryItem(item));
 }
