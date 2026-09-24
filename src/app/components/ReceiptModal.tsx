@@ -8,28 +8,32 @@ import { formatMoney } from '@/lib/pos/money';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
 
-function buildThermalReceiptText(sale: SaleTransaction, currency: string, businessName: string, businessAddress: string | undefined, businessPhone: string | undefined, receiptFooter: string, taxLabel: string) {
+function buildThermalReceiptText(sale: SaleTransaction, _currency: string, businessName: string, businessAddress: string | undefined, businessPhone: string | undefined, receiptFooter: string, taxLabel: string) {
   const width = 48;
-  const money = (value: number) => formatMoney(Number(value) || 0, currency);
+  const money = (value: number) => new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0);
   const lines: string[] = [];
-  const center = (value: string) => { const text = value.slice(0, width); lines.push(' '.repeat(Math.max(0, Math.floor((width - text.length) / 2))) + text); };
-  const row = (label: string, value: string) => lines.push(label.padEnd(width - value.length) + value);
-  center('TOVAPOS');
-  center(businessName);
-  if (businessAddress) center(businessAddress);
-  if (businessPhone) center(businessPhone);
-  center(sale.transactionId);
+  const boldOn = '\u001bE\u0001';
+  const boldOff = '\u001bE\u0000';
+  const center = (value: string, bold = false) => { const text = value.slice(0, width); const line = ' '.repeat(Math.max(0, Math.floor((width - text.length) / 2))) + text; lines.push(bold ? boldOn + line + boldOff : line); };
+  const row = (label: string, value: string, bold = false) => { const safeValue = value.slice(0, width); const line = label.slice(0, Math.max(0, width - safeValue.length)).padEnd(Math.max(0, width - safeValue.length)) + safeValue; lines.push(bold ? boldOn + line + boldOff : line); };
+  const wrap = (value: string) => { const words = value.trim().split(/\s+/).filter(Boolean); const wrapped: string[] = []; let current = ''; words.forEach((word) => { if (!current) current = word.slice(0, width); else if (current.length + 1 + word.length <= width) current += ' ' + word; else { wrapped.push(current); current = word.slice(0, width); } }); if (current) wrapped.push(current); return wrapped.length ? wrapped : ['']; };
+  const timestamp = sale.timestamp.includes('T') ? sale.timestamp.slice(0, 19).replace('T', '  ') : sale.timestamp;
+  center('TOVAPOS', true);
+  center(businessName, true);
+  if (businessAddress) center(businessAddress, true);
+  if (businessPhone) center(businessPhone, true);
+  center(sale.transactionId, true);
   lines.push('-'.repeat(width));
-  row('Date', sale.timestamp);
-  row('Cashier', sale.cashier);
-  if (sale.customerName) row('Customer', sale.customerName);
-  row('Payment', sale.paymentMethod.toUpperCase());
+  row('Date', timestamp, true);
+  row('Cashier', sale.cashier, true);
+  if (sale.customerName) row('Customer', sale.customerName, true);
+  row('Payment', sale.paymentMethod.toUpperCase(), true);
   lines.push('-'.repeat(width));
-  lines.push('Description'.padEnd(24) + 'Qty'.padStart(5) + 'Price'.padStart(9) + 'Total'.padStart(10));
+  lines.push(boldOn + 'Description'.padEnd(24) + 'Qty'.padStart(5) + 'Price'.padStart(9) + 'Total'.padStart(10) + boldOff);
   lines.push('-'.repeat(width));
   sale.items.forEach((item) => {
-    const unit = item.saleUnit && item.saleUnit !== 'piece' ? ` (${item.saleUnit})` : '';
-    const name = `${item.name}${unit}`;
+    const unit = item.saleUnit && item.saleUnit !== 'piece' ? ' (' + item.saleUnit + ')' : '';
+    const name = item.name + unit;
     const price = money(item.unitPrice);
     const total = money(item.unitPrice * item.quantity * (1 - item.discount / 100));
     let remaining = name;
@@ -39,11 +43,11 @@ function buildThermalReceiptText(sale: SaleTransaction, currency: string, busine
   });
   row('Subtotal', money(sale.subtotal));
   if (sale.discountTotal > 0) row('Discount', '-' + money(sale.discountTotal));
-  row(`Tax (${taxLabel})`, money(sale.taxAmount));
-  row('AMOUNT PAID', money(Number(sale.amountPaid ?? sale.grandTotal)));
+  row('Tax (' + taxLabel + ')', money(sale.taxAmount));
+  row('AMOUNT PAID', money(Number(sale.amountPaid ?? sale.grandTotal)), true);
   if (sale.paymentMethod === 'cash') { row('Cash Tendered', money(sale.cashTendered ?? 0)); row('Change', money(sale.changeGiven ?? 0)); }
   lines.push('-'.repeat(width));
-  (receiptFooter || 'Thank you for shopping with us.').split(/\r?\n/).forEach(center);
+  (receiptFooter || 'Thank you for shopping with us.').split(/\r?\n/).forEach((paragraph) => wrap(paragraph).forEach((line) => center(line)));
   return lines.join('\r\n') + '\r\n';
 }
 
