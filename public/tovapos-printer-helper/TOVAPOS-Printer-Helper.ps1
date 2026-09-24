@@ -53,12 +53,12 @@ public static class TovaRawPrinter {
 }
 
 function Default-Printer {
-   = @(Get-Printer)
-   =  | Where-Object { ].Name -match 'bXprinterb|bXP[- ]' } | Select-Object -First 1
-  if () { return .Name }
-   =  | Where-Object Default -eq  | Select-Object -First 1
-  if () { return .Name }
-  return ( | Select-Object -First 1).Name
+  $printers = @(Get-Printer)
+  $preferred = $printers | Where-Object { $_.Name -match 'Xprinter|XP[- ]' } | Select-Object -First 1
+  if ($preferred) { return $preferred.Name }
+  $default = $printers | Where-Object Default -eq $true | Select-Object -First 1
+  if ($default) { return $default.Name }
+  return ($printers | Select-Object -First 1).Name
 }
 $listener = [Net.HttpListener]::new()
 $listener.Prefixes.Add("http://127.0.0.1:$port/")
