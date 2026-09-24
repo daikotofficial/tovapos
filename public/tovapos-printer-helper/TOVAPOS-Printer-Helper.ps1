@@ -8,6 +8,7 @@ if (-not $Install -and $PSCommandPath -ne $installed) { $Install = $true }
 
 if ($Install) {
   New-Item -ItemType Directory -Force -Path $root | Out-Null
+  Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*$installed*" } | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate | Out-Null }
   Copy-Item -LiteralPath $PSCommandPath -Destination $installed -Force
   $command = "powershell.exe -NoProfile -File `"$installed`""
   New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'TOVAPOS Printer Helper' -Value $command -PropertyType String -Force | Out-Null
