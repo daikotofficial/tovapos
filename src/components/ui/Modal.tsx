@@ -49,11 +49,14 @@ export default function Modal({
       aria-labelledby="modal-title"
       data-print-target={printTarget}
     >
-      <div className="absolute inset-0 bg-foreground/40 backdrop-blur-sm" onClick={onClose} />
       <div
-        className={`relative flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] min-w-0 ${sizeMap[size]} flex-col overflow-hidden rounded-xl border border-border bg-card shadow-modal slide-up sm:max-h-[90vh] sm:w-full`}
+        className="print-modal-backdrop absolute inset-0 bg-foreground/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div
+        className={`print-modal-shell relative flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] min-w-0 ${sizeMap[size]} flex-col overflow-hidden rounded-xl border border-border bg-card shadow-modal slide-up sm:max-h-[90vh] sm:w-full`}
       >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-6">
+        <div className="print-modal-header flex shrink-0 items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <h2 id="modal-title" className="text-base font-semibold text-foreground">
               {title}
@@ -68,11 +71,11 @@ export default function Modal({
             <X size={16} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-4 scrollbar-thin sm:px-6">
+        <div className="print-modal-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-3 py-4 scrollbar-thin sm:px-6">
           {children}
         </div>
         {footer && (
-          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6 [&>button]:w-full sm:[&>button]:w-auto">
+          <div className="print-modal-footer flex shrink-0 flex-col-reverse gap-2 border-t border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-end sm:px-6 [&>button]:w-full sm:[&>button]:w-auto">
             {footer}
           </div>
         )}
