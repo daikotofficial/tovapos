@@ -579,8 +579,8 @@ function SettingsPageContent() {
                   <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Install the helper once on this cashier computer. It will start automatically after that.</p>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:justify-end">
-                  <a href="/tovapos-printer-helper/TOVAPOS-Printer-Helper.ps1" download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90">
-                    <Printer size={14} /> Download helper
+                  <a href="/api/print-helper/windows" download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90">
+                    <Printer size={14} /> Install printer helper
                   </a>
                   <button type="button" onClick={startPrinter} disabled={startingPrinter} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground transition hover:bg-muted disabled:opacity-60">
                     {startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
