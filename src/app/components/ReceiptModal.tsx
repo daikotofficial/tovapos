@@ -62,7 +62,7 @@ export default function ReceiptModal({
     printWindow.document.write(
       '<!doctype html><html><head><meta charset="utf-8"><title>Receipt</title>' +
         styles +
-        '<style>html,body{margin:0!important;padding:0!important;width:80mm!important;min-width:80mm!important;height:auto!important;min-height:0!important;background:#fff!important}body{display:block!important;overflow:visible!important}.receipt-print-root{display:block!important;width:80mm!important;min-width:80mm!important;height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:visible!important}.receipt-paper{display:block!important;width:80mm!important;max-width:80mm!important;min-height:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important;box-sizing:border-box!important;color:#000!important;background:#fff!important}@media print{body>*{display:none!important}body>.receipt-print-root{display:block!important}}</style></head><body><div class="receipt-print-root">' +
+        '<style>@page{size:80mm auto;margin:0}html,body{margin:0!important;padding:0!important;width:80mm!important;min-width:80mm!important;height:auto!important;min-height:0!important;background:#fff!important}body{display:block!important;overflow:visible!important;font-family:Arial,Helvetica,sans-serif!important;line-height:1.25!important}*{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.receipt-print-root{display:block!important;width:80mm!important;min-width:80mm!important;height:auto!important;min-height:0!important;margin:0!important;padding:0!important;overflow:visible!important;vertical-align:top!important}.receipt-paper{display:block!important;width:80mm!important;max-width:80mm!important;min-height:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important;box-sizing:border-box!important;color:#000!important;background:#fff!important;font-family:Arial,Helvetica,sans-serif!important;font-size:11px!important;line-height:1.25!important}.receipt-paper *{color:#000!important}.receipt-paper .text-base{font-size:14px!important}.receipt-paper .text-sm{font-size:12px!important}.receipt-paper .text-xs{font-size:11px!important}.receipt-paper>div{padding-top:8px!important;padding-bottom:8px!important;padding-left:12px!important;padding-right:12px!important}.receipt-paper>div:first-child{padding-top:10px!important;padding-bottom:10px!important}@media print{body>*{display:none!important}body>.receipt-print-root{display:block!important}}</style></head><body><div class="receipt-print-root">' +
         receiptPaper.outerHTML +
         '</div></body></html>'
     );
@@ -101,7 +101,11 @@ export default function ReceiptModal({
           printPaper.getBoundingClientRect().height
         ) + 2
       );
-      const receiptHeightMm = Math.max(30, (receiptHeightPx * 25.4) / 96 + 2);
+      const receiptHeightMm = Math.max(10, (receiptHeightPx * 25.4) / 96 + 1);
+      printRoot.style.height = receiptHeightPx + 'px';
+      printPaper.style.height = 'auto';
+      printWindow.document.documentElement.style.height = receiptHeightPx + 'px';
+      printWindow.document.body.style.height = receiptHeightPx + 'px';
       const pageStyle = printWindow.document.createElement('style');
       pageStyle.textContent =
         '@page { size: 80mm ' + receiptHeightMm.toFixed(2) + 'mm; margin: 0; }';
