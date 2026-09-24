@@ -46,36 +46,44 @@ export default function ReceiptModal({
     );
 
     if (!receiptPaper) {
-      window.print();
       return;
     }
 
-    document.querySelectorAll('.receipt-print-root').forEach((node) => node.remove());
-    document.getElementById('receipt-print-page-style')?.remove();
+    const printWindow = window.open('', '_blank', 'width=420,height=900');
+    if (!printWindow) {
+      return;
+    }
 
-    const printRoot = document.createElement('div');
-    printRoot.className = 'receipt-print-root';
-    printRoot.style.cssText =
-      'display: block; position: fixed; left: -100000px; top: 0; width: 80mm; visibility: visible;';
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((style) => style.outerHTML)
+      .join('');
 
-    const printPaper = receiptPaper.cloneNode(true) as HTMLElement;
-    printPaper.style.width = '80mm';
-    printPaper.style.maxWidth = '80mm';
-    printPaper.style.border = '0';
-    printPaper.style.borderRadius = '0';
-    printPaper.style.overflow = 'visible';
-    printRoot.appendChild(printPaper);
-    document.body.appendChild(printRoot);
+    printWindow.document.open();
+    printWindow.document.write(
+      '<!doctype html><html><head><meta charset="utf-8"><title>Receipt</title>' +
+        styles +
+        '<style>html,body{margin:0;padding:0;width:80mm;background:#fff}body{overflow:visible}.receipt-print-root{display:block!important;width:80mm!important;min-width:80mm!important;margin:0!important;padding:0!important}.receipt-paper{display:block!important;width:80mm!important;max-width:80mm!important;min-height:0!important;height:auto!important;margin:0!important;padding:0!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important;color:#000!important;background:#fff!important}@media print{body>*{display:none!important}body>.receipt-print-root{display:block!important}}</style></head><body><div class="receipt-print-root">' +
+        receiptPaper.outerHTML +
+        '</div></body></html>'
+    );
+    printWindow.document.close();
 
-    const receiptHeightPx = Math.ceil(printRoot.getBoundingClientRect().height);
-    const receiptHeightMm = Math.max(20, (receiptHeightPx * 25.4) / 96);
-    const printPageStyle = document.createElement('style');
-    printPageStyle.id = 'receipt-print-page-style';
-    printPageStyle.textContent =
-      '@media print { @page { size: 80mm ' + receiptHeightMm.toFixed(2) + 'mm; } }';
-    document.head.appendChild(printPageStyle);
+    window.setTimeout(() => {
+      const printRoot = printWindow.document.querySelector<HTMLElement>('.receipt-print-root');
+      if (!printRoot) {
+        printWindow.close();
+        return;
+      }
 
-    requestAnimationFrame(() => window.print());
+      const receiptHeightPx = Math.ceil(printRoot.getBoundingClientRect().height);
+      const receiptHeightMm = Math.max(20, (receiptHeightPx * 25.4) / 96);
+      const pageStyle = printWindow.document.createElement('style');
+      pageStyle.textContent =
+        '@page { size: 80mm ' + receiptHeightMm.toFixed(2) + 'mm; margin: 0; }';
+      printWindow.document.head.appendChild(pageStyle);
+      printWindow.focus();
+      printWindow.print();
+    }, 150);
   };
 
   return (
@@ -139,7 +147,6 @@ export default function ReceiptModal({
                 {[businessAddress, businessPhone].filter(Boolean).join(' · ')}
               </p>
             )}
-            <p className="text-xs text-muted-foreground">Offline receipt copy</p>
             <p className="text-xs font-mono text-muted-foreground mt-1">{sale.transactionId}</p>
           </div>
 
@@ -166,57 +173,43 @@ export default function ReceiptModal({
           </div>
 
           {/* Items */}
-          <div className="px-6 py-3 border-b border-dashed border-border">
+          <div className="px-4 py-3 border-b border-dashed border-border">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
               Items Sold
             </p>
-            <div className="space-y-2">
-              {sale.items.map((item) => (
-                <div key={`receipt-${item.id}`} className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground leading-tight">{item.name}</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {item.batchLot} | Exp: {item.expiryDate}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {item.quantity} x {formatMoney(item.unitPrice, currency)}
-                      {item.discount > 0 ? ` (${item.discount}% off)` : ''}
-                    </p>
-                    {(item.discount > 0 || (item.taxApplicable && Number(item.taxRate) > 0)) && (
-                      <div className="mt-1 space-y-0.5">
-                        {item.discount > 0 && (
-                          <p className="text-[10px] text-success">
-                            Discount: -
-                            {formatMoney(
-                              item.discountAmount ??
-                                item.unitPrice * item.quantity * (item.discount / 100),
-                              currency
-                            )}
-                          </p>
-                        )}
-                        {item.taxApplicable && Number(item.taxRate) > 0 && (
-                          <p className="text-[10px] text-primary">
-                            VAT {item.taxRate}% {item.taxMode ?? 'exclusive'}:{' '}
-                            {formatMoney(
-                              item.taxAmount ??
-                                item.unitPrice *
-                                  item.quantity *
-                                  ((Number(item.taxRate) || 0) / 100),
-                              currency
-                            )}
-                          </p>
-                        )}
-                      </div>
-                    )}
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] gap-x-2 border-b border-border pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span>Description</span>
+              <span className="text-right">Qty</span>
+              <span className="text-right">Price</span>
+              <span className="text-right">Total</span>
+            </div>
+            <div className="mt-2 space-y-2">
+              {sale.items.map((item) => {
+                const lineTotal = item.unitPrice * item.quantity * (1 - item.discount / 100);
+
+                return (
+                  <div
+                    key={`receipt-${item.id}`}
+                    className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto] items-start gap-x-2 text-[10px]"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium leading-tight text-foreground break-words">
+                        {item.name}
+                      </p>
+                      {item.discount > 0 && (
+                        <p className="mt-0.5 text-[9px] text-success">{item.discount}% discount</p>
+                      )}
+                    </div>
+                    <span className="text-right font-tabular text-foreground">{item.quantity}</span>
+                    <span className="text-right font-tabular text-foreground">
+                      {formatMoney(item.unitPrice, currency)}
+                    </span>
+                    <span className="text-right font-semibold font-tabular text-foreground">
+                      {formatMoney(lineTotal, currency)}
+                    </span>
                   </div>
-                  <span className="text-xs font-semibold font-tabular text-foreground shrink-0">
-                    {formatMoney(
-                      item.unitPrice * item.quantity * (1 - item.discount / 100),
-                      currency
-                    )}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -302,10 +295,6 @@ export default function ReceiptModal({
             <p className="text-[10px] text-muted-foreground mt-0.5">
               Keep this receipt for returns and reconciliation
             </p>
-            <div className="mt-2 flex justify-center">
-              <div className="bg-foreground h-8 w-40 rounded-sm opacity-10" />
-            </div>
-            <p className="text-[9px] font-mono text-muted-foreground mt-1">{sale.transactionId}</p>
           </div>
         </div>
 
