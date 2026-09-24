@@ -52,7 +52,14 @@ public static class TovaRawPrinter {
   if (-not [TovaRawPrinter]::Send($printerName, $payload)) { throw 'Windows printer rejected the raw receipt.' }
 }
 
-function Default-Printer { (Get-Printer | Where-Object Default -eq $true | Select-Object -First 1).Name }
+function Default-Printer {
+   = @(Get-Printer)
+   =  | Where-Object { ].Name -match 'bXprinterb|bXP[- ]' } | Select-Object -First 1
+  if () { return .Name }
+   =  | Where-Object Default -eq  | Select-Object -First 1
+  if () { return .Name }
+  return ( | Select-Object -First 1).Name
+}
 $listener = [Net.HttpListener]::new()
 $listener.Prefixes.Add("http://127.0.0.1:$port/")
 $listener.Start()
