@@ -52,15 +52,32 @@ export default function ReceiptModal({
 
     const printRoot = document.createElement('div');
     printRoot.className = 'receipt-print-root';
-    printRoot.appendChild(receiptPaper.cloneNode(true));
+    printRoot.style.cssText =
+      'display: block; position: fixed; left: -100000px; top: 0; width: 80mm; visibility: hidden;';
+
+    const printPaper = receiptPaper.cloneNode(true) as HTMLElement;
+    printPaper.style.width = '80mm';
+    printPaper.style.maxWidth = '80mm';
+    printPaper.style.border = '0';
+    printPaper.style.borderRadius = '0';
+    printPaper.style.overflow = 'visible';
+    printRoot.appendChild(printPaper);
     document.body.appendChild(printRoot);
+
+    const receiptHeightPx = Math.ceil(printRoot.getBoundingClientRect().height);
+    const receiptHeightMm = Math.max(20, (receiptHeightPx * 25.4) / 96);
+    const printPageStyle = document.createElement('style');
+    printPageStyle.textContent =
+      '@media print { @page { size: 80mm ' + receiptHeightMm.toFixed(2) + 'mm; } }';
+    document.head.appendChild(printPageStyle);
 
     const cleanup = () => {
       printRoot.remove();
+      printPageStyle.remove();
     };
 
     window.addEventListener('afterprint', cleanup, { once: true });
-    window.print();
+    requestAnimationFrame(() => window.print());
   };
 
   return (
@@ -119,9 +136,9 @@ export default function ReceiptModal({
               />
             )}
             <p className="text-base font-bold text-foreground">{businessName}</p>
-            {showBusinessDetails && (businessAddress || businessPhone || businessEmail) && (
+            {showBusinessDetails && (businessAddress || businessPhone) && (
               <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-                {[businessAddress, businessPhone, businessEmail].filter(Boolean).join(' · ')}
+                {[businessAddress, businessPhone].filter(Boolean).join(' · ')}
               </p>
             )}
             <p className="text-xs text-muted-foreground">Offline receipt copy</p>
