@@ -236,6 +236,7 @@ function SettingsPageContent() {
               <div className="grid grid-cols-1 gap-3 border-t border-border p-5 lg:grid-cols-3">
                 {planOptions.map((plan) => {
                   const active = (form.subscriptionPlanId ?? 'starter') === plan.id;
+                  const planPrice = billingCycle === 'yearly' && plan.monthlyPrice ? Math.round(plan.monthlyPrice * 12 * 0.95) : plan.monthlyPrice;
                   return (
                     <div
                       key={plan.id}
@@ -253,8 +254,8 @@ function SettingsPageContent() {
                         {active && <CheckCircle2 size={18} className="shrink-0 text-primary" />}
                       </div>
                       <p className="mt-3 text-sm font-bold">
-                        {plan.monthlyPrice
-                          ? `NGN ${plan.monthlyPrice.toLocaleString()} / month`
+                        {planPrice
+                          ? `NGN ${planPrice.toLocaleString()} / ${billingCycle === 'yearly' ? 'year' : 'month'}`
                           : 'Custom'}
                       </p>
                       <p className="mt-2 text-xs text-muted-foreground">
@@ -567,9 +568,27 @@ function SettingsPageContent() {
           </div>
 
           {true && (
-            <div className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card mb-6">
-              <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Printer size={16} className="text-primary" /><span className="text-sm font-semibold">Receipt Printer</span></div>
-                <div><p className="text-sm font-medium">Direct thermal printing</p><p className="mt-1 text-xs text-muted-foreground">Install the helper once on this cashier computer. It will start automatically after that.</p></div><div className="flex flex-wrap gap-2"><a href="/tovapos-printer-helper/TOVAPOS-Printer-Helper.ps1" download className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"><Printer size={14} /> Download helper</a><button type="button" onClick={startPrinter} disabled={startingPrinter} className="inline-flex items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground disabled:opacity-60">{startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}{startingPrinter ? "Checking..." : printerReady ? "Printer Ready" : "Check Printer"}</button></div></div>
+            <div className="scroll-mt-16 overflow-hidden rounded-xl border border-border bg-card shadow-card mb-6">
+              <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                <Printer size={16} className="shrink-0 text-primary" />
+                <span className="text-sm font-semibold">Receipt Printer</span>
+              </div>
+              <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">Direct thermal printing</p>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Install the helper once on this cashier computer. It will start automatically after that.</p>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:justify-end">
+                  <a href="/tovapos-printer-helper/TOVAPOS-Printer-Helper.ps1" download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90">
+                    <Printer size={14} /> Download helper
+                  </a>
+                  <button type="button" onClick={startPrinter} disabled={startingPrinter} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground transition hover:bg-muted disabled:opacity-60">
+                    {startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+                    {startingPrinter ? 'Checking...' : printerReady ? 'Printer Ready' : 'Check Printer'}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           <div
@@ -1120,12 +1139,11 @@ function TextListArea({
     <label className="space-y-1">
       <span className="text-xs text-muted-foreground">{label}</span>
       <textarea
-        value={value.join('\n')}
+        value={value.join("\n")}
         onChange={(e) =>
           onChange(
             e.target.value
-              .split('\n')
-              .map((item) => item.trim())
+              .split("\n")
               .filter(Boolean)
           )
         }
