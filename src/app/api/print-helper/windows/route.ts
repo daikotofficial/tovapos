@@ -12,7 +12,6 @@ export async function GET() {
     'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%helper%" -Install',
     'echo.',
     'echo TOVAPOS Printer Helper installed for this Windows user.',
-    'pause',
     '',
   ].join('\r\n');
   return new Response(batch, {

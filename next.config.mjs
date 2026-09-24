@@ -29,7 +29,7 @@ const nextConfig = {
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https://images.unsplash.com https://images.pexels.com https://images.pixabay.com https://img.rocket.new",
       "font-src 'self' data:",
-      "connect-src 'self'",
+      "connect-src 'self' http://127.0.0.1:4318 http://localhost:4318",
       "manifest-src 'self'",
       "worker-src 'self' blob:",
     ].join('; ');
