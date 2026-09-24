@@ -85,6 +85,8 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     packPrice: packPricingEnabledValue(item.packPricingEnabled, packPrice, packQuantity),
     packQuantity: packQuantity >= 1 ? Math.floor(packQuantity) : undefined,
     packUnit: item.packUnit === 'carton' ? 'carton' : 'pack',
+    skuAliases: Array.isArray(item.skuAliases) ? item.skuAliases : [],
+    barcodeAliases: Array.isArray(item.barcodeAliases) ? item.barcodeAliases : [],
     profitMargin: computeProfitMargin(unitCost, sellingPrice),
     discountType: item.discountType ?? 'none',
     discountValue: Number(item.discountValue) || 0,
@@ -111,6 +113,8 @@ export function findInventoryItemByScan(
     return (
       item.sku.toLowerCase() === code ||
       barcode === code ||
+      item.skuAliases?.some((alias) => alias.active && alias.code.toLowerCase() === code) ||
+      item.barcodeAliases?.some((alias) => alias.active && alias.code.toLowerCase() === code) ||
       item.name.toLowerCase() === code ||
       item.name.toLowerCase().includes(code)
     );

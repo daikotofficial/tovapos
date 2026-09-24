@@ -8,6 +8,7 @@ import AppLogo from '@/components/ui/AppLogo';
 import {
   ShoppingCart,
   Package,
+  Boxes,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -80,6 +81,15 @@ const navItems: NavItem[] = [
     group: 'Operations',
     permission: 'inventory',
     order: 2,
+  },
+  {
+    id: 'nav-stock-management',
+    label: 'Stock Management',
+    href: '/stock-management',
+    icon: Boxes,
+    group: 'Operations',
+    permission: 'adjust-stock',
+    order: 3,
   },
   {
     id: 'nav-reservations',

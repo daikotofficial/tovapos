@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Search, Plus, Trash2, Download, Filter } from 'lucide-react';
+import { Search, Trash2, Download, Filter } from 'lucide-react';
 import NiceSelect from '@/components/ui/NiceSelect';
 import type { InventoryItem } from '@/lib/pos/types';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
@@ -16,7 +16,6 @@ interface InventoryFiltersProps {
   supplierFilter: string;
   setSupplierFilter: (v: string) => void;
   items: InventoryItem[];
-  onAddProduct: () => void;
   onExport: () => void;
   selectedCount: number;
   onClearSelection: () => void;
@@ -55,7 +54,6 @@ export default function InventoryFilters({
   supplierFilter,
   setSupplierFilter,
   items,
-  onAddProduct,
   onExport,
   selectedCount,
   onClearSelection,
@@ -110,13 +108,6 @@ export default function InventoryFilters({
           >
             <Download size={12} />
             Export CSV
-          </button>
-          <button
-            onClick={onAddProduct}
-            className="flex min-h-9 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white transition-all duration-150 hover:bg-primary/90 active:scale-95"
-          >
-            <Plus size={12} />
-            Add Product
           </button>
         </div>
       </div>

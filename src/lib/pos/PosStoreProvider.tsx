@@ -112,6 +112,7 @@ interface PosStoreValue {
   hasPermission: (permission: Permission) => boolean;
   upsertInventoryItem: (item: InventoryItem) => Promise<InventoryItem>;
   deleteInventoryItem: (inventoryId: string) => Promise<void>;
+  applyInventorySnapshot: (item: InventoryItem, movement?: StockMovement) => Promise<void>;
   upsertUser: (user: TovaUser) => Promise<TovaUser>;
   deleteUser: (userId: string) => Promise<void>;
   upsertCustomer: (customer: Customer) => Promise<Customer>;
@@ -1166,6 +1167,14 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     [currentUser?.name, hasPermission, inventory, isOnline, settings]
   );
 
+  const applyInventorySnapshot = useCallback(async (item: InventoryItem, movement?: StockMovement) => {
+    const normalized = normalizeInventoryItem(item);
+    await cacheInventoryLocally([normalized]);
+    if (movement) await cacheStockMovementsLocally([movement]);
+    setInventory((prev) => sortInventory([...prev.filter((entry) => entry.id !== normalized.id), normalized]));
+    if (movement) setStockMovements((prev) => [movement, ...prev.filter((entry) => entry.id !== movement.id)]);
+  }, []);
+
   const deleteInventoryItem = useCallback(
     async (inventoryId: string) => {
       const allowedRoles: UserRole[] = ['owner', 'super-admin', 'manager'];
@@ -2076,6 +2085,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       hasPermission,
       upsertInventoryItem,
       deleteInventoryItem,
+      applyInventorySnapshot,
       upsertUser,
       deleteUser,
       upsertCustomer,
@@ -2117,6 +2127,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       hasPermission,
       upsertInventoryItem,
       deleteInventoryItem,
+      applyInventorySnapshot,
       upsertUser,
       deleteUser,
       upsertCustomer,

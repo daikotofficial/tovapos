@@ -2,12 +2,39 @@ export type StockStatus = 'in-stock' | 'low' | 'critical' | 'out' | 'expiring-so
 
 export type ProductCategory = string;
 
+export interface InventoryCodeAlias {
+  code: string;
+  kind: 'sku' | 'barcode';
+  batchId: string;
+  active: boolean;
+  addedAt: string;
+  inactivatedAt?: string;
+}
+
+export interface StockBatch {
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  barcode?: string;
+  quantityReceived: number;
+  quantityRemaining: number;
+  unitCost: number;
+  sellingPrice: number;
+  expiryDate: string;
+  supplier?: string;
+  receivedAt: string;
+  status: 'active' | 'exhausted' | 'returned';
+}
+
 export interface InventoryItem {
   id: string;
   name: string;
   genericName: string;
   sku: string;
   barcode?: string;
+  skuAliases?: InventoryCodeAlias[];
+  barcodeAliases?: InventoryCodeAlias[];
   variantName?: string;
   description?: string;
   category: ProductCategory;
@@ -121,7 +148,7 @@ export interface StockMovement {
   sku: string;
   barcode?: string;
   batchLot: string;
-  type: 'sale' | 'restock' | 'adjustment' | 'refund' | 'sync-correction';
+  type: 'sale' | 'restock' | 'receive' | 'return' | 'adjustment' | 'refund' | 'sync-correction';
   quantityDelta: number;
   quantityBefore: number;
   quantityAfter: number;
@@ -130,6 +157,9 @@ export interface StockMovement {
   referenceId: string;
   referenceLabel: string;
   reason: string;
+  batchId?: string;
+  valueBefore?: number;
+  valueAfter?: number;
   createdAt: string;
   createdBy: string;
   syncStatus: 'pending' | 'synced' | 'failed';

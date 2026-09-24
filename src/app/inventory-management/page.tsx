@@ -7,7 +7,7 @@ export default function InventoryManagementPage() {
   return (
     <AppLayout
       title="Inventory Management"
-      subtitle="Add products, stock levels, pricing, barcode/SKU, variants, and vendors"
+      subtitle="Browse products, stock levels, pricing, barcode/SKU, variants, and vendors"
     >
       <PermissionGate permission="inventory">
         <InventoryScreen />

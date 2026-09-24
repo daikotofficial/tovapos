@@ -270,11 +270,6 @@ export default function InventoryScreen() {
         supplierFilter={supplierFilter}
         setSupplierFilter={setSupplierFilter}
         items={items}
-        onAddProduct={() => {
-          if (!hasPermission('add-product')) return;
-          setEditItem(null);
-          setShowAddModal(true);
-        }}
         onExport={exportInventory}
         selectedCount={selectedIds.size}
         onClearSelection={() => setSelectedIds(new Set())}
@@ -298,11 +293,6 @@ export default function InventoryScreen() {
           setShowAddModal(true);
         }}
         onViewBatch={(item) => setDrawerItem(item)}
-        onAddProduct={() => {
-          if (!hasPermission('add-product')) return;
-          setEditItem(null);
-          setShowAddModal(true);
-        }}
         page={page}
         totalPages={totalPages}
         perPage={perPage}

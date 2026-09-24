@@ -891,6 +891,15 @@ export async function saveInventoryItems(items: InventoryItem[]): Promise<void> 
 }
 
 export async function loadStockMovements(): Promise<StockMovement[]> {
+  if (shouldUsePostgresStore()) {
+    try {
+      const movements = await apiRequest<StockMovement[]>('stockMovements', undefined, { limit: 1000 });
+      void putManyInBrowser('stockMovements', movements).catch(() => undefined);
+      return movements.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
+  }
   const movements = await getAll<StockMovement>('stockMovements');
   return movements.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }

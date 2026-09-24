@@ -561,6 +561,8 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
         AND (
           lower(sku) = lower($2)
           OR lower(coalesce(barcode, '')) = lower($2)
+          OR data->'skuAliases' @> jsonb_build_array(jsonb_build_object('code', $2, 'active', true))
+          OR data->'barcodeAliases' @> jsonb_build_array(jsonb_build_object('code', $2, 'active', true))
           OR lower(name) = lower($2)
           OR lower(name) LIKE '%' || lower($2) || '%'
         )
@@ -568,6 +570,8 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
         CASE
           WHEN lower(sku) = lower($2) THEN 0
           WHEN lower(coalesce(barcode, '')) = lower($2) THEN 1
+          WHEN data->'skuAliases' @> jsonb_build_array(jsonb_build_object('code', $2, 'active', true)) THEN 1
+          WHEN data->'barcodeAliases' @> jsonb_build_array(jsonb_build_object('code', $2, 'active', true)) THEN 1
           WHEN lower(name) = lower($2) THEN 2
           ELSE 3
         END,

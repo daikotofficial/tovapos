@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   ShieldAlert,
   FileText,
-  Plus,
 } from 'lucide-react';
 import Badge from '@/components/ui/Badge';
 import NiceSelect from '@/components/ui/NiceSelect';
@@ -29,7 +28,6 @@ interface InventoryTableProps {
   onToggleSelectAll: () => void;
   onEdit: (item: InventoryItem) => void;
   onViewBatch: (item: InventoryItem) => void;
-  onAddProduct: () => void;
   page: number;
   totalPages: number;
   perPage: number;
@@ -93,7 +91,6 @@ export default function InventoryTable({
   onToggleSelectAll,
   onEdit,
   onViewBatch,
-  onAddProduct,
   page,
   totalPages,
   perPage,
@@ -157,14 +154,6 @@ export default function InventoryTable({
                         Add the first product, or adjust the current filters.
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={onAddProduct}
-                      className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-primary/90"
-                    >
-                      <Plus size={13} />
-                      Add Product
-                    </button>
                   </div>
                 </td>
               </tr>

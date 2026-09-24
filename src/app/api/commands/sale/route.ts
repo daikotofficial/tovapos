@@ -276,7 +276,9 @@ export async function POST(request: NextRequest) {
           expiryDate: row.expiry_date ? String(row.expiry_date).slice(0, 10) : '',
           quantity: requested.quantity,
           unitPrice: requested.unitPrice,
-          unitCost: Number(row.unit_cost),
+          unitCost: Number(row.unit_cost) * unitsPerSale,
+          saleUnit: requested.saleUnit,
+          unitsPerSale,
           discount: requested.discount,
           lineTotal: calculated.lineTotal,
           discountAmount: calculated.discountAmount,
@@ -289,6 +291,40 @@ export async function POST(request: NextRequest) {
           category: row.category,
         };
       });
+
+      // Consume receipt batches FIFO. Historical batches stay in the ledger; aliases are
+      // only deactivated once the stock belonging to their batch is exhausted.
+      for (const updated of updatedInventory) {
+        const requested = items.find((item) => item.inventoryItemId === updated.id);
+        if (!requested) continue;
+        const unitsPerSale = requested.saleUnit === 'piece' ? 1 : Math.max(1, Number(updated.packQuantity) || 1);
+        let remainingToAllocate = requested.quantity * unitsPerSale;
+        const batchRows = await client.query(
+          `SELECT record_id, data FROM pos_tenant_records
+           WHERE tenant_id = $1 AND store_name = 'stockBatches'
+             AND data->>'productId' = $2 AND data->>'status' = 'active'
+             AND coalesce((data->>'quantityRemaining')::numeric, 0) > 0
+           ORDER BY data->>'receivedAt' ASC, record_id ASC FOR UPDATE`,
+          [auth.tenantId, updated.id]
+        );
+        for (const batchRow of batchRows.rows) {
+          if (remainingToAllocate <= 0) break;
+          const batch = batchRow.data as { id: string; quantityRemaining: number; status: string };
+          const allocated = Math.min(remainingToAllocate, Number(batch.quantityRemaining));
+          const nextRemaining = Number(batch.quantityRemaining) - allocated;
+          const nextBatch = { ...batch, quantityRemaining: nextRemaining, status: nextRemaining === 0 ? 'exhausted' : 'active' };
+          await client.query(
+            `UPDATE pos_tenant_records SET data = $3::jsonb, version = version + 1, updated_at = now()
+             WHERE tenant_id = $1 AND store_name = 'stockBatches' AND record_id = $2`,
+            [auth.tenantId, batchRow.record_id, JSON.stringify({ ...batchRow.data, ...nextBatch })]
+          );
+          if (nextRemaining === 0) {
+            updated.skuAliases = (updated.skuAliases ?? []).map((alias) => alias.batchId === batch.id ? { ...alias, active: false, inactivatedAt: now } : alias);
+            updated.barcodeAliases = (updated.barcodeAliases ?? []).map((alias) => alias.batchId === batch.id ? { ...alias, active: false, inactivatedAt: now } : alias);
+          }
+          remainingToAllocate -= allocated;
+        }
+      }
 
       const taxable = money(subtotal - discountTotal);
       const grandTotal = money(taxable + taxAmount);
