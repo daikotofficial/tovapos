@@ -15,6 +15,7 @@ import { formatMoney } from '@/lib/pos/money';
 import { getProductDiscountPercent, money, resolveTaxRate } from '@/lib/pos/sale-calculations';
 import { loyaltyRedemption } from '@/lib/pos/loyalty';
 import { normalizeCustomerPhone } from '@/lib/pos/customer';
+import Modal from '@/components/ui/Modal';
 
 export interface CartItem {
   id: string;
@@ -68,6 +69,8 @@ export default function CheckoutScreen() {
   const [paymentBreakdown, setPaymentBreakdown] = useState<PaymentBreakdown>({ cash: 0, 'bank-transfer': 0 });
   const [showReceipt, setShowReceipt] = useState(false);
   const [showRefund, setShowRefund] = useState(false);
+  const [pendingPackProduct, setPendingPackProduct] = useState<InventoryItem | null>(null);
+  const [pendingSaleUnit, setPendingSaleUnit] = useState<SaleUnit>('piece');
   const [completedSale, setCompletedSale] = useState<SaleTransaction | null>(null);
   const [completedTaxLabel, setCompletedTaxLabel] = useState('0%');
   const [isScanning, setIsScanning] = useState(false);
@@ -216,7 +219,7 @@ export default function CheckoutScreen() {
   }, [isScanning, scanInput]);
 
   const handleScan = useCallback(
-    async (rawCode: string) => {
+    async (rawCode: string, selectedSaleUnit?: SaleUnit) => {
       globalScanBufferRef.current = '';
       if (!isHydrated) {
         toast.error('Inventory is still loading. Try again in a moment.');
@@ -239,7 +242,16 @@ export default function CheckoutScreen() {
         }
 
         const existingCartItem = cartRef.current.find((item) => item.inventoryItemId === product.id);
-        assertSellable(product, (existingCartItem?.quantity ?? 0) + 1);
+        if (hasPackPricing(product) && !selectedSaleUnit) {
+          setPendingPackProduct(product);
+          setPendingSaleUnit('piece');
+          setScanInput('');
+          setSearchSuggestions([]);
+          return;
+        }
+        const saleUnit = selectedSaleUnit ?? 'piece';
+        const unitsPerSale = getUnitsPerSale(product, saleUnit);
+        assertSellable(product, (existingCartItem?.quantity ?? 0) * (existingCartItem?.unitsPerSale ?? 1) + unitsPerSale);
 
         const daysUntilExpiry = getDaysUntilExpiry(product.expiryDate);
         if (daysUntilExpiry <= 30) {
@@ -270,7 +282,7 @@ export default function CheckoutScreen() {
           if (existing) {
             const next = prev.map((item) =>
               item.inventoryItemId === product.id
-                ? { ...item, quantity: item.quantity + 1, availableQty: product.currentQty }
+                ? { ...item, quantity: item.quantity + 1, saleUnit, unitsPerSale, unitPrice: getSaleUnitPrice(product, saleUnit), availableQty: product.currentQty }
                 : item
             );
             cartRef.current = next;
@@ -288,9 +300,9 @@ export default function CheckoutScreen() {
             batchLot: product.batchLot,
             expiryDate: product.expiryDate,
             quantity: 1,
-            unitPrice: getSaleUnitPrice(product, 'piece'),
-            saleUnit: 'piece',
-            unitsPerSale: 1,
+            unitPrice: getSaleUnitPrice(product, saleUnit),
+            saleUnit,
+            unitsPerSale,
             packUnit: hasPackPricing(product) ? product.packUnit : undefined,
             unitCost: product.unitCost,
             discount: rule ? customerDiscount : getProductDiscountPercent(product),
@@ -324,6 +336,13 @@ export default function CheckoutScreen() {
     [customers, customerName, isHydrated, settings.taxMode, settings.taxRate]
   );
 
+  const confirmPackSelection = () => {
+    if (!pendingPackProduct) return;
+    const product = pendingPackProduct;
+    setPendingPackProduct(null);
+    void handleScan(product.barcode || product.sku || product.name, pendingSaleUnit);
+  };
+
   const queueScan = useCallback(
     (rawCode: string) => {
       const queued = scanQueueRef.current.catch(() => undefined).then(() => handleScan(rawCode));
@@ -335,7 +354,7 @@ export default function CheckoutScreen() {
 
   useEffect(() => {
     const captureScannerInput = (event: KeyboardEvent) => {
-      if (event.ctrlKey || event.metaKey || event.altKey || showReceipt || showRefund) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || showReceipt || showRefund || pendingPackProduct) return;
       const target = event.target as HTMLElement | null;
       const isEditable =
         target?.tagName === 'INPUT' ||
@@ -367,13 +386,13 @@ export default function CheckoutScreen() {
 
     window.addEventListener('keydown', captureScannerInput, true);
     return () => window.removeEventListener('keydown', captureScannerInput, true);
-  }, [queueScan, showReceipt, showRefund]);
+  }, [pendingPackProduct, queueScan, showReceipt, showRefund]);
 
   useEffect(() => {
-    if (isScanning || isProcessing || showReceipt || showRefund) return;
+    if (isScanning || isProcessing || showReceipt || showRefund || pendingPackProduct) return;
     const frame = window.requestAnimationFrame(() => scanRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [isProcessing, isScanning, showReceipt, showRefund]);
+  }, [isProcessing, isScanning, pendingPackProduct, showReceipt, showRefund]);
 
   const handleScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && scanInput.trim()) {
@@ -603,6 +622,30 @@ export default function CheckoutScreen() {
           amountToPay={amountToPay}
         />
       </div>
+
+      {pendingPackProduct && (
+        <Modal
+          open
+          onClose={() => setPendingPackProduct(null)}
+          title="Select quantity type"
+          subtitle={pendingPackProduct.name}
+          size="sm"
+          footer={
+            <>
+              <button type="button" onClick={() => setPendingPackProduct(null)} className="rounded-lg bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground">Cancel</button>
+              <button type="button" onClick={confirmPackSelection} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white">Add to cart</button>
+            </>
+          }
+        >
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-muted-foreground">Sell as</span>
+            <select value={pendingSaleUnit} onChange={(event) => setPendingSaleUnit(event.target.value as SaleUnit)} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm">
+              <option value="piece">Piece - {formatMoney(pendingPackProduct.sellingPrice, settings.currency)}</option>
+              <option value={pendingPackProduct.packUnit}>{pendingPackProduct.packUnit === "carton" ? "Carton" : "Pack"} - {formatMoney(pendingPackProduct.packPrice ?? 0, settings.currency)}</option>
+            </select>
+          </label>
+        </Modal>
+      )}
 
       {completedSale && (
         <ReceiptModal

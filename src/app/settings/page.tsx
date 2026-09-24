@@ -57,10 +57,10 @@ function SettingsPageContent() {
   const startPrinter = async () => {
     setStartingPrinter(true);
     try {
-      const response = await fetch('/api/print-agent', { method: 'POST' });
-      const result = (await response.json()) as { running?: boolean; error?: string };
-      if (!response.ok) throw new Error(result.error || 'Printer service could not start.');
-      setPrinterReady(Boolean(result.running));
+      const response = await fetch('http://127.0.0.1:4318/health');
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) throw new Error(result?.error || 'Printer helper is not installed or running.');
+      setPrinterReady(true);
       toast.success('Receipt printer is ready.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Printer service could not start.');
@@ -566,11 +566,10 @@ function SettingsPageContent() {
             </div>
           </div>
 
-          {isOnPremise && (
+          {true && (
             <div className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card mb-6">
               <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Printer size={16} className="text-primary" /><span className="text-sm font-semibold">Receipt Printer</span></div>
-              <div className="p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">Direct thermal printing</p><p className="mt-1 text-xs text-muted-foreground">The printer service starts automatically with TOVAPOS.</p></div><button type="button" onClick={startPrinter} disabled={startingPrinter} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}{startingPrinter ? 'Starting...' : printerReady ? 'Printer Ready' : 'Start / Check Printer'}</button></div>
-            </div>
+                <div><p className="text-sm font-medium">Direct thermal printing</p><p className="mt-1 text-xs text-muted-foreground">Install the helper once on this cashier computer. It will start automatically after that.</p></div><div className="flex flex-wrap gap-2"><a href="/tovapos-printer-helper/TOVAPOS-Printer-Helper.ps1" download className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"><Printer size={14} /> Download helper</a><button type="button" onClick={startPrinter} disabled={startingPrinter} className="inline-flex items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground disabled:opacity-60">{startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}{startingPrinter ? "Checking..." : printerReady ? "Printer Ready" : "Check Printer"}</button></div></div>
           )}
 
           <div
