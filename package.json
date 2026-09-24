@@ -49,6 +49,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
     "serve": "next start",
     "type-check": "tsc --noEmit",
+    "print-agent": "node scripts/print-agent.mjs",
     "test:security": "node scripts/verify-security.mjs",
     "backup:onprem": "node scripts/backup-onprem.mjs",
     "db:local:start": "/usr/lib/postgresql/16/bin/pg_ctl -D .pgdata -o \"-p 55432 -k /home/motherrepo/projects/TOVAPOS/tovapos/.pgdata\" -l .pgdata/postgres.log start",

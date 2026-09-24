@@ -57,3 +57,6 @@ Filename: "http://127.0.0.1:4028"; Description: "Open TOVAPOS"; Flags: postinsta
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Stop-Service TOVAPOSPostgreSQL -ErrorAction SilentlyContinue"""; Flags: runhidden; RunOnceId: "StopTOVAPOSPostgreSQL"
+
+[Registry]
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "TOVAPOS"; ValueData: "{app}\TOVAPOS-Start.cmd"; Flags: uninsdeletevalue

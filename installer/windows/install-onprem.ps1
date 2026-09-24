@@ -9,6 +9,7 @@ $Postgres = Join-Path $InstallRoot 'postgresql'
 $Data = Join-Path $InstallRoot 'data'
 $Backups = Join-Path $InstallRoot 'backups'
 $Port = 4028
+$PrintAgent = Join-Path $AppRoot 'print-agent.mjs'
 $DbPort = 55433
 $DbName = 'tovapos_local'
 $DbUser = 'tovapos_app'
@@ -127,5 +128,14 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {
   Start-Sleep -Seconds 1
 }
 if (-not $appReady) { throw "The TOVAPOS server did not become ready. Check $serverErrorLog for details." }
+
+if (Test-Path $PrintAgent) {
+  try {
+    $printReady = (Invoke-WebRequest -Uri "http://127.0.0.1:4318/health" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200
+  } catch { $printReady = $false }
+  if (-not $printReady) {
+    Start-Process -FilePath (Join-Path $Runtime "node.exe") -ArgumentList @($PrintAgent) -WorkingDirectory $AppRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Data "printer.log") -RedirectStandardError (Join-Path $Data "printer-error.log") | Out-Null
+  }
+}
 
 Write-Host "TOVAPOS installed and ready. Open http://127.0.0.1:$Port or the server LAN IP from cashier computers."

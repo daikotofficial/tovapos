@@ -23,6 +23,7 @@ await cp(path.join(root, '.next', 'static'), path.join(output, '.next', 'static'
   recursive: true,
 });
 await cp(path.join(root, 'public'), path.join(output, 'public'), { recursive: true });
+await cp(path.join(root, 'scripts', 'print-agent.mjs'), path.join(output, 'print-agent.mjs'));
 await cp(path.join(root, '.env.onprem.example'), path.join(output, '.env.example'));
 
 const readme = `# TOVAPOS on-premise package

@@ -10,6 +10,7 @@ import {
   KeyRound,
   Loader2,
   Palette,
+  Printer,
   Receipt,
   Save,
   Settings,
@@ -46,11 +47,25 @@ function SettingsPageContent() {
   const [saved, setSaved] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [payingPlan, setPayingPlan] = useState<SubscriptionPlanId | null>(null);
+  const [printerReady, setPrinterReady] = useState(false);
+  const [startingPrinter, setStartingPrinter] = useState(false);
   const searchParams = useSearchParams();
   const isHospitality = settings.businessMode === 'hospitality';
   const isOnPremise = isOnPremiseDeployment();
   const productUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
   const planOptions = Object.values(subscriptionPlans);
+  const startPrinter = async () => {
+    setStartingPrinter(true);
+    try {
+      const response = await fetch('/api/print-agent', { method: 'POST' });
+      const result = (await response.json()) as { running?: boolean; error?: string };
+      if (!response.ok) throw new Error(result.error || 'Printer service could not start.');
+      setPrinterReady(Boolean(result.running));
+      toast.success('Receipt printer is ready.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Printer service could not start.');
+    } finally { setStartingPrinter(false); }
+  };
 
   useEffect(() => {
     setForm(settings);
@@ -550,6 +565,13 @@ function SettingsPageContent() {
               </div>
             </div>
           </div>
+
+          {isOnPremise && (
+            <div className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card mb-6">
+              <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Printer size={16} className="text-primary" /><span className="text-sm font-semibold">Receipt Printer</span></div>
+              <div className="p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">Direct thermal printing</p><p className="mt-1 text-xs text-muted-foreground">The printer service starts automatically with TOVAPOS.</p></div><button type="button" onClick={startPrinter} disabled={startingPrinter} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}{startingPrinter ? 'Starting...' : printerReady ? 'Printer Ready' : 'Start / Check Printer'}</button></div>
+            </div>
+          )}
 
           <div
             id="tax-types"

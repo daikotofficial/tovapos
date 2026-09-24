@@ -49,8 +49,13 @@ export default function ReceiptModal({
       return;
     }
 
-    document.querySelectorAll('.receipt-print-root').forEach((node) => node.remove());
-    document.getElementById('receipt-print-page-style')?.remove();
+    const cleanup = () => {
+      document.querySelectorAll('.receipt-print-root').forEach((node) => node.remove());
+      document.getElementById('receipt-print-page-style')?.remove();
+      window.removeEventListener('afterprint', cleanup);
+    };
+
+    cleanup();
 
     const printRoot = document.createElement('div');
     printRoot.className = 'receipt-print-root';
@@ -60,27 +65,21 @@ export default function ReceiptModal({
     document.body.appendChild(printRoot);
 
     await document.fonts.ready;
-    const receiptHeightPx = Math.ceil(
-      Math.max(
-        printRoot.scrollHeight,
-        printRoot.getBoundingClientRect().height,
-        printRoot.firstElementChild?.scrollHeight ?? 0
-      ) + 2
-    );
-    const receiptHeightMm = Math.max(10, (receiptHeightPx * 25.4) / 96 + 1);
     const pageStyle = document.createElement('style');
     pageStyle.id = 'receipt-print-page-style';
-    pageStyle.textContent =
-      '@media print { @page { size: 80mm ' +
-      receiptHeightMm.toFixed(2) +
-      'mm; margin: 0; } html, body { width: 80mm !important; height: ' +
-      receiptHeightPx +
-      'px !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; } body > * { display: none !important; } body > .receipt-print-root { display: block !important; width: 80mm !important; height: ' +
-      receiptHeightPx +
-      'px !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; left: 0 !important; top: 0 !important; visibility: visible !important; } .receipt-print-root .receipt-paper { display: block !important; width: 80mm !important; max-width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; border: 0 !important; box-shadow: none !important; color: #000 !important; background: #fff !important; font-family: Arial, Helvetica, sans-serif !important; font-size: 11px !important; line-height: 1.25 !important; } .receipt-print-root .receipt-paper * { color: #000 !important; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }';
+    pageStyle.textContent = '@media print { @page { size: 80mm auto; margin: 0 !important; } html, body { width: 80mm !important; min-width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; } body > * { display: none !important; } body > .receipt-print-root { display: block !important; width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; left: 0 !important; top: 0 !important; visibility: visible !important; } .receipt-print-root .receipt-paper { display: block !important; width: 80mm !important; max-width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; color: #000 !important; background: #fff !important; font-family: Arial, Helvetica, sans-serif !important; font-size: 11px !important; line-height: 1.25 !important; } .receipt-print-root .receipt-paper * { color: #000 !important; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }';
     document.head.appendChild(pageStyle);
 
+    window.addEventListener('afterprint', cleanup, { once: true });
     window.print();
+  };
+
+  const handleDirectPrint = async () => {
+    const payload = { businessName, businessAddress, businessPhone, transactionId: sale.transactionId, timestamp: sale.timestamp, cashier: sale.cashier, paymentMethod: sale.paymentMethod, customerName: sale.customerName, items: sale.items, subtotal: sale.subtotal, discountTotal: sale.discountTotal, taxAmount: sale.taxAmount, taxLabel, grandTotal: sale.grandTotal, amountPaid: sale.amountPaid, cashTendered: sale.cashTendered, changeGiven: sale.changeGiven, footer: receiptFooter };
+    try {
+      const response = await fetch('http://127.0.0.1:4318/print', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (!response.ok) throw new Error('Local print bridge failed');
+    } catch { await handlePrint(); }
   };
 
   return (
@@ -100,11 +99,11 @@ export default function ReceiptModal({
             Close
           </button>
           <button
-            onClick={handlePrint}
+            onClick={handleDirectPrint}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 active:scale-95 transition-all duration-150"
           >
             <Printer size={14} />
-            Print Receipt
+            Print Directly
           </button>
         </>
       }

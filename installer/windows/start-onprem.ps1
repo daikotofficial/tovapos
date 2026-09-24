@@ -7,6 +7,8 @@ $AppRoot = Join-Path $InstallRoot 'app'
 $Runtime = Join-Path $InstallRoot 'runtime'
 $Data = Join-Path $InstallRoot 'data'
 $Port = 4028
+$PrintAgent = Join-Path $AppRoot 'print-agent.mjs'
+$node = Join-Path $Runtime "node.exe"
 
 $service = Get-Service -Name TOVAPOSPostgreSQL -ErrorAction SilentlyContinue
 if (-not $service) {
@@ -42,5 +44,10 @@ if (-not $ready) {
   throw "TOVAPOS could not start. Check $(Join-Path $Data 'server-error.log')."
 }
 
+if (Test-Path $PrintAgent) {
+  $printReady = $false
+  try { $printReady = (Invoke-WebRequest -Uri 'http://127.0.0.1:4318/health' -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200 } catch { }
+  if (-not $printReady) { Start-Process -FilePath $node -ArgumentList @($PrintAgent) -WorkingDirectory $AppRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $Data 'printer.log') -RedirectStandardError (Join-Path $Data 'printer-error.log') | Out-Null }
+}
 Start-Process "http://127.0.0.1:$Port"
 
