@@ -50,10 +50,13 @@ export default function ReceiptModal({
       return;
     }
 
+    document.querySelectorAll('.receipt-print-root').forEach((node) => node.remove());
+    document.getElementById('receipt-print-page-style')?.remove();
+
     const printRoot = document.createElement('div');
     printRoot.className = 'receipt-print-root';
     printRoot.style.cssText =
-      'display: block; position: fixed; left: -100000px; top: 0; width: 80mm; visibility: hidden;';
+      'display: block; position: fixed; left: -100000px; top: 0; width: 80mm; visibility: visible;';
 
     const printPaper = receiptPaper.cloneNode(true) as HTMLElement;
     printPaper.style.width = '80mm';
@@ -67,16 +70,11 @@ export default function ReceiptModal({
     const receiptHeightPx = Math.ceil(printRoot.getBoundingClientRect().height);
     const receiptHeightMm = Math.max(20, (receiptHeightPx * 25.4) / 96);
     const printPageStyle = document.createElement('style');
+    printPageStyle.id = 'receipt-print-page-style';
     printPageStyle.textContent =
       '@media print { @page { size: 80mm ' + receiptHeightMm.toFixed(2) + 'mm; } }';
     document.head.appendChild(printPageStyle);
 
-    const cleanup = () => {
-      printRoot.remove();
-      printPageStyle.remove();
-    };
-
-    window.addEventListener('afterprint', cleanup, { once: true });
     requestAnimationFrame(() => window.print());
   };
 
