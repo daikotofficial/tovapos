@@ -82,9 +82,36 @@ while ($listener.IsListening) {
     $receipt = $reader.ReadToEnd() | ConvertFrom-Json
     $printer = if ($receipt.printerName) { $receipt.printerName } else { Default-Printer }
     if (-not $printer) { throw 'No default printer found.' }
-    $lines = @('TOVAPOS', $receipt.businessName, $receipt.transactionId, $receipt.timestamp, ('Cashier: ' + $receipt.cashier), ('Payment: ' + $receipt.paymentMethod), ('-' * 48))
-    $footer = if ($receipt.footer) { $receipt.footer } else { 'Thank you.' }
-    $lines += ('-' * 48), ('Subtotal: ' + ([decimal]$receipt.subtotal).ToString('0.00')), ('Tax: ' + ([decimal]$receipt.taxAmount).ToString('0.00')), ('TOTAL: ' + ([decimal]$receipt.grandTotal).ToString('0.00')), '', $footer
+    $width = 48
+    $lines = @()
+    $money = { param($value) if ($null -eq $value) { return '0.00' }; return ([decimal]$value).ToString('N2', [Globalization.CultureInfo]::InvariantCulture) }
+    $center = { param($value, [ref]$target); $text = [string]$value; if ($text.Length -gt $width) { $text = $text.Substring(0, $width) }; $target.Value += (' ' * [Math]::Max(0, [int](($width - $text.Length) / 2))) + $text }
+    & $center 'TOVAPOS' ([ref]$lines)
+    & $center $receipt.businessName ([ref]$lines)
+    if ($receipt.businessAddress) { & $center $receipt.businessAddress ([ref]$lines) }
+    if ($receipt.businessPhone) { & $center $receipt.businessPhone ([ref]$lines) }
+    & $center $receipt.transactionId ([ref]$lines)
+    $lines += ('-' * $width)
+    $lines += ('Date'.PadRight(12) + ([string]$receipt.timestamp))
+    $lines += ('Cashier'.PadRight(12) + ([string]$receipt.cashier))
+    if ($receipt.customerName) { $lines += ('Customer'.PadRight(12) + ([string]$receipt.customerName)) }
+    $lines += ('Payment'.PadRight(12) + ([string]$receipt.paymentMethod).ToUpperInvariant())
+    $lines += ('-' * $width)
+    $lines += ('Description'.PadRight(24) + 'Qty'.PadLeft(5) + 'Price'.PadLeft(9) + 'Total'.PadLeft(10))
+    $lines += ('-' * $width)
+    foreach ($item in $receipt.items) {
+    $name = [string]$item.name; $unit = if ($item.saleUnit -and $item.saleUnit -ne 'piece') { ' (' + $item.saleUnit + ')' } else { '' }; $name = $name + $unit; $qty = [string]$item.quantity; $price = & $money $item.unitPrice; $total = & $money ([decimal]$item.unitPrice * [decimal]$item.quantity * (1 - ([decimal]$item.discount / 100)));
+    $first = $true; while ($name.Length -gt 0) { $part = if ($name.Length -gt 24) { $name.Substring(0,24) } else { $name }; $name = if ($name.Length -gt 24) { $name.Substring(24).TrimStart() } else { '' }; if ($first) { $lines += $part.PadRight(24) + $qty.PadLeft(5) + $price.PadLeft(9) + $total.PadLeft(10); $first = $false } else { $lines += $part }; }
+    $lines += ('-' * $width)
+    }
+    $lines += ('Subtotal'.PadRight(38) + (& $money $receipt.subtotal).PadLeft(10))
+    if ([decimal]$receipt.discountTotal -gt 0) { $lines += ('Discount'.PadRight(38) + ('-' + (& $money $receipt.discountTotal)).PadLeft(10)) }
+    $taxLabel = if ($receipt.taxLabel) { $receipt.taxLabel } else { 'VAT' }; $lines += (('Tax (' + $taxLabel + ')').PadRight(38) + (& $money $receipt.taxAmount).PadLeft(10))
+    $lines += ('AMOUNT PAID'.PadRight(38) + (& $money $receipt.amountPaid).PadLeft(10))
+    if ($receipt.paymentMethod -eq 'cash') { $lines += ('Cash Tendered'.PadRight(38) + (& $money $receipt.cashTendered).PadLeft(10)); $lines += ('Change'.PadRight(38) + (& $money $receipt.changeGiven).PadLeft(10)) }
+    $lines += ('-' * $width)
+    $footer = if ($receipt.footer) { [string]$receipt.footer } else { 'Thank you for shopping with us.' }; foreach ($footerLine in ($footer -split '\r?\n')) { & $center $footerLine ([ref]$lines) }
+    $lines += '', ''
     Send-RawReceipt $printer ($lines -join [Environment]::NewLine)
     Send-Json $context 200 @{ ok = $true; printer = $printer }
   } catch { Send-Json $context 500 @{ ok = $false; error = $_.Exception.Message } }
