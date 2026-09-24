@@ -64,7 +64,10 @@ export async function GET(request: NextRequest) {
     const auth = await authorize(request);
     const productId = text(request.nextUrl.searchParams.get('productId'));
     if (!productId) throw new HttpError(400, 'Product is required', 'VALIDATION_ERROR');
-    return NextResponse.json({ batches: await loadBatches(auth.tenantId, productId) });
+    const batches = await loadBatches(auth.tenantId, productId);
+    const movementResult = await getPosPool().query(`SELECT data FROM pos_tenant_records WHERE tenant_id = $1 AND store_name = 'stockMovements' AND data->>'inventoryItemId' = $2 ORDER BY data->>'createdAt' DESC`, [auth.tenantId, productId]);
+    const auditResult = await getPosPool().query(`SELECT id, action, entity_id AS \"entityId\", metadata, created_at AS \"createdAt\", user_id AS \"userId\" FROM pos_audit_log WHERE tenant_id = $1 AND entity_type = 'inventory' AND entity_id = $2 ORDER BY created_at DESC, id DESC`, [auth.tenantId, productId]);
+    return NextResponse.json({ batches, movements: movementResult.rows.map((row) => row.data), audits: auditResult.rows });
   } catch (error) { return errorResponse(error); }
 }
 
@@ -95,6 +98,7 @@ export async function POST(request: NextRequest) {
       let batch: StockBatch;
       let quantityDelta: number;
       let reason: string;
+      const notes = text(body.notes);
 
       if (action === 'receive') {
         const quantity = positive(body.quantity, 'Quantity received');
@@ -117,7 +121,7 @@ export async function POST(request: NextRequest) {
           if (activeCodes.has(code.toLowerCase())) throw new HttpError(409, `SKU/barcode ${code} is already active on another product`, 'DUPLICATE_CODE');
         }
         const batchId = `batch-${randomUUID()}`;
-        batch = { id: batchId, productId, productName: current.name, sku, barcode, quantityReceived: quantity, quantityRemaining: quantity, unitCost, sellingPrice, expiryDate, supplier: text(body.supplier) || current.supplier, receivedAt: now, status: 'active' };
+        batch = { id: batchId, productId, productName: current.name, sku, barcode, quantityReceived: quantity, quantityRemaining: quantity, unitCost, sellingPrice, expiryDate, supplier: text(body.supplier) || current.supplier, supplierPhone: text(body.supplierPhone) || current.supplierPhone, invoiceNumber: text(body.invoiceNumber), receivedAt: now, status: 'active' };
         const weightedCost = (beforeValue + quantity * unitCost) / (beforeQty + quantity);
         const skuAliases = [...currentSkuAliases.filter((alias) => alias.code.toLowerCase() !== sku.toLowerCase()), ...(sku === current.sku ? [] : [{ code: sku, kind: 'sku' as const, batchId, active: true, addedAt: now }])];
         const barcodeAliases = [...currentBarcodeAliases.filter((alias) => alias.code.toLowerCase() !== String(barcode || '').toLowerCase()), ...(barcode && barcode !== current.barcode ? [{ code: barcode, kind: 'barcode' as const, batchId, active: true, addedAt: now }] : [])];
@@ -143,7 +147,7 @@ export async function POST(request: NextRequest) {
       }
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockBatches', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, batch.id, JSON.stringify(batch)]);
       await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
-      const movement: StockMovement = { id: `move-${randomUUID()}`, operationId: `stock-${randomUUID()}`, inventoryItemId: productId, productName: current.name, sku: batch.sku, barcode: batch.barcode, batchLot: current.batchLot, type: action === 'receive' ? 'receive' : 'return', quantityDelta, quantityBefore: beforeQty, quantityAfter: updated.currentQty, unitCost: batch.unitCost, unitPrice: batch.sellingPrice, referenceId: batch.id, referenceLabel: action === 'receive' ? 'Stock receipt' : 'Supplier return', reason, batchId: batch.id, valueBefore: beforeValue, valueAfter: updated.currentQty * updated.unitCost, createdAt: now, createdBy: auth.user.name, syncStatus: 'synced' };
+      const movement: StockMovement = { id: `move-${randomUUID()}`, operationId: `stock-${randomUUID()}`, inventoryItemId: productId, productName: current.name, sku: batch.sku, barcode: batch.barcode, batchLot: current.batchLot, type: action === 'receive' ? 'receive' : 'return', quantityDelta, quantityBefore: beforeQty, quantityAfter: updated.currentQty, unitCost: batch.unitCost, unitPrice: batch.sellingPrice, referenceId: batch.id, referenceLabel: action === 'receive' ? 'Stock receipt' : 'Supplier return', reason: notes ? `${reason} — ${notes}` : reason, batchId: batch.id, supplier: batch.supplier, supplierPhone: batch.supplierPhone, invoiceNumber: batch.invoiceNumber, valueBefore: beforeValue, valueAfter: updated.currentQty * updated.unitCost, createdAt: now, createdBy: auth.user.name, syncStatus: 'synced' };
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockMovements', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, movement.id, JSON.stringify(movement)]);
       await client.query(`INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, metadata) VALUES ($1, $2, $3, 'inventory', $4, $5::jsonb)`, [auth.tenantId, auth.user.id, action === 'receive' ? 'stock.received' : 'stock.returned', productId, JSON.stringify({ beforeQty, afterQty: updated.currentQty, beforeValue, afterValue: updated.currentQty * updated.unitCost, batch, movement, notes: text(body.notes), sku: batch.sku, barcode: batch.barcode })]);
       await client.query('COMMIT');

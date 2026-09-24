@@ -151,6 +151,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         expiryDate: editItem.expiryDate,
         manufactureDate: editItem.manufactureDate || '',
         supplier: editItem.supplier || '',
+        supplierPhone: editItem.supplierPhone || '',
+        supplierInvoiceNumber: editItem.supplierInvoiceNumber || '',
         unitOfMeasurement: editItem.unitOfMeasurement ?? 'unit',
         imageUrl: editItem.imageUrl,
         productStatus: editItem.productStatus ?? 'active',
@@ -193,6 +195,9 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         manufactureDate: '',
         expiryDate: nextYear.toISOString().slice(0, 10),
         lastRestocked: today,
+        supplier: '',
+        supplierPhone: '',
+        supplierInvoiceNumber: '',
       });
     }
   }, [editItem, reset, open, settings.taxMode, settings.taxRate, settings.lowStockAlertDays]);
@@ -254,6 +259,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       barcode: data.barcode?.trim() || data.sku.trim(),
       batchLot: data.batchLot?.trim() || 'N/A',
       supplier: data.supplier?.trim() || 'Unassigned',
+      supplierPhone: data.supplierPhone?.trim() || undefined,
+      supplierInvoiceNumber: data.supplierInvoiceNumber?.trim() || undefined,
       manufactureDate: data.manufactureDate || '',
       expiryDate,
       currentQty: Number(data.currentQty) || 0,
@@ -570,6 +577,14 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 className={inputClass}
                 placeholder="Vendor or supplier name"
               />
+            </div>
+            <div>
+              <label className={labelClass}>Vendor Phone <span className="font-normal text-muted-foreground">(Optional)</span></label>
+              <input {...register('supplierPhone')} className={inputClass} placeholder="Phone number" inputMode="tel" />
+            </div>
+            <div>
+              <label className={labelClass}>Invoice Number <span className="font-normal text-muted-foreground">(Optional)</span></label>
+              <input {...register('supplierInvoiceNumber')} className={`${inputClass} font-mono`} placeholder="Supplier invoice/reference" />
             </div>
             <div>
               <label className={labelClass}>Manufacture Date</label>

@@ -23,6 +23,8 @@ export interface StockBatch {
   sellingPrice: number;
   expiryDate: string;
   supplier?: string;
+  supplierPhone?: string;
+  invoiceNumber?: string;
   receivedAt: string;
   status: 'active' | 'exhausted' | 'returned';
 }
@@ -58,6 +60,8 @@ export interface InventoryItem {
   expiryDate: string;
   manufactureDate: string;
   supplier: string;
+  supplierPhone?: string;
+  supplierInvoiceNumber?: string;
   unitOfMeasurement?: string;
   imageUrl?: string;
   productStatus?: 'active' | 'inactive';
@@ -158,6 +162,9 @@ export interface StockMovement {
   referenceLabel: string;
   reason: string;
   batchId?: string;
+  supplier?: string;
+  supplierPhone?: string;
+  invoiceNumber?: string;
   valueBefore?: number;
   valueAfter?: number;
   createdAt: string;
