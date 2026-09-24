@@ -8,6 +8,45 @@ import { formatMoney } from '@/lib/pos/money';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
 
+function buildThermalReceiptText(sale: SaleTransaction, currency: string, businessName: string, businessAddress: string | undefined, businessPhone: string | undefined, receiptFooter: string, taxLabel: string) {
+  const width = 48;
+  const money = (value: number) => formatMoney(Number(value) || 0, currency);
+  const lines: string[] = [];
+  const center = (value: string) => { const text = value.slice(0, width); lines.push(' '.repeat(Math.max(0, Math.floor((width - text.length) / 2))) + text); };
+  const row = (label: string, value: string) => lines.push(label.padEnd(width - value.length) + value);
+  center('TOVAPOS');
+  center(businessName);
+  if (businessAddress) center(businessAddress);
+  if (businessPhone) center(businessPhone);
+  center(sale.transactionId);
+  lines.push('-'.repeat(width));
+  row('Date', sale.timestamp);
+  row('Cashier', sale.cashier);
+  if (sale.customerName) row('Customer', sale.customerName);
+  row('Payment', sale.paymentMethod.toUpperCase());
+  lines.push('-'.repeat(width));
+  lines.push('Description'.padEnd(24) + 'Qty'.padStart(5) + 'Price'.padStart(9) + 'Total'.padStart(10));
+  lines.push('-'.repeat(width));
+  sale.items.forEach((item) => {
+    const unit = item.saleUnit && item.saleUnit !== 'piece' ? ` (${item.saleUnit})` : '';
+    const name = `${item.name}${unit}`;
+    const price = money(item.unitPrice);
+    const total = money(item.unitPrice * item.quantity * (1 - item.discount / 100));
+    let remaining = name;
+    let first = true;
+    do { const part = remaining.slice(0, 24); remaining = remaining.slice(24).trimStart(); lines.push(first ? part.padEnd(24) + String(item.quantity).padStart(5) + price.padStart(9) + total.padStart(10) : part); first = false; } while (remaining);
+    lines.push('-'.repeat(width));
+  });
+  row('Subtotal', money(sale.subtotal));
+  if (sale.discountTotal > 0) row('Discount', '-' + money(sale.discountTotal));
+  row(`Tax (${taxLabel})`, money(sale.taxAmount));
+  row('AMOUNT PAID', money(Number(sale.amountPaid ?? sale.grandTotal)));
+  if (sale.paymentMethod === 'cash') { row('Cash Tendered', money(sale.cashTendered ?? 0)); row('Change', money(sale.changeGiven ?? 0)); }
+  lines.push('-'.repeat(width));
+  (receiptFooter || 'Thank you for shopping with us.').split(/\r?\n/).forEach(center);
+  return lines.join('\r\n') + '\r\n';
+}
+
 interface ReceiptModalProps {
   open: boolean;
   onClose: () => void;
@@ -76,7 +115,7 @@ export default function ReceiptModal({
   };
 
   const handleDirectPrint = async () => {
-    const payload = { businessName, businessAddress, businessPhone, transactionId: sale.transactionId, timestamp: sale.timestamp, cashier: sale.cashier, paymentMethod: sale.paymentMethod, customerName: sale.customerName, items: sale.items, subtotal: sale.subtotal, discountTotal: sale.discountTotal, taxAmount: sale.taxAmount, taxLabel, grandTotal: sale.grandTotal, amountPaid: sale.amountPaid, cashTendered: sale.cashTendered, changeGiven: sale.changeGiven, footer: receiptFooter };
+    const payload = { businessName, businessAddress, businessPhone, transactionId: sale.transactionId, timestamp: sale.timestamp, cashier: sale.cashier, paymentMethod: sale.paymentMethod, customerName: sale.customerName, items: sale.items, subtotal: sale.subtotal, discountTotal: sale.discountTotal, taxAmount: sale.taxAmount, taxLabel, grandTotal: sale.grandTotal, amountPaid: sale.amountPaid, cashTendered: sale.cashTendered, changeGiven: sale.changeGiven, footer: receiptFooter, rawText: buildThermalReceiptText(sale, currency, businessName, businessAddress, businessPhone, receiptFooter, taxLabel) };
     try {
       const response = await fetch('http://127.0.0.1:4318/print', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!response.ok) {

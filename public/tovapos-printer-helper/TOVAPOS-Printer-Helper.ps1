@@ -82,6 +82,11 @@ while ($listener.IsListening) {
     $receipt = $reader.ReadToEnd() | ConvertFrom-Json
     $printer = if ($receipt.printerName) { $receipt.printerName } else { Default-Printer }
     if (-not $printer) { throw 'No default printer found.' }
+    if ($receipt.rawText) {
+      Send-RawReceipt $printer ([string]$receipt.rawText)
+      Send-Json $context 200 @{ ok = $true; printer = $printer }
+      continue
+    }
     $width = 48
     $lines = @()
     $money = { param($value) if ($null -eq $value) { return '0.00' }; return ([decimal]$value).ToString('N2', [Globalization.CultureInfo]::InvariantCulture) }
