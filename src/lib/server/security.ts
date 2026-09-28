@@ -265,6 +265,15 @@ export function errorResponse(error: unknown): NextResponse {
       { status: 409 }
     );
   }
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const databaseError = error as { code?: unknown; constraint?: unknown };
+    if (databaseError.code === '23505' && (databaseError.constraint === 'pos_tenant_inventory_sku_unique_idx' || databaseError.constraint === 'pos_tenant_inventory_barcode_unique_idx')) {
+      return NextResponse.json({ error: 'This SKU or barcode is already used by another product. Use a unique code', code: 'DUPLICATE_INVENTORY_CODE' }, { status: 409 });
+    }
+    if (databaseError.code === '22P02' || databaseError.code === '23502' || databaseError.code === '23514') {
+      return NextResponse.json({ error: 'One or more product values are invalid. Check the dates, prices, and quantities and try again.', code: 'INVALID_INVENTORY_DATA' }, { status: 400 });
+    }
+  }
   if (isDatabaseUnavailableError(error)) {
     return NextResponse.json(
       {

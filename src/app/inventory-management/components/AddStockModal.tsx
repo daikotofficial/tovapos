@@ -16,6 +16,7 @@ import {
   roundBulkUnitCost,
 } from '@/lib/pos/stock';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import { hasPackPricing } from '@/lib/pos/sale-units';
 
 interface AddStockModalProps {
   open: boolean;
@@ -88,7 +89,12 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const skuRegistration = register('sku', { required: 'SKU, barcode, or QR code is required' });
   const bulkPurchasePriceRegistration = register('bulkPurchasePrice');
   const packPriceRegistration = register('packPrice', { validate: (value) => !packPricingActive || Number(value) > 0 || 'Pack/carton price is required' });
-  const packQuantityRegistration = register('packQuantity', { validate: (value) => !packPricingActive || Number(value) >= 1 || 'Pack/carton quantity is required' });
+  const packQuantityRegistration = register('packQuantity', {
+    validate: (value) =>
+      !packPricingActive ||
+      (Number.isInteger(Number(value)) && Number(value) >= 1) ||
+      'Enter a whole number of pieces per pack/carton',
+  });
   const bulkQuantityRegistration = register('bulkQuantity', {
     min: { value: 0.01, message: 'Quantity must be greater than 0' },
   });
@@ -120,7 +126,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
     if (editItem) {
       setPricingMode('manual');
       setBulkPricingActive(false);
-      setPackPricingActive(Boolean(editItem.packPricingEnabled));
+      setPackPricingActive(hasPackPricing(editItem));
       reset({
         name: editItem.name,
         genericName: editItem.genericName,
@@ -136,7 +142,7 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
         unitCost: editItem.unitCost,
         bulkPurchasePrice: '',
         bulkQuantity: '',
-        packPricingEnabled: Boolean(editItem.packPricingEnabled),
+        packPricingEnabled: hasPackPricing(editItem),
         packPrice: editItem.packPrice ?? '',
         packQuantity: editItem.packQuantity ?? '',
         packUnit: editItem.packUnit ?? 'pack',

@@ -251,8 +251,12 @@ export default function CheckoutScreen() {
         }
         const saleUnit = selectedSaleUnit ?? 'piece';
         const unitsPerSale = getUnitsPerSale(product, saleUnit);
+        if (existingCartItem && existingCartItem.saleUnit !== saleUnit) {
+          toast.error(product.name + ' is already in the cart as a ' + existingCartItem.saleUnit + '. Remove it first before adding it as a ' + saleUnit + '.');
+          setScanInput('');
+          return;
+        }
         assertSellable(product, (existingCartItem?.quantity ?? 0) * (existingCartItem?.unitsPerSale ?? 1) + unitsPerSale);
-
         const daysUntilExpiry = getDaysUntilExpiry(product.expiryDate);
         if (daysUntilExpiry <= 30) {
           toast.warning(

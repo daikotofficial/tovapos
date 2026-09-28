@@ -1949,7 +1949,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
         const updated = normalizeInventoryItem({
           ...current,
-          currentQty: current.currentQty + line.quantity,
+          currentQty: current.currentQty + line.quantity * (line.unitsPerSale ?? 1),
           updatedAt: now,
         });
         updatedInventory.push({ ...updated, _expectedUpdatedAt: current.updatedAt });
@@ -1963,7 +1963,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           barcode: line.barcode,
           batchLot: line.batchLot,
           type: 'refund' as const,
-          quantityDelta: line.quantity,
+          quantityDelta: line.quantity * (line.unitsPerSale ?? 1),
           quantityBefore: current.currentQty,
           quantityAfter: updated.currentQty,
           unitCost: line.unitCost,

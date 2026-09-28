@@ -72,6 +72,7 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
   const sellingPrice = Number(item.sellingPrice) || 0;
   const packPrice = Number(item.packPrice) || 0;
   const packQuantity = Number(item.packQuantity) || 0;
+  const hasValidPackPricing = packPrice > 0 && Number.isInteger(packQuantity) && packQuantity >= 1;
   const taxRate = Number(item.taxRate) || 0;
 
   return {
@@ -81,9 +82,9 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     maxStock: Number(item.maxStock) || Math.max(currentQty, reorderLevel),
     unitCost,
     sellingPrice,
-    packPricingEnabled: Boolean(item.packPricingEnabled && packPrice > 0 && packQuantity >= 1),
-    packPrice: packPricingEnabledValue(item.packPricingEnabled, packPrice, packQuantity),
-    packQuantity: packQuantity >= 1 ? Math.floor(packQuantity) : undefined,
+    packPricingEnabled: Boolean((item.packPricingEnabled || hasValidPackPricing) && hasValidPackPricing),
+    packPrice: packPricingEnabledValue(Boolean(item.packPricingEnabled || hasValidPackPricing), packPrice, packQuantity),
+    packQuantity: hasValidPackPricing ? packQuantity : undefined,
     packUnit: item.packUnit === 'carton' ? 'carton' : 'pack',
     skuAliases: Array.isArray(item.skuAliases) ? item.skuAliases : [],
     barcodeAliases: Array.isArray(item.barcodeAliases) ? item.barcodeAliases : [],

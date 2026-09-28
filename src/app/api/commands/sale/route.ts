@@ -228,7 +228,10 @@ export async function POST(request: NextRequest) {
           throw new HttpError(409, `${row.name} cannot be sold below cost`, 'BELOW_COST_FORBIDDEN');
         }
         const productData = row.data as InventoryItem;
-        const packConfigured = Boolean(productData.packPricingEnabled && Number(productData.packPrice) > 0 && Number(productData.packQuantity) >= 1);
+        const packConfigured =
+          Number(productData.packPrice) > 0 &&
+          Number.isInteger(Number(productData.packQuantity)) &&
+          Number(productData.packQuantity) >= 1;
         if (requested.saleUnit !== 'piece' && !packConfigured) {
           throw new HttpError(409, `${row.name} has no ${requested.saleUnit} price configured`, 'PACK_PRICE_NOT_CONFIGURED');
         }

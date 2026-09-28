@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as Record<string, unknown>;
     const product = body.product as InventoryItem | undefined;
     if (!product?.id || !product.name?.trim() || !product.sku?.trim()) {
-      throw new HttpError(400, 'Product id, name, and SKU are required', 'VALIDATION_ERROR');
+      throw new HttpError(400, 'Product name and SKU are required before saving', 'VALIDATION_ERROR');
     }
     const quantityDelta = Number(body.quantityDelta ?? 0);
     if (!Number.isFinite(quantityDelta)) {

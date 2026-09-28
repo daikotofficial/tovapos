@@ -82,7 +82,8 @@ export async function POST(request: NextRequest) {
         if (!row) continue;
         const existingUpdate = updates.find((item) => item.id === line.inventoryItemId);
         const before = existingUpdate ? existingUpdate.currentQty : Number(row.current_qty);
-        const after = before + line.quantity;
+        const restoredQuantity = line.quantity * (line.unitsPerSale ?? 1);
+        const after = before + restoredQuantity;
         const updated: InventoryItem = {
           ...(row.data as InventoryItem),
           currentQty: after,
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
           barcode: line.barcode,
           batchLot: line.batchLot,
           type: 'refund',
-          quantityDelta: line.quantity,
+          quantityDelta: restoredQuantity,
           quantityBefore: before,
           quantityAfter: after,
           unitCost: line.unitCost,
