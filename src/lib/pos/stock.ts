@@ -110,6 +110,7 @@ export function findInventoryItemByScan(
   if (!code) return undefined;
 
   return items.find((item) => {
+    if (item.productStatus === 'inactive') return false;
     const barcode = item.barcode?.toLowerCase();
     return (
       item.sku.toLowerCase() === code ||

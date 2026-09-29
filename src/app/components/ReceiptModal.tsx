@@ -17,7 +17,20 @@ function buildThermalReceiptText(sale: SaleTransaction, _currency: string, busin
   const center = (value: string, bold = false) => { const text = value.slice(0, width); const line = ' '.repeat(Math.max(0, Math.floor((width - text.length) / 2))) + text; lines.push(bold ? boldOn + line + boldOff : line); };
   const row = (label: string, value: string, bold = false) => { const safeValue = value.slice(0, width); const line = label.slice(0, Math.max(0, width - safeValue.length)).padEnd(Math.max(0, width - safeValue.length)) + safeValue; lines.push(bold ? boldOn + line + boldOff : line); };
   const wrap = (value: string) => { const words = value.trim().split(/\s+/).filter(Boolean); const wrapped: string[] = []; let current = ''; words.forEach((word) => { if (!current) current = word.slice(0, width); else if (current.length + 1 + word.length <= width) current += ' ' + word; else { wrapped.push(current); current = word.slice(0, width); } }); if (current) wrapped.push(current); return wrapped.length ? wrapped : ['']; };
-  const timestamp = sale.timestamp.includes('T') ? sale.timestamp.slice(0, 19).replace('T', '  ') : sale.timestamp;
+  const timestamp = (() => {
+    const parsed = Date.parse(sale.timestamp);
+    if (!Number.isFinite(parsed)) return sale.timestamp;
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Lagos',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(parsed)).replace(',', '') + ' WAT';
+  })();
   center('TOVAPOS', true);
   center(businessName, true);
   if (businessAddress) center(businessAddress, true);
@@ -70,7 +83,7 @@ function buildThermalReceiptText(sale: SaleTransaction, _currency: string, busin
   row('AMOUNT PAID', money(Number(sale.amountPaid ?? sale.grandTotal)), true);
   if (sale.paymentMethod === 'cash') { row('Cash Tendered', money(sale.cashTendered ?? 0)); row('Change', money(sale.changeGiven ?? 0)); }
   lines.push('-'.repeat(width));
-  (receiptFooter || 'Thank you for shopping with us.').split(/\r?\n/).forEach((paragraph) => wrap(paragraph).forEach((line) => center(line)));
+  (receiptFooter || 'Thank you for shopping with us.').split(/\r?\n/).forEach((paragraph) => wrap(paragraph).forEach((line) => center(line, true)));
   // Leave enough blank feed after the footer for common 80mm cutters to finish before cutting.
   lines.push('', '', '', '');
   return lines.join('\r\n') + '\r\n';

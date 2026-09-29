@@ -548,9 +548,9 @@ export async function loadInventoryPage(
     }
   }
 
-  const allItems = (await getAllFromBrowser<InventoryItem>('inventory')).map(
-    normalizeInventoryItem
-  );
+  const allItems = (await getAllFromBrowser<InventoryItem>('inventory'))
+    .map(normalizeInventoryItem)
+    .filter((item) => item.productStatus !== 'inactive');
   const q = input.q?.trim().toLowerCase();
   const filtered = allItems
     .filter((item) => {

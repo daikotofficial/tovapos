@@ -194,7 +194,7 @@ async function getInventoryMetrics(request: NextRequest, auth: AuthContext) {
       coalesce(sum(current_qty * unit_cost), 0)::float8 AS total_value,
       coalesce(sum(current_qty * (selling_price - unit_cost)), 0)::float8 AS potential_profit
     FROM pos_tenant_inventory
-    WHERE tenant_id = $2
+    WHERE tenant_id = $2 AND product_status = 'active'
     `,
     [expiryAlertDays, auth.tenantId]
   );
@@ -562,6 +562,7 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
       SELECT data
       FROM pos_tenant_inventory
       WHERE tenant_id = $1
+        AND product_status = 'active'
         AND (
           lower(sku) = lower($2)
           OR lower(coalesce(barcode, '')) = lower($2)
@@ -602,7 +603,7 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
       `
       SELECT data
       FROM pos_tenant_inventory
-      WHERE tenant_id = $1 AND id = ANY($2::text[])
+      WHERE tenant_id = $1 AND product_status = 'active' AND id = ANY($2::text[])
       ORDER BY lower(name) ASC, id ASC
       `,
       [auth.tenantId, inventoryIds]
@@ -615,7 +616,7 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
   const offset = clampOffset(params.get('offset'));
   const cursor = decodeCursor(params.get('cursor'));
   const values: unknown[] = [auth.tenantId];
-  const where: string[] = ['tenant_id = $1'];
+  const where: string[] = ["tenant_id = $1", "product_status = 'active'"];
 
   const q = params.get('q')?.trim();
   if (q) {
