@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 $port = 4318
 $root = Join-Path $env:LOCALAPPDATA 'TOVAPOS\PrinterHelper'
 $installed = Join-Path $root 'TOVAPOS-Printer-Helper.ps1'
+$startupLog = Join-Path $root 'startup.log'
 if (-not $Install -and $PSCommandPath -ne $installed) { $Install = $true }
 
 if ($Install) {
@@ -22,17 +23,25 @@ if ($Install) {
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description 'TOVAPOS local receipt printer helper' -Force | Out-Null
     Start-ScheduledTask -TaskName $taskName
+    Start-Sleep -Milliseconds 1200
+    $probe = [Net.Sockets.TcpClient]::new()
+    try {
+      $probe.Connect('127.0.0.1', $port)
+    } finally {
+      $probe.Dispose()
+    }
   } catch {
-    # Keep a compatibility fallback for Windows editions where Scheduled Tasks are unavailable.
+    $_ | Out-File -LiteralPath $startupLog -Encoding utf8 -Append
+    # Keep a compatibility fallback for Windows editions or policies where Scheduled Tasks fail.
     $command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $installed + '"'
     New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $taskName -Value $command -PropertyType String -Force | Out-Null
     Start-Process $powershell -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $installed)
+    Start-Sleep -Milliseconds 500
   }
   Write-Host 'TOVAPOS Printer Helper installed for this Windows user.'
   Write-Host 'It runs locally and survives TOVAPOS website updates.'
   exit 0
 }
-
 function Send-Json($context, $status, $body) {
   $origin = $context.Request.Headers['Origin']
   $bytes = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Compress))

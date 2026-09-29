@@ -9,7 +9,7 @@ export async function GET() {
     'setlocal',
     'set "helper=%TEMP%\\TOVAPOS-Printer-Helper.ps1"',
     `powershell.exe -NoProfile -Command "$bytes=[Convert]::FromBase64String('${helper}'); [IO.File]::WriteAllBytes($env:TEMP + '\\TOVAPOS-Printer-Helper.ps1',$bytes)"`,
-    'powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%helper%" -Install',
+    'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%helper%" -Install',
     'echo.',
     'echo TOVAPOS Printer Helper installed for this Windows user.',
     '',
