@@ -71,28 +71,24 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
         onSubmit={handleSubmit(onSubmit)}
         className="space-y-4"
       >
-        {/* Email */}
+        {/* Email or phone */}
         <div>
           <label htmlFor="login-email" className={labelClass}>
-            Email Address
+            Email or Phone Number
           </label>
           <input
             id="login-email"
-            type="email"
+            type="text"
             {...register('email', {
-              required: 'Email address is required',
-              pattern: {
-                value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                message: 'Enter a valid email address',
-              },
+              required: 'Email or phone number is required',
             })}
             className={`${inputClass} ${
               errors.email
                 ? 'border-danger focus:ring-danger/30 focus:border-danger'
                 : 'border-border'
             }`}
-            placeholder="you@business.com"
-            autoComplete="email"
+            placeholder="you@business.com or 08012345678"
+            autoComplete="username"
           />
           {errors.email && (
             <p className="text-[11px] text-danger mt-1.5 flex items-start gap-1">

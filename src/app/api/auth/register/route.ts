@@ -4,6 +4,7 @@ import { defaultSettings } from '@/lib/pos/seeds';
 import { issueEmailVerification } from '@/lib/server/email-verification';
 import { getPosPool } from '@/lib/server/pos-db';
 import { hashPasswordServer, passwordStrengthError } from '@/lib/server/password';
+import { normalizePhoneForLogin } from '@/lib/server/login-identifier';
 import { OWNER_PERMISSIONS } from '@/lib/server/roles';
 import {
   assertSameOrigin,
@@ -53,7 +54,8 @@ export async function POST(request: NextRequest) {
     const businessName = requiredText(body.businessName, 'Business name');
     const ownerName = requiredText(body.ownerName, 'Owner name');
     const email = requiredText(body.email, 'Email').toLowerCase();
-    const phone = requiredText(body.phone, 'Phone number', 50);
+    const phone = normalizePhoneForLogin(requiredText(body.phone, 'Phone number', 50));
+    if (!phone) throw new HttpError(400, 'Enter a valid phone number', 'INVALID_PHONE');
     const password = requiredText(body.password, 'Password', 200);
     let referralCode: string | null = null;
     try {
@@ -139,6 +141,18 @@ export async function POST(request: NextRequest) {
         'An account already uses this email. Sign in or reset your password instead.',
         'ACCOUNT_EXISTS'
       );
+    }
+
+    const existingPhone = await getPosPool().query(
+      `SELECT 1 FROM pos_app_users
+       WHERE regexp_replace(coalesce(phone, ''), '[^0-9+]', '', 'g') = $1
+          OR ('+234' || substring(regexp_replace(coalesce(phone, ''), '[^0-9+]', '', 'g') from 2)) = $1
+          OR ('+' || regexp_replace(coalesce(phone, ''), '[^0-9+]', '', 'g')) = $1
+       LIMIT 1`,
+      [phone]
+    );
+    if (existingPhone.rowCount) {
+      throw new HttpError(409, 'An account already uses this phone number. Sign in or contact an administrator.', 'ACCOUNT_PHONE_EXISTS');
     }
 
     const tenantId = `tenant-${randomUUID()}`;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPosPool } from '@/lib/server/pos-db';
+import { normalizePhoneForLogin } from '@/lib/server/login-identifier';
 import { getSubscriptionPlan } from '@/lib/pos/subscription';
 import type { Permission } from '@/lib/pos/types';
 import { hashPasswordServer, passwordStrengthError } from '@/lib/server/password';
@@ -922,8 +923,12 @@ export async function PUT(request: NextRequest) {
           throw new HttpError(400, 'User id is required', 'VALIDATION_ERROR');
         }
         const email = typeof record.email === 'string' ? record.email.trim().toLowerCase() : '';
+        const phone = typeof record.phone === 'string' ? normalizePhoneForLogin(record.phone) : '';
         const name = typeof record.name === 'string' ? record.name.trim() : '';
         if (!name) throw new HttpError(400, 'User name is required', 'VALIDATION_ERROR');
+        if (!email && !phone) {
+          throw new HttpError(400, 'Provide an email address or phone number for this user to sign in', 'LOGIN_IDENTIFIER_REQUIRED');
+        }
         const existing = await getPosPool().query(
           `SELECT * FROM pos_app_users WHERE tenant_id = $1 AND id = $2`,
           [auth.tenantId, record.id]
@@ -940,6 +945,22 @@ export async function PUT(request: NextRequest) {
           : { rowCount: 0 };
         if (emailConflict.rowCount) {
           throw new HttpError(409, 'An account already uses this email address', 'DUPLICATE_EMAIL');
+        }
+        if (phone) {
+          const phoneConflict = await getPosPool().query(
+            `SELECT name FROM pos_app_users
+             WHERE id <> $1
+               AND (
+                 regexp_replace(coalesce(phone, ''), '[^0-9+]', '', 'g') = $2
+                 OR ('+234' || substring(regexp_replace(coalesce(phone, ''), '[^0-9+]', '', 'g') from 2)) = $2
+                 OR ('+' || regexp_replace(coalesce(phone, ''), '[^0-9+]', '', 'g')) = $2
+               )
+             LIMIT 1`,
+            [record.id, phone]
+          );
+          if (phoneConflict.rowCount) {
+            throw new HttpError(409, `This phone number already belongs to ${phoneConflict.rows[0]?.name ?? 'another user'}`, 'DUPLICATE_PHONE');
+          }
         }
         const allowedRoles = new Set([
           'super-admin',
@@ -1056,7 +1077,7 @@ export async function PUT(request: NextRequest) {
             record.id,
             name,
             email || null,
-            typeof record.phone === 'string' ? record.phone.trim() : '',
+            phone,
             requestedRole,
             JSON.stringify(requestedPermissions),
             requestedStatus,

@@ -312,6 +312,10 @@ export default function UsersPage() {
       toast.error('Full name is required.');
       return;
     }
+    if (!form.email.trim() && !form.phone?.trim()) {
+      toast.error('Provide an email address or phone number so this user can sign in.');
+      return;
+    }
     const isExisting = users.some((user) => user.id === form.id);
     if (!isExisting && loginPassword.length < 10) {
       toast.error('A login password of at least 10 characters is required.');
@@ -495,7 +499,7 @@ export default function UsersPage() {
               />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Email</span>
+              <span className="text-xs text-muted-foreground">Email (optional if phone is provided)</span>
               <input
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -503,7 +507,7 @@ export default function UsersPage() {
               />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Phone</span>
+              <span className="text-xs text-muted-foreground">Phone (alternative login)</span>
               <input
                 value={form.phone ?? ''}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}

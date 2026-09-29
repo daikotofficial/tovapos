@@ -12,6 +12,7 @@ import {
   setSessionCookie,
 } from '@/lib/server/security';
 import { ensureSecuritySchema } from '@/lib/server/security-schema';
+import { phoneLoginCandidates, normalizePhoneForLogin } from '@/lib/server/login-identifier';
 
 export async function POST(request: NextRequest) {
   const isNativeForm = request.headers
@@ -24,17 +25,21 @@ export async function POST(request: NextRequest) {
     const body = isNativeForm
       ? Object.fromEntries((await request.formData()).entries())
       : ((await request.json()) as Record<string, unknown>);
-    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const identifier = typeof body.email === 'string' ? body.email.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
-    if (!email || !password) {
-      throw new HttpError(400, 'Email and password are required', 'VALIDATION_ERROR');
+    const isEmailLogin = identifier.includes('@');
+    const email = isEmailLogin ? identifier.toLowerCase() : '';
+    const phoneCandidates = isEmailLogin ? [] : phoneLoginCandidates(identifier);
+    if (!identifier || !password || (!isEmailLogin && phoneCandidates.length === 0)) {
+      throw new HttpError(400, 'Email or phone number and password are required', 'VALIDATION_ERROR');
     }
+    const loginKey = isEmailLogin ? email : normalizePhoneForLogin(identifier) || identifier;
 
     const clientAddress =
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
       request.headers.get('x-real-ip') ||
       'unknown';
-    const attemptKey = createHash('sha256').update(`${clientAddress}|${email}`).digest('hex');
+    const attemptKey = createHash('sha256').update(`${clientAddress}|${loginKey}`).digest('hex');
     const attempt = await getPosPool().query(
       `SELECT failures, blocked_until FROM pos_auth_attempts WHERE attempt_key = $1`,
       [attemptKey]
@@ -47,21 +52,30 @@ export async function POST(request: NextRequest) {
       `SELECT u.*, t.slug AS tenant_slug, t.name AS tenant_name, t.status AS tenant_status
        FROM pos_app_users u
        JOIN pos_tenants t ON t.id = u.tenant_id
-       WHERE lower(u.email) = $1
+       WHERE (
+         ($1::boolean AND lower(u.email) = $2)
+         OR (NOT $1::boolean AND (
+           regexp_replace(coalesce(u.phone, ''), '[^0-9+]', '', 'g') = ANY($3::text[])
+           OR ('+234' || substring(regexp_replace(coalesce(u.phone, ''), '[^0-9+]', '', 'g') from 2)) = ANY($3::text[])
+           OR ('+' || regexp_replace(coalesce(u.phone, ''), '[^0-9+]', '', 'g')) = ANY($3::text[])
+         ))
+       )
        ORDER BY u.created_at DESC
        LIMIT 2`,
-      [email]
+      [isEmailLogin, email, phoneCandidates]
     );
     if (result.rows.length > 1) {
       throw new HttpError(
         409,
-        'This email is attached to more than one account. Contact an administrator to resolve the duplicate before signing in.',
-        'DUPLICATE_EMAIL'
+        isEmailLogin
+          ? 'This email is attached to more than one account. Contact an administrator to resolve the duplicate before signing in.'
+          : 'This phone number is attached to more than one account. Contact an administrator to resolve the duplicate before signing in.',
+        isEmailLogin ? 'DUPLICATE_EMAIL' : 'DUPLICATE_PHONE'
       );
     }
     const candidate = result.rows[0];
     if (!candidate) {
-      throw new HttpError(401, 'The email or password is incorrect.', 'INVALID_CREDENTIALS');
+      throw new HttpError(401, 'The email or phone number or password is incorrect.', 'INVALID_CREDENTIALS');
     }
     if (candidate.status !== 'active') {
       throw new HttpError(
@@ -102,7 +116,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!row.email_verified_at) {
+    if (isEmailLogin && !row.email_verified_at) {
       throw new HttpError(
         403,
         'Confirm your email address before signing in. You can request a new confirmation email.',
@@ -149,7 +163,9 @@ export async function POST(request: NextRequest) {
       const authError =
         error instanceof HttpError && error.code === 'DUPLICATE_EMAIL'
           ? 'duplicate-email'
-          : error instanceof HttpError && error.code === 'EMAIL_NOT_VERIFIED'
+          : error instanceof HttpError && error.code === 'DUPLICATE_PHONE'
+            ? 'duplicate-phone'
+            : error instanceof HttpError && error.code === 'EMAIL_NOT_VERIFIED'
             ? 'email-unverified'
             : error instanceof HttpError && error.code === 'RATE_LIMITED'
               ? 'rate-limited'
