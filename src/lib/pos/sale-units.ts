@@ -3,7 +3,7 @@ import type { InventoryItem } from './types';
 export type SaleUnit = 'piece' | 'pack' | 'carton';
 
 export function hasPackPricing(item: InventoryItem): boolean {
-  return Boolean(item.packPricingEnabled && Number(item.packPrice) > 0 && Number.isInteger(Number(item.packQuantity)) && Number(item.packQuantity) >= 1);
+  return Number(item.packPrice) > 0 && Number.isInteger(Number(item.packQuantity)) && Number(item.packQuantity) >= 1;
 }
 
 export function getSaleUnitPrice(item: InventoryItem, unit: SaleUnit): number {
