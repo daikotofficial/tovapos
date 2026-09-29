@@ -164,8 +164,12 @@ function protectSaleFinancials(data: Record<string, unknown>, auth: AuthContext)
 }
 
 function protectInventoryFinancials(data: Record<string, unknown>, auth: AuthContext) {
-  if (authAllows(auth, 'view-cost-price')) return data;
-  const { unitCost: _unitCost, profitMargin: _profitMargin, ...safe } = data;
+  const packPrice = Number(String(data.packPrice ?? '').replace(/,/g, ''));
+  const packQuantity = Number(String(data.packQuantity ?? '').replace(/,/g, ''));
+  const hasPackPricing = packPrice > 0 && Number.isInteger(packQuantity) && packQuantity >= 1;
+  const normalized: Record<string, unknown> = { ...data, packPricingEnabled: hasPackPricing, packPrice: hasPackPricing ? packPrice : undefined, packQuantity: hasPackPricing ? packQuantity : undefined };
+  if (authAllows(auth, 'view-cost-price')) return normalized;
+  const { unitCost: _unitCost, profitMargin: _profitMargin, ...safe } = normalized;
   return { ...safe, unitCost: 0, profitMargin: 0 };
 }
 
