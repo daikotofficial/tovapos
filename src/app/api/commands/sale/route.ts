@@ -155,6 +155,9 @@ export async function POST(request: NextRequest) {
     const client = await getPosPool().connect();
     try {
       await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `sales-reset:${auth.tenantId}`,
+      ]);
       const claimed = await client.query(
         `INSERT INTO pos_idempotency_keys
           (tenant_id, idempotency_key, operation_type, request_hash)

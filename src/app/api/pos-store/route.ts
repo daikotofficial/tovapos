@@ -1039,6 +1039,11 @@ export async function PUT(request: NextRequest) {
 
     try {
       await client.query('BEGIN');
+      if (storeName === 'sales') {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+          `sales-reset:${auth.tenantId}`,
+        ]);
+      }
       if (storeName === 'settings') {
         const existing = await client.query(
           `SELECT data FROM pos_tenant_records
@@ -1240,6 +1245,11 @@ export async function DELETE(request: NextRequest) {
     const client = await getPosPool().connect();
     try {
       await client.query('BEGIN');
+      if (storeName === 'sales') {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+          `sales-reset:${auth.tenantId}`,
+        ]);
+      }
       await client.query(
         `DELETE FROM pos_tenant_records
          WHERE tenant_id = $1 AND store_name = $2 AND record_id = $3`,
