@@ -2,6 +2,7 @@ import React from 'react';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import CheckoutScreen from '../components/CheckoutScreen';
+import SalesShiftBar from '../components/SalesShiftBar';
 
 export default function SalesCheckoutPage() {
   return (
@@ -10,7 +11,10 @@ export default function SalesCheckoutPage() {
       subtitle="Scan barcode/SKU, sell products, and reduce stock instantly"
     >
       <PermissionGate permission="checkout">
-        <CheckoutScreen />
+        <div className="px-3 py-4 sm:p-6">
+          <SalesShiftBar />
+          <CheckoutScreen />
+        </div>
       </PermissionGate>
     </AppLayout>
   );

@@ -60,6 +60,10 @@ function parsePaymentBreakdown(
   return breakdown;
 }
 
+function currentBusinessDate(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: process.env.POS_TIMEZONE ?? 'Africa/Lagos' }).format(new Date());
+}
+
 function commandHash(body: unknown): string {
   return createHash('sha256').update(JSON.stringify(body)).digest('hex');
 }
@@ -142,6 +146,8 @@ export async function POST(request: NextRequest) {
     const customerName =
       typeof body.customerName === 'string' ? body.customerName.trim() : 'Walk-in Customer';
     const loyaltyPointsToRedeem = Math.max(0, Number(body.loyaltyPointsToRedeem ?? 0) || 0);
+    const shiftId = typeof body.shiftId === 'string' ? body.shiftId : '';
+    if (!shiftId) throw new HttpError(409, 'An open sales shift is required', 'SHIFT_REQUIRED');
     const requestHash = commandHash({
       operationId,
       idempotencyKey,
@@ -151,6 +157,7 @@ export async function POST(request: NextRequest) {
       paymentBreakdown,
       customerName,
       loyaltyPointsToRedeem,
+      shiftId,
     });
     const client = await getPosPool().connect();
     try {
@@ -158,6 +165,15 @@ export async function POST(request: NextRequest) {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
         `sales-reset:${auth.tenantId}`,
       ]);
+      const shiftResult = await client.query(
+        `SELECT data FROM pos_tenant_records
+         WHERE tenant_id = $1 AND store_name = 'salesShifts' AND record_id = $2 FOR UPDATE`,
+        [auth.tenantId, shiftId]
+      );
+      const activeShift = shiftResult.rows[0]?.data as Record<string, unknown> | undefined;
+      if (!activeShift || activeShift.status !== 'open' || activeShift.userId !== auth.user.id || activeShift.businessDate !== currentBusinessDate()) {
+        throw new HttpError(409, 'The signed-in user has no authoritative open sales shift', 'SHIFT_NOT_OPEN');
+      }
       const claimed = await client.query(
         `INSERT INTO pos_idempotency_keys
           (tenant_id, idempotency_key, operation_type, request_hash)
@@ -363,6 +379,8 @@ export async function POST(request: NextRequest) {
         customerName,
         timestamp: now,
         cashier: auth.user.name,
+        cashierId: auth.user.id,
+        shiftId,
         status: 'completed',
         syncStatus: 'synced',
       };

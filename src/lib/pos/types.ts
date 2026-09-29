@@ -140,6 +140,8 @@ export interface SaleTransaction {
   customerName?: string;
   timestamp: string;
   cashier: string;
+  cashierId?: string;
+  shiftId?: string;
   status: 'completed' | 'voided' | 'refunded';
   syncStatus: 'pending' | 'synced' | 'failed';
 }
@@ -277,6 +279,7 @@ export interface CompleteSaleInput {
   customerName?: string;
   loyaltyPointsToRedeem?: number;
   cashier: string;
+  shiftId?: string;
 }
 
 export interface ReconcileCreditSaleInput {

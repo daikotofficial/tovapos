@@ -16,6 +16,8 @@ import { getProductDiscountPercent, money, resolveTaxRate } from '@/lib/pos/sale
 import { loyaltyRedemption } from '@/lib/pos/loyalty';
 import { normalizeCustomerPhone } from '@/lib/pos/customer';
 import Modal from '@/components/ui/Modal';
+import NiceSelect from '@/components/ui/NiceSelect';
+import { getOpenSalesShift } from '@/lib/pos/sales-shift';
 
 export interface CartItem {
   id: string;
@@ -500,6 +502,14 @@ export default function CheckoutScreen() {
       toast.error('Your current role does not have permission to complete sales.');
       return;
     }
+    if (!currentUser || !getOpenSalesShift(currentUser.id)) {
+      toast.error('Open Sales first and record the cash handover before completing a sale.');
+      return;
+    }
+    if (paymentMethod === 'credit' && !hasPermission('credit-sales')) {
+      toast.error('Your role does not have permission to sell on credit.');
+      return;
+    }
 
     if (cart.length === 0) {
       toast.error('Cart is empty. Add items before processing payment.');
@@ -532,6 +542,7 @@ export default function CheckoutScreen() {
 
     setIsProcessing(true);
     try {
+      const activeShift = currentUser ? getOpenSalesShift(currentUser.id) : null;
       const sale = await completeSale({
         items: cart.map((item) => ({
           inventoryItemId: item.inventoryItemId,
@@ -553,6 +564,7 @@ export default function CheckoutScreen() {
         customerName,
         loyaltyPointsToRedeem: loyaltyPreview.points,
         cashier: currentUser?.name ?? 'Unknown cashier',
+        shiftId: activeShift?.id,
       });
 
       setCompletedSale(sale);
@@ -643,10 +655,14 @@ export default function CheckoutScreen() {
         >
           <label className="block space-y-1">
             <span className="text-xs font-medium text-muted-foreground">Sell as</span>
-            <select value={pendingSaleUnit} onChange={(event) => setPendingSaleUnit(event.target.value as SaleUnit)} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm">
-              <option value="piece">Piece - {formatMoney(pendingPackProduct.sellingPrice, settings.currency)}</option>
-              <option value={pendingPackProduct.packUnit}>{pendingPackProduct.packUnit === "carton" ? "Carton" : "Pack"} - {formatMoney(pendingPackProduct.packPrice ?? 0, settings.currency)}</option>
-            </select>
+            <NiceSelect
+              value={pendingSaleUnit}
+              onChange={(value) => setPendingSaleUnit(value as SaleUnit)}
+              options={[
+                { value: 'piece', label: `Piece - ${formatMoney(pendingPackProduct.sellingPrice, settings.currency)}` },
+                { value: pendingPackProduct.packUnit ?? 'pack', label: `${pendingPackProduct.packUnit === 'carton' ? 'Carton' : 'Pack'} - ${formatMoney(pendingPackProduct.packPrice ?? 0, settings.currency)}` },
+              ]}
+            />
           </label>
         </Modal>
       )}

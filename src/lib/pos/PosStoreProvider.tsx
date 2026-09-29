@@ -74,6 +74,7 @@ import {
   planAllowsPermission,
 } from './subscription';
 import { normalizeCustomerPhone } from './customer';
+import { getOpenSalesShift } from './sales-shift';
 
 interface PosStoreValue {
   tenant: { id: string; slug: string; name: string; status?: 'active' | 'suspended' } | null;
@@ -138,7 +139,7 @@ type VersionedInventoryItem = InventoryItem & {
 const OFFLINE_SESSION_KEY = 'tovapos.offlineSession';
 const TAB_TENANT_KEY = 'tovapos.tabTenant';
 const OFFLINE_SINCE_KEY = 'tovapos.offlineSince';
-const OFFLINE_SALE_MAX_MS = 24 * 60 * 60 * 1000;
+const OFFLINE_SALE_MAX_MS = 6 * 60 * 60 * 1000;
 
 type CachedSession = {
   user: TovaUser;
@@ -585,6 +586,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     cashTendered: payload.sale.cashTendered,
                     customerName: payload.sale.customerName,
                     loyaltyPointsToRedeem: payload.sale.loyaltyPointsRedeemed,
+                    shiftId: payload.sale.shiftId,
                   }),
                 });
                 const result = (await response.json()) as {
@@ -1020,6 +1022,15 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Your role is not allowed to manage products.');
       }
       const existingItem = inventory.find((existing) => existing.id === item.id);
+      if (!existingItem && !hasPermission('add-product')) {
+        throw new Error('Your role is not allowed to add products.');
+      }
+      if (existingItem && !hasPermission('edit-product')) {
+        throw new Error('Your role is not allowed to edit products.');
+      }
+      if (existingItem && item.currentQty !== existingItem.currentQty && !hasPermission('adjust-stock')) {
+        throw new Error('Your role is not allowed to adjust stock quantity.');
+      }
       const planUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
       if (!existingItem && planUsage.isAtLimit) {
         throw new Error(
@@ -1177,9 +1188,8 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
   const deleteInventoryItem = useCallback(
     async (inventoryId: string) => {
-      const allowedRoles: UserRole[] = ['owner', 'super-admin', 'manager'];
-      if (!currentUser || !allowedRoles.includes(currentUser.role)) {
-        throw new Error('Only an admin or manager can delete products.');
+      if (!currentUser || !hasPermission('delete-product')) {
+        throw new Error('Your role is not allowed to delete products.');
       }
       if (!hasActiveSubscription(settings)) {
         throw new Error('An active subscription is required to delete products.');
@@ -1381,6 +1391,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
   const updateSettings = useCallback(
     async (nextSettings: BusinessSettings) => {
+      if (!hasPermission('settings')) {
+        throw new Error('Your role is not allowed to change business settings.');
+      }
       const saved = {
         ...nextSettings,
         id: 'settings' as const,
@@ -1448,13 +1461,16 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       setSyncQueue((prev) => [queueItem, ...prev]);
       return saved;
     },
-    [isOnline]
+    [hasPermission, isOnline]
   );
 
   const completeSale = useCallback(
     async (input: CompleteSaleInput) => {
       if (!hasPermission('checkout')) {
         throw new Error('Your role is not allowed to complete sales.');
+      }
+      if (!currentUser || !input.shiftId || input.shiftId !== getOpenSalesShift(currentUser.id)?.id) {
+        throw new Error('An open sales shift is required before completing a sale.');
       }
       if (!hasActiveSubscription(settings)) {
         throw new Error(
@@ -1475,7 +1491,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         const offlineSinceMs = offlineSince ? Date.parse(offlineSince) : NaN;
         if (Number.isFinite(offlineSinceMs) && Date.now() - offlineSinceMs >= OFFLINE_SALE_MAX_MS) {
           throw new Error(
-            'Offline sales are paused after 24 hours without a confirmed server connection. Reconnect before recording more sales.'
+            'Offline sales are paused after 6 hours without a confirmed server connection. Reconnect before recording more sales.'
           );
         }
       }
@@ -1504,6 +1520,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                 paymentBreakdown: input.paymentBreakdown,
                 customerName: input.customerName,
                 loyaltyPointsToRedeem: input.loyaltyPointsToRedeem,
+                shiftId: input.shiftId,
               }),
             });
           } catch (error) {
@@ -1660,6 +1677,8 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           customerName: input.customerName || 'Walk-in Customer',
           timestamp: now,
           cashier: input.cashier,
+          cashierId: currentUser?.id,
+          shiftId: input.shiftId,
           status: 'completed',
           syncStatus: 'pending',
         };
@@ -1687,7 +1706,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               referenceLabel: sale.transactionId,
               reason: 'POS sale checkout',
               createdAt: now,
-              createdBy: input.cashier,
+              createdBy: currentUser?.id ?? input.cashier,
               syncStatus: 'pending' as const,
             },
           ];

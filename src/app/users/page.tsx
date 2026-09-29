@@ -45,7 +45,7 @@ const permissions: Permission[] = [
 const permissionGroups: { title: string; items: Permission[] }[] = [
   {
     title: 'Dashboard & POS',
-    items: ['dashboard', 'checkout', 'give-discount', 'void-sale', 'refunds'],
+    items: ['dashboard', 'checkout', 'credit-sales', 'give-discount', 'void-sale', 'refunds'],
   },
   {
     title: 'Products & Stock',
@@ -226,7 +226,7 @@ const permissionLabels: Record<Permission, string> = {
   'give-discount': 'Give discount',
   'void-sale': 'Void sale',
   reports: 'View reports',
-  'credit-sales': 'Reconcile credit sales',
+  'credit-sales': 'Sell on credit',
   'export-reports': 'Export reports',
   users: 'Manage users',
   settings: 'Manage settings',
