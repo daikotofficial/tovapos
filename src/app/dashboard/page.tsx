@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   TrendingDown,
   TrendingUp,
+  RefreshCw,
 } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
@@ -287,33 +288,51 @@ export default function DashboardPage() {
     isAuthenticated,
   } = usePosStore();
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
+  const [todayMetrics, setTodayMetrics] = useState<SalesMetrics | null>(null);
+  const [monthMetrics, setMonthMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
+  const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null);
+  const [isRefreshingMetrics, setIsRefreshingMetrics] = useState(false);
+  const refreshSequenceRef = useRef(0);
+
+  const refreshMetrics = useCallback(async () => {
+    if (!isHydrated || !isAuthenticated || activeBusinessMode === 'hospitality') return;
+    setIsRefreshingMetrics(true);
+    const requestSequence = ++refreshSequenceRef.current;
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const month = today.slice(0, 7);
+    try {
+
+      const [allTime, todayResult, monthResult, nextInventoryMetrics] = await Promise.all([
+        loadSalesMetrics(),
+        loadSalesMetrics({ from: today, to: today }),
+        loadSalesMetrics({ from: month + '-01', to: today }),
+        loadInventoryMetrics(Number(settings.expiryAlertDays) || 30),
+      ]);
+      if (requestSequence !== refreshSequenceRef.current) return;
+      setSalesMetrics(allTime);
+      setTodayMetrics(todayResult);
+      setMonthMetrics(monthResult);
+      setInventoryMetrics(nextInventoryMetrics);
+      setMetricsUpdatedAt(new Date());
+    } catch (error) {
+      console.error('Failed to refresh dashboard metrics', error);
+    } finally {
+      if (requestSequence === refreshSequenceRef.current) setIsRefreshingMetrics(false);
+    }
+  }, [activeBusinessMode, isAuthenticated, isHydrated, settings.expiryAlertDays]);
 
   useEffect(() => {
-    let cancelled = false;
-    async function loadMetrics() {
-      if (activeBusinessMode === 'hospitality') {
-        setSalesMetrics(null);
-        setInventoryMetrics(null);
-        return;
-      }
-      try {
-        const [nextSalesMetrics, nextInventoryMetrics] = await Promise.all([
-          loadSalesMetrics(),
-          loadInventoryMetrics(Number(settings.expiryAlertDays) || 30),
-        ]);
-        if (cancelled) return;
-        setSalesMetrics(nextSalesMetrics);
-        setInventoryMetrics(nextInventoryMetrics);
-      } catch (error) {
-        if (!cancelled) console.error('Failed to load dashboard metrics', error);
-      }
-    }
-    void loadMetrics();
+    void refreshMetrics();
+    const interval = window.setInterval(() => void refreshMetrics(), 30_000);
+    const onFocus = () => void refreshMetrics();
+    window.addEventListener('focus', onFocus);
     return () => {
-      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [activeBusinessMode, settings.expiryAlertDays]);
+  }, [refreshMetrics]);
 
   const data = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -376,13 +395,19 @@ export default function DashboardPage() {
       return acc;
     }, new Map<string, number>());
 
-    const metricRevenue = salesMetrics?.revenue ?? revenue;
-    const metricGrossProfit = salesMetrics?.grossProfit ?? grossProfit;
-    const metricExpenseTotal = salesMetrics?.expenses ?? expenseTotal;
+    const metricRevenue = monthMetrics?.revenue ?? salesMetrics?.revenue ?? revenue;
+    const metricTodayRevenue = todayMetrics?.revenue ?? todayRevenue;
+    const metricMonthRevenue = monthMetrics?.revenue ?? monthRevenue;
+    const metricTodayProfit = todayMetrics?.grossProfit ?? todayProfit;
+    const metricMonthProfit = monthMetrics?.grossProfit ?? monthProfit;
+    const metricGrossProfit = monthMetrics?.grossProfit ?? salesMetrics?.grossProfit ?? grossProfit;
+    const metricExpenseTotal = monthMetrics?.expenses ?? salesMetrics?.expenses ?? expenseTotal;
+    const metricMonthExpenseTotal = monthMetrics?.expenses ?? monthExpenseTotal;
     const metricStockValue = inventoryMetrics?.totalValue ?? stockValue;
     const metricPotentialMargin = inventoryMetrics?.potentialProfit ?? potentialMargin;
-    const metricTopProducts = salesMetrics?.topProducts ?? topProducts;
+    const metricTopProducts = monthMetrics?.topProducts ?? salesMetrics?.topProducts ?? topProducts;
     const metricExpenseCategories =
+      monthMetrics?.expenseCategories ??
       salesMetrics?.expenseCategories ??
       [...expenseCategories.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
 
@@ -391,24 +416,27 @@ export default function DashboardPage() {
       recordedExpenses,
       todaySales,
       revenue: metricRevenue,
-      todayRevenue,
-      monthRevenue,
+      todaySalesCount: todayMetrics?.completedCount ?? todaySales.length,
+      todayRevenue: metricTodayRevenue,
+      monthRevenue: metricMonthRevenue,
       grossProfit: metricGrossProfit,
-      todayProfit,
-      monthProfit,
+      todayProfit: metricTodayProfit,
+      monthProfit: metricMonthProfit,
       expenseTotal: metricExpenseTotal,
-      monthExpenseTotal,
-      netProfit: metricGrossProfit - metricExpenseTotal,
-      monthNetProfit: monthProfit - monthExpenseTotal,
+      monthExpenseTotal: metricMonthExpenseTotal,
+      netProfit: (monthMetrics?.netProfit ?? (metricGrossProfit - metricExpenseTotal)),
+      monthNetProfit: metricMonthProfit - metricMonthExpenseTotal,
       stockValue: metricStockValue,
       retailStockValue,
       potentialMargin: metricPotentialMargin,
       stockAlerts,
+      stockAlertCount: inventoryMetrics ? inventoryMetrics.lowStock + inventoryMetrics.outOfStock + inventoryMetrics.expired : stockAlerts.length,
+      expiredCount: inventoryMetrics?.expired ?? expiredItems.length,
       expiredItems,
-      cashSales: salesMetrics?.cashSales ?? cashSales,
-      nonCashSales: salesMetrics?.nonCashSales ?? nonCashSales,
+      cashSales: monthMetrics?.cashSales ?? salesMetrics?.cashSales ?? cashSales,
+      nonCashSales: monthMetrics?.nonCashSales ?? salesMetrics?.nonCashSales ?? nonCashSales,
       vatCollected:
-        salesMetrics?.vatCollected ??
+        monthMetrics?.vatCollected ?? salesMetrics?.vatCollected ??
         completedSales
           .filter((sale) => sale.paymentMethod !== 'credit')
           .reduce((sum, sale) => sum + Number(sale.taxAmount || 0), 0),
@@ -416,13 +444,13 @@ export default function DashboardPage() {
       expenseCategories: metricExpenseCategories,
       totalProducts: inventoryMetrics?.totalProducts ?? inventory.length,
     };
-  }, [expenses, inventory, inventoryMetrics, sales, salesMetrics]);
+  }, [expenses, inventory, inventoryMetrics, monthMetrics, sales, salesMetrics, todayMetrics]);
 
   const kpis = [
     {
       label: 'Today Sales',
       value: formatMoney(data.todayRevenue, settings.currency),
-      helper: `${data.todaySales.length} transaction${data.todaySales.length === 1 ? '' : 's'} today`,
+      helper: `${data.todaySalesCount} transaction${data.todaySalesCount === 1 ? '' : 's'} today`,
       icon: Receipt,
       tone: 'text-primary',
       bg: 'bg-primary/10',
@@ -454,7 +482,7 @@ export default function DashboardPage() {
     {
       label: 'Total Stock Value',
       value: formatMoney(data.stockValue, settings.currency),
-      helper: `${data.stockAlerts.length} item${data.stockAlerts.length === 1 ? '' : 's'} need attention`,
+      helper: `${data.stockAlertCount} item${data.stockAlertCount === 1 ? '' : 's'} need attention`,
       icon: Boxes,
       tone: 'text-foreground',
       bg: 'bg-muted',
@@ -482,6 +510,8 @@ export default function DashboardPage() {
                     <span className="rounded-md bg-white/10 px-3 py-1 text-xs font-semibold text-white/70">
                       {pendingSyncCount} pending sync
                     </span>
+                    <span className="rounded-md bg-white/10 px-3 py-1 text-xs font-semibold text-white/70">Updated {metricsUpdatedAt ? metricsUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'waiting'}</span>
+                    <button type="button" onClick={() => void refreshMetrics()} disabled={isRefreshingMetrics} className="inline-flex items-center gap-1.5 rounded-md border border-white/15 px-3 py-1 text-xs font-semibold text-white/80 hover:bg-white/10 disabled:opacity-60"><RefreshCw size={13} className={isRefreshingMetrics ? 'animate-spin' : ''} /> Refresh</button>
                   </div>
                   <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-3">
                     <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
@@ -636,13 +666,13 @@ export default function DashboardPage() {
                     <div className="rounded-md bg-warning/10 p-3 text-warning">
                       <p className="text-[10px] font-bold uppercase">Alerts</p>
                       <p className="mt-1 text-2xl font-bold font-tabular">
-                        {data.stockAlerts.length}
+                        {data.stockAlertCount}
                       </p>
                     </div>
                     <div className="rounded-md bg-danger/10 p-3 text-danger">
                       <p className="text-[10px] font-bold uppercase">Expired</p>
                       <p className="mt-1 text-2xl font-bold font-tabular">
-                        {data.expiredItems.length}
+                        {data.expiredCount}
                       </p>
                     </div>
                     <div className="rounded-md bg-success/10 p-3 text-success">
@@ -676,7 +706,7 @@ export default function DashboardPage() {
                         <p className="font-bold font-tabular">{item.currentQty}</p>
                       </div>
                     ))}
-                    {data.stockAlerts.length === 0 && (
+                    {data.stockAlertCount === 0 && (
                       <p className="py-5 text-center text-sm text-muted-foreground">
                         No active stock alerts.
                       </p>
