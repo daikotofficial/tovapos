@@ -577,7 +577,7 @@ function SettingsPageContent() {
               <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">Direct thermal printing</p>
-                  <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Install the helper once on this cashier computer. It will start automatically after that.</p>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Install the helper once on this cashier computer. It runs locally and remains available across TOVAPOS website updates.</p>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:justify-end">
                   <a href="/api/print-helper/windows" download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90">

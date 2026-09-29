@@ -8,12 +8,28 @@ if (-not $Install -and $PSCommandPath -ne $installed) { $Install = $true }
 
 if ($Install) {
   New-Item -ItemType Directory -Force -Path $root | Out-Null
-  Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*$installed*" } | ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate | Out-Null }
+  Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like "*$installed*" } | ForEach-Object {
+    try { Invoke-CimMethod -InputObject $_ -MethodName Terminate | Out-Null } catch { }
+  }
   Copy-Item -LiteralPath $PSCommandPath -Destination $installed -Force
-  $command = "powershell.exe -NoProfile -File `"$installed`""
-  New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'TOVAPOS Printer Helper' -Value $command -PropertyType String -Force | Out-Null
-  Start-Process powershell.exe -ArgumentList @('-NoProfile', '-File', $installed) -WindowStyle Minimized
+
+  $taskName = 'TOVAPOS Printer Helper'
+  $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $taskArguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $installed + '"'
+  try {
+    $action = New-ScheduledTaskAction -Execute $powershell -Argument $taskArguments
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description 'TOVAPOS local receipt printer helper' -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName
+  } catch {
+    # Keep a compatibility fallback for Windows editions where Scheduled Tasks are unavailable.
+    $command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $installed + '"'
+    New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $taskName -Value $command -PropertyType String -Force | Out-Null
+    Start-Process $powershell -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $installed)
+  }
   Write-Host 'TOVAPOS Printer Helper installed for this Windows user.'
+  Write-Host 'It runs locally and survives TOVAPOS website updates.'
   exit 0
 }
 
