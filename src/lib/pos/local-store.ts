@@ -758,6 +758,16 @@ export async function lookupInventoryItem(rawCode: string): Promise<InventoryIte
 }
 
 export async function loadUsers(seed: TovaUser[]): Promise<TovaUser[]> {
+  if (shouldUsePostgresStore()) {
+    try {
+      const users = await apiRequest<TovaUser[]>('users');
+      await replaceBrowserStore('users', users);
+      return users;
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
+  }
+
   const existing = await getAll<TovaUser>('users');
   if (existing.length > 0) return existing;
   await putMany('users', seed);

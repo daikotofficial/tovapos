@@ -1214,16 +1214,36 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
   const upsertUser = useCallback(async (user: TovaUser) => {
     const transport = { ...user, updatedAt: new Date().toISOString() };
-    await saveUser(transport);
+    if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
+      if (!isOnline) throw new Error('User management requires an internet connection.');
+      const response = await fetch('/api/pos-store?store=users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(transport),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        users?: TovaUser[];
+        error?: string;
+      } | null;
+      if (!response.ok || !payload?.users?.[0]) {
+        throw new Error(payload?.error ?? 'Unable to save user account.');
+      }
+      const saved = payload.users[0];
+      await saveUser(saved);
+      setUsers((prev) => [...prev.filter((existing) => existing.id !== saved.id), saved]);
+      return saved;
+    }
+
     const {
       newPassword: _newPassword,
       passwordHash: _passwordHash,
       passwordSalt: _passwordSalt,
       ...safe
     } = transport;
+    await saveUser(safe);
     setUsers((prev) => [...prev.filter((existing) => existing.id !== safe.id), safe]);
     return safe;
-  }, []);
+  }, [isOnline]);
 
   const deleteUser = useCallback(
     async (userId: string) => {
@@ -1248,12 +1268,26 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         payload: { id: userId, email: target.email, deletedAt: new Date().toISOString() },
       });
 
+      if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
+        if (!isOnline) throw new Error('User management requires an internet connection.');
+        const response = await fetch('/api/pos-store?store=users', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: userId }),
+        });
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (!response.ok) throw new Error(payload?.error ?? 'Unable to delete user account.');
+        await deleteStoredUser(userId);
+        setUsers((prev) => prev.filter((user) => user.id !== userId));
+        return;
+      }
+
       await deleteStoredUser(userId);
       await saveSyncQueueItem(queueItem);
       setUsers((prev) => prev.filter((user) => user.id !== userId));
       setSyncQueue((prev) => [queueItem, ...prev]);
     },
-    [activeUserId, users]
+    [activeUserId, isOnline, users]
   );
 
   const upsertCustomer = useCallback(

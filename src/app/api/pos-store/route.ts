@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPosPool } from '@/lib/server/pos-db';
 import { getSubscriptionPlan } from '@/lib/pos/subscription';
 import type { Permission } from '@/lib/pos/types';
-import { hashPasswordServer } from '@/lib/server/password';
+import { hashPasswordServer, passwordStrengthError } from '@/lib/server/password';
 import {
   assertPermission,
   assertAnyPermission,
@@ -815,14 +815,19 @@ export async function PUT(request: NextRequest) {
       );
     }
     const permission = WRITE_PERMISSIONS[storeName];
-    if (permission && storeName !== 'settings') {
-      assertPermission(auth, permission);
-      await assertTenantPlanPermission(auth.tenantId, permission);
-    }
     const body = await request.json();
     let records = (Array.isArray(body) ? body : [body]) as PosRecord[];
     if (records.length === 0 || records.length > 500) {
       throw new HttpError(400, 'Write batch must contain 1 to 500 records', 'VALIDATION_ERROR');
+    }
+    const selfProfileRequest =
+      storeName === 'users' &&
+      records.length === 1 &&
+      records[0]?.id === auth.user.id &&
+      !records[0]?.newPassword;
+    if (permission && storeName !== 'settings' && !selfProfileRequest) {
+      assertPermission(auth, permission);
+      await assertTenantPlanPermission(auth.tenantId, permission);
     }
 
     if (storeName === 'inputVat') {
@@ -949,12 +954,38 @@ export async function PUT(request: NextRequest) {
           'auditor',
           'viewer',
         ]);
-        const requestedRole =
-          typeof record.role === 'string' && allowedRoles.has(record.role)
-            ? record.role
-            : 'cashier';
+        const suppliedRole = typeof record.role === 'string' ? record.role : '';
+        if (suppliedRole && !allowedRoles.has(suppliedRole)) {
+          throw new HttpError(400, 'This user role is not valid.', 'INVALID_ROLE');
+        }
+        const requestedRole = suppliedRole || current?.role || 'cashier';
+        const requestedStatus = record.status
+          ? record.status === 'suspended'
+            ? 'suspended'
+            : 'active'
+          : current?.status || 'active';
         const actingUserIsAdmin = ['owner', 'super-admin'].includes(auth.user.role);
         const protectedRoles = ['owner', 'super-admin', 'manager'];
+        const isSelf = current?.id === auth.user.id;
+        if (isSelf && current && requestedRole !== current.role) {
+          throw new HttpError(403, 'You cannot change your own role.', 'SELF_ROLE_CHANGE_FORBIDDEN');
+        }
+        if (isSelf && current && requestedStatus !== current.status) {
+          throw new HttpError(403, 'You cannot suspend or reactivate your own account.', 'SELF_STATUS_CHANGE_FORBIDDEN');
+        }
+        if (isSelf && current && Array.isArray(record.permissions)) {
+          const currentPermissions = [...(Array.isArray(current.permissions) ? current.permissions : [])].sort();
+          const requestedPermissionsForSelf = [...record.permissions.filter((permission) => typeof permission === 'string')].sort();
+          if (JSON.stringify(currentPermissions) !== JSON.stringify(requestedPermissionsForSelf)) {
+            throw new HttpError(403, 'You cannot change your own permissions.', 'SELF_PERMISSION_CHANGE_FORBIDDEN');
+          }
+        }
+        if (requestedRole === 'super-admin' && auth.user.role !== 'super-admin') {
+          throw new HttpError(403, 'Only a super admin can grant the super-admin role.', 'SUPER_ADMIN_ROLE_REQUIRED');
+        }
+        if (current?.role === 'super-admin' && auth.user.role !== 'super-admin') {
+          throw new HttpError(403, 'Only a super admin can modify a super-admin account.', 'SUPER_ADMIN_ROLE_REQUIRED');
+        }
         if (
           !actingUserIsAdmin &&
           (protectedRoles.includes(requestedRole) || protectedRoles.includes(current?.role))
@@ -965,14 +996,16 @@ export async function PUT(request: NextRequest) {
             'ADMIN_ROLE_REQUIRED'
           );
         }
-        const requestedPermissions = Array.isArray(record.permissions)
+        const requestedPermissions: Permission[] = Array.isArray(record.permissions)
           ? record.permissions.filter(
               (permission): permission is Permission =>
                 typeof permission === 'string' &&
                 permission !== 'sync-logs' &&
                 getSubscriptionPlan('delux').permissions.includes(permission as Permission)
             )
-          : [];
+          : Array.isArray(current?.permissions)
+            ? (current.permissions as unknown[]).filter((permission): permission is Permission => typeof permission === 'string')
+            : [];
         if (
           !actingUserIsAdmin &&
           requestedPermissions.some((permission) => !auth.user.permissions.includes(permission))
@@ -991,6 +1024,8 @@ export async function PUT(request: NextRequest) {
             'WEAK_PASSWORD'
           );
         }
+        const strengthError = newPassword ? passwordStrengthError(newPassword) : null;
+        if (strengthError) throw new HttpError(400, strengthError, 'WEAK_PASSWORD');
         const passwordHash = newPassword
           ? await hashPasswordServer(newPassword)
           : current?.password_hash;
@@ -1023,14 +1058,19 @@ export async function PUT(request: NextRequest) {
             typeof record.phone === 'string' ? record.phone.trim() : '',
             requestedRole,
             JSON.stringify(requestedPermissions),
-            record.status === 'suspended' ? 'suspended' : 'active',
+            requestedStatus,
             typeof record.branch === 'string' ? record.branch : '',
             pinHash,
             passwordHash,
             Boolean(newPassword),
           ]
         );
-        savedUsers.push(publicUser(saved.rows[0]));
+        const safeUser = publicUser(saved.rows[0]);
+        savedUsers.push(safeUser);
+        await getPosPool().query(
+          "INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, after_data) VALUES ($1, $2, $3, 'user', $4, $5::jsonb)",
+          [auth.tenantId, auth.user.id, current ? 'user.updated' : 'user.created', safeUser.id, JSON.stringify(safeUser)]
+        );
       }
       return NextResponse.json({ ok: true, users: savedUsers });
     }
@@ -1239,6 +1279,10 @@ export async function DELETE(request: NextRequest) {
         auth.tenantId,
         id,
       ]);
+      await getPosPool().query(
+        "INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, metadata) VALUES ($1, $2, 'user.deleted', 'user', $3, $4::jsonb)",
+        [auth.tenantId, auth.user.id, id, JSON.stringify({ targetRole: target.rows[0]?.role ?? null })]
+      );
       return NextResponse.json({ ok: true });
     }
 
