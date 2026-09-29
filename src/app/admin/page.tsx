@@ -162,6 +162,8 @@ export default function AdminPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'support'>('support');
   const [inviteUrl, setInviteUrl] = useState('');
+  const [currentAdminPassword, setCurrentAdminPassword] = useState('');
+  const [newAdminEmail, setNewAdminEmail] = useState('');
   const [planDrafts, setPlanDrafts] = useState<
     Record<string, { subscriptionPlanId: PlanId; subscriptionStatus: SubscriptionStatus }>
   >({});
@@ -327,6 +329,39 @@ export default function AdminPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Admin action failed');
       return false;
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const changeAdminEmail = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!admin) return;
+    setBusy('change-admin-email');
+    setError('');
+    try {
+      const response = await fetch('/api/admin/control-panel', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'change-admin-email',
+          currentPassword: currentAdminPassword,
+          newEmail: newAdminEmail,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        admin?: AdminUser;
+        error?: string;
+      } | null;
+      if (!response.ok || !payload?.admin) {
+        throw new Error(payload?.error ?? 'Unable to change the admin login email');
+      }
+      setAdmin(payload.admin);
+      setCurrentAdminPassword('');
+      setNewAdminEmail('');
+      toast.success('Admin login email updated. Use the new email next time you sign in.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to change the admin login email');
     } finally {
       setBusy('');
     }
@@ -1189,6 +1224,45 @@ export default function AdminPage() {
 
             {currentSection === 'admins' && (
               <div className="space-y-5">
+                <form
+                  onSubmit={changeAdminEmail}
+                  className="rounded-lg border border-primary/20 bg-primary/5 p-4"
+                >
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold">Change platform login email</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      This changes the email used to sign in to this admin control panel. It does not change a business user account.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                    <input
+                      type="password"
+                      value={currentAdminPassword}
+                      onChange={(event) => setCurrentAdminPassword(event.target.value)}
+                      className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                      placeholder="Current password"
+                      autoComplete="current-password"
+                      required
+                    />
+                    <input
+                      type="email"
+                      value={newAdminEmail}
+                      onChange={(event) => setNewAdminEmail(event.target.value)}
+                      className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                      placeholder={admin.email}
+                      autoComplete="email"
+                      required
+                    />
+                    <button
+                      type="submit"
+                      disabled={busy === 'change-admin-email'}
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {busy === 'change-admin-email' ? 'Saving…' : 'Save email'}
+                    </button>
+                  </div>
+                </form>
+
                 {isSuperAdmin ? (
                   <form
                     onSubmit={inviteAdmin}

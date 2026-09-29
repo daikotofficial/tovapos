@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import type { SupportTicket } from '@/lib/pos/types';
 import { getPosPool } from '@/lib/server/pos-db';
+import { verifyPasswordServer } from '@/lib/server/password';
 import { assertSameOrigin, errorResponse, HttpError } from '@/lib/server/security';
 import {
   assertPlatformOperator,
@@ -338,6 +339,53 @@ export async function PATCH(request: NextRequest) {
         client.release();
       }
       return NextResponse.json({ ok: true, delivered: tenantIds.rows.length });
+    }
+
+    if (action === 'change-admin-email') {
+      const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+      const newEmail = safeText(body.newEmail).toLowerCase();
+      if (!currentPassword) {
+        throw new HttpError(400, 'Current password is required', 'VALIDATION_ERROR');
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+        throw new HttpError(400, 'Enter a valid login email address', 'VALIDATION_ERROR');
+      }
+
+      const account = await getPosPool().query(
+        'SELECT password_hash, email FROM pos_platform_admins WHERE id = $1 AND status = $2 LIMIT 1',
+        [admin.id, 'active']
+      );
+      const passwordHash = account.rows[0]?.password_hash;
+      if (typeof passwordHash !== 'string' || !(await verifyPasswordServer(currentPassword, passwordHash))) {
+        throw new HttpError(401, 'Current password is incorrect', 'INVALID_CREDENTIALS');
+      }
+      if (String(account.rows[0].email).toLowerCase() === newEmail) {
+        throw new HttpError(400, 'Enter a different email address', 'VALIDATION_ERROR');
+      }
+
+      const duplicate = await getPosPool().query(
+        'SELECT id FROM pos_platform_admins WHERE lower(email) = $1 AND id <> $2 LIMIT 1',
+        [newEmail, admin.id]
+      );
+      if (duplicate.rows[0]) {
+        throw new HttpError(409, 'That email is already used by another admin account', 'EMAIL_IN_USE');
+      }
+
+      const updated = await getPosPool().query(
+        "UPDATE pos_platform_admins SET email = $2, updated_at = now() WHERE id = $1 AND status = 'active' RETURNING id, name, email, role, status, mfa_enabled",
+        [admin.id, newEmail]
+      );
+      if (!updated.rows[0]) throw new HttpError(409, 'Admin account is no longer active', 'ACCOUNT_CHANGED');
+      return NextResponse.json({
+        admin: {
+          id: updated.rows[0].id,
+          name: updated.rows[0].name,
+          email: updated.rows[0].email,
+          role: updated.rows[0].role,
+          status: updated.rows[0].status,
+          mfaEnabled: Boolean(updated.rows[0].mfa_enabled),
+        },
+      });
     }
 
     if (action === 'suspend-admin' || action === 'activate-admin' || action === 'delete-admin') {
