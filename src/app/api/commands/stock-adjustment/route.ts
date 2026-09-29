@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
       const now = new Date().toISOString();
       const saved: InventoryItem = {
         ...(existing ? (existing.data as InventoryItem) : product),
-        ...(existing && !expectedUpdatedAt ? {} : product),
+        ...product,
         currentQty: after,
         stockStatus: after === 0 ? 'out' : product.stockStatus,
         updatedAt: now,
