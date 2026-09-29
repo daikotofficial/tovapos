@@ -29,8 +29,22 @@ function buildThermalReceiptText(sale: SaleTransaction, _currency: string, busin
   if (sale.customerName) row('Customer', sale.customerName, true);
   row('Payment', sale.paymentMethod.toUpperCase(), true);
   lines.push('-'.repeat(width));
-  lines.push(boldOn + 'Description'.padEnd(24) + 'Qty'.padStart(5) + 'Price'.padStart(9) + 'Total'.padStart(10) + boldOff);
-  lines.push('-'.repeat(width));
+  const descriptionWidth = 22;
+  const quantityWidth = 4;
+  const priceWidth = 9;
+  const totalWidth = 10;
+  const tableDivider =
+    '-'.repeat(descriptionWidth) + '+' +
+    '-'.repeat(quantityWidth) + '+' +
+    '-'.repeat(priceWidth) + '+' +
+    '-'.repeat(totalWidth);
+  const tableLine = (description: string, quantity = '', price = '', total = '') =>
+    description.slice(0, descriptionWidth).padEnd(descriptionWidth) + '|' +
+    quantity.slice(0, quantityWidth).padStart(quantityWidth) + '|' +
+    price.slice(0, priceWidth).padStart(priceWidth) + '|' +
+    total.slice(0, totalWidth).padStart(totalWidth);
+  lines.push(boldOn + tableLine('Description', 'Qty', 'Price', 'Total') + boldOff);
+  lines.push(tableDivider);
   sale.items.forEach((item) => {
     const unit = item.saleUnit && item.saleUnit !== 'piece' ? ' (' + item.saleUnit + ')' : '';
     const name = item.name + unit;
@@ -38,8 +52,17 @@ function buildThermalReceiptText(sale: SaleTransaction, _currency: string, busin
     const total = money(item.unitPrice * item.quantity * (1 - item.discount / 100));
     let remaining = name;
     let first = true;
-    do { const part = remaining.slice(0, 24); remaining = remaining.slice(24).trimStart(); lines.push(first ? part.padEnd(24) + String(item.quantity).padStart(5) + price.padStart(9) + total.padStart(10) : part); first = false; } while (remaining);
-    lines.push('-'.repeat(width));
+    do {
+      const part = remaining.slice(0, descriptionWidth);
+      remaining = remaining.slice(descriptionWidth).trimStart();
+      lines.push(
+        first
+          ? tableLine(part, String(item.quantity), price, total)
+          : tableLine(part)
+      );
+      first = false;
+    } while (remaining);
+    lines.push(tableDivider);
   });
   row('Subtotal', money(sale.subtotal));
   if (sale.discountTotal > 0) row('Discount', '-' + money(sale.discountTotal));
@@ -48,6 +71,8 @@ function buildThermalReceiptText(sale: SaleTransaction, _currency: string, busin
   if (sale.paymentMethod === 'cash') { row('Cash Tendered', money(sale.cashTendered ?? 0)); row('Change', money(sale.changeGiven ?? 0)); }
   lines.push('-'.repeat(width));
   (receiptFooter || 'Thank you for shopping with us.').split(/\r?\n/).forEach((paragraph) => wrap(paragraph).forEach((line) => center(line)));
+  // Leave enough blank feed after the footer for common 80mm cutters to finish before cutting.
+  lines.push('', '', '', '');
   return lines.join('\r\n') + '\r\n';
 }
 
