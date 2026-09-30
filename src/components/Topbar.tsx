@@ -246,8 +246,8 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
             <span className="font-tabular" title={syncProgress.failed > 0 ? `${syncProgress.failed} synchronization group(s) need retry` : undefined}>
               {syncProgress.isSyncing
                 ? `Sending ${syncProgress.completed}/${syncProgress.total}`
-                : syncProgress.failed > 0
-                  ? `${syncProgress.failed} sync retry${syncProgress.failed === 1 ? '' : 'ies'} pending`
+                : syncProgress.failed > 0 && pendingSyncCount > 0
+                  ? `${syncProgress.failed} sync retr${syncProgress.failed === 1 ? 'y' : 'ies'} pending`
                   : `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting`}
             </span>
           </div>
