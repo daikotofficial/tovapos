@@ -79,6 +79,11 @@ export default function PaymentPanel({
   const { customers, hasPermission, settings } = usePosStore();
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const [splitInputValues, setSplitInputValues] = useState<Partial<Record<SplitPaymentMethod, string>>>({});
+  const [loyaltyInputValue, setLoyaltyInputValue] = useState(loyaltyPointsToRedeem > 0 ? String(loyaltyPointsToRedeem) : '');
+  useEffect(() => {
+    setLoyaltyInputValue(loyaltyPointsToRedeem > 0 ? String(loyaltyPointsToRedeem) : '');
+  }, [selectedCustomer?.id]);
+
   useEffect(() => {
     if (paymentMethod !== 'split') return;
     setSplitInputValues(
@@ -196,9 +201,11 @@ export default function PaymentPanel({
                 type="button"
                 disabled={!loyaltyEligible}
                 onClick={() =>
-                  setLoyaltyPointsToRedeem(
-                    loyaltyPointsToRedeem > 0 ? 0 : selectedCustomer.loyaltyPoints
-                  )
+                  (() => {
+                    const nextValue = loyaltyPointsToRedeem > 0 ? 0 : selectedCustomer.loyaltyPoints;
+                    setLoyaltyPointsToRedeem(nextValue);
+                    setLoyaltyInputValue(nextValue > 0 ? String(nextValue) : '');
+                  })()
                 }
                 className="rounded-md border border-primary/30 px-2 py-1 text-xs font-semibold text-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -216,10 +223,12 @@ export default function PaymentPanel({
                 type="number"
                 min="0"
                 max={selectedCustomer.loyaltyPoints}
-                value={loyaltyPointsToRedeem}
-                onChange={(event) =>
-                  setLoyaltyPointsToRedeem(Math.max(0, Number(event.target.value) || 0))
-                }
+                value={loyaltyInputValue}
+                onChange={(event) => {
+                  const raw = event.target.value;
+                  setLoyaltyInputValue(raw);
+                  setLoyaltyPointsToRedeem(Math.max(0, Number(raw) || 0));
+                }}
                 className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                 aria-label="Loyalty credit to use"
               />
