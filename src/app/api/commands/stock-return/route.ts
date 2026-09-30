@@ -60,13 +60,16 @@ export async function POST(request: NextRequest) {
     }
 
     const client = await getPosPool().connect();
+    let stage = 'starting transaction';
     try {
       await client.query('BEGIN');
+      stage = 'locking product';
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
         `stock-return:${auth.tenantId}:${productId}`,
       ]);
 
       const requestHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+      stage = 'claiming idempotency';
       const claim = await client.query(
         `INSERT INTO pos_idempotency_keys
           (tenant_id, idempotency_key, operation_type, request_hash)
@@ -88,6 +91,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(replay.rows[0].response_body);
       }
 
+      stage = 'loading matching sales';
       const salesResult = await client.query(
         `SELECT id, data FROM pos_tenant_sales
          WHERE tenant_id = $1
@@ -97,6 +101,7 @@ export async function POST(request: NextRequest) {
          FOR UPDATE`,
         [auth.tenantId, productId]
       );
+      stage = 'loading product';
       const inventoryResult = await client.query(
         `SELECT * FROM pos_tenant_inventory
          WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
@@ -109,6 +114,7 @@ export async function POST(request: NextRequest) {
       const updatedSales: SaleTransaction[] = [];
       const returnedItems: { saleId: string; quantity: number; stockQuantity: number; amount: number }[] = [];
       let restoredStockQuantity = 0;
+      stage = 'calculating return';
       for (const row of salesResult.rows) {
         if (remaining <= 0) break;
         const sale = row.data as SaleTransaction;
@@ -205,6 +211,7 @@ export async function POST(request: NextRequest) {
         stockStatus: computeStockStatus(afterQty, current.reorderLevel, current.expiryDate),
         updatedAt: now,
       };
+      stage = 'updating sales and reports';
       for (const sale of updatedSales) {
         await client.query(
           `UPDATE pos_tenant_records SET data = $3::jsonb, version = version + 1, updated_at = now()
@@ -213,6 +220,7 @@ export async function POST(request: NextRequest) {
         );
         await upsertTenantSaleIndex(client, auth.tenantId, normalizeSaleForIndex(sale));
       }
+      stage = 'updating inventory';
       await client.query(
         `UPDATE pos_tenant_records SET data = $3::jsonb, version = version + 1, updated_at = now()
          WHERE tenant_id = $1 AND store_name = 'inventory' AND record_id = $2`,
@@ -240,17 +248,20 @@ export async function POST(request: NextRequest) {
         createdBy: auth.user.name,
         syncStatus: 'synced',
       };
+      stage = 'recording stock movement';
       await client.query(
         `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
          VALUES ($1, 'stockMovements', $2, $3::jsonb)`,
         [auth.tenantId, movement.id, JSON.stringify(movement)]
       );
+      stage = 'recording return audit';
       await client.query(
         `INSERT INTO pos_audit_log
           (tenant_id, user_id, action, entity_type, entity_id, operation_id, after_data, metadata)
          VALUES ($1, $2, 'sale.returned', 'inventory', $3, $4, $5::jsonb, $6::jsonb)`,
         [auth.tenantId, auth.user.id, productId, operationId, JSON.stringify(updated), JSON.stringify({ quantity, restoredStockQuantity, reason, returnedItems })]
       );
+      stage = 'saving completed response';
       const responseBody = { inventory: updated, movement, sales: updatedSales, returnedItems, returnedQuantity: quantity, restoredStockQuantity };
       await client.query(
         `UPDATE pos_idempotency_keys SET response_status = 200, response_body = $3::jsonb, completed_at = now()
@@ -261,7 +272,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(responseBody);
     } catch (error) {
       await client.query('ROLLBACK');
-      throw normalizeReturnError(error);
+      throw normalizeReturnError(error, stage);
     } finally {
       client.release();
     }
@@ -287,14 +298,12 @@ function normalizeSaleForIndex(sale: SaleTransaction): Record<string, unknown> &
   return { ...sale, items } as unknown as Record<string, unknown> & { id: string };
 }
 
-function normalizeReturnError(error: unknown): unknown {
+function normalizeReturnError(error: unknown, stage: string): unknown {
   if (error instanceof HttpError) return error;
-  const candidate = error as { code?: unknown; message?: unknown };
-  if (typeof candidate?.code === 'string' && ['22P02', '23502', '23503', '23505', '23514'].includes(candidate.code)) {
-    return new HttpError(409, 'This return could not be applied because the sale record is inconsistent. No changes were saved; refresh the product and try again.', 'RETURN_CONFLICT');
-  }
-  console.error('Stock return transaction rolled back', error);
-  return new HttpError(409, 'The return was not saved. No stock or sales data was changed. Please refresh the product and try again.', 'RETURN_ROLLED_BACK');
+  const candidate = error as { code?: unknown };
+  const databaseCode = typeof candidate?.code === 'string' ? candidate.code : 'UNKNOWN';
+  console.error('Stock return transaction rolled back', { stage, databaseCode, error });
+  return new HttpError(409, `The return was not saved during ${stage}. No stock or sales data was changed. Please try again. Reference ${databaseCode}.`, 'RETURN_ROLLED_BACK');
 }
 
 function nextSaleStatus(nextGrandTotal: number, sale: SaleTransaction): 'unpaid' | 'partial' | 'paid' {
