@@ -240,9 +240,13 @@ export async function POST(request: NextRequest) {
         if (requested.discount > 0 && settings.allowCashierDiscounts === false) {
           assertPermission(auth, 'give-discount');
         }
+        // Piece sales must never go below the recorded piece cost. Pack/carton
+        // prices are deliberate bundle prices and are validated against their
+        // configured price below, while stock still deducts the full bundle quantity.
         if (
           settings.allowSellingBelowCost === false &&
-          requested.unitPrice < Number(row.unit_cost) * (requested.saleUnit === 'piece' ? 1 : Math.max(1, Number((row.data as InventoryItem).packQuantity) || 1))
+          requested.saleUnit === 'piece' &&
+          requested.unitPrice < Number(row.unit_cost)
         ) {
           throw new HttpError(409, `${row.name} cannot be sold below cost`, 'BELOW_COST_FORBIDDEN');
         }
