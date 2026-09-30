@@ -470,6 +470,7 @@ function ReportsContent() {
     customers,
     vendors,
     syncQueue,
+    users,
     settings,
     activeBusinessMode,
     hasPermission,
@@ -495,6 +496,19 @@ function ReportsContent() {
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
   const [serverReportRows, setServerReportRows] = useState<Record<string, unknown[]>>({});
+  const [reportRefreshToken, setReportRefreshToken] = useState(0);
+
+  useEffect(() => {
+    const refresh = () => setReportRefreshToken((token) => token + 1);
+    const interval = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
 
   useEffect(() => {
     setDraftRange(range);
@@ -522,7 +536,7 @@ function ReportsContent() {
     return () => {
       cancelled = true;
     };
-  }, [range.from, range.preset, range.to, settings.expiryAlertDays]);
+  }, [range.from, range.preset, range.to, settings.expiryAlertDays, reportRefreshToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -564,7 +578,7 @@ function ReportsContent() {
     return () => {
       cancelled = true;
     };
-  }, [range.from, range.preset, range.to]);
+  }, [range.from, range.preset, range.to, reportRefreshToken]);
 
   const data = useMemo(() => {
     const completedSales = sales.filter(
@@ -1677,23 +1691,34 @@ function ReportsContent() {
                 headers={['Cashier', 'Transactions', 'Revenue', 'Profit']}
                 empty="No cashier sales recorded yet."
                 rows={Object.entries(
-                  data.paidSales.reduce(
-                    (map, sale) => {
-                      const current = map[sale.cashier] ?? { count: 0, revenue: 0, profit: 0 };
-                      current.count += 1;
-                      current.revenue += sale.grandTotal;
-                      current.profit += profitForSale(sale);
-                      map[sale.cashier] = current;
-                      return map;
-                    },
-                    {} as Record<string, { count: number; revenue: number; profit: number }>
-                  )
-                ).map(([cashier, row]) => [
-                  cashier,
-                  row.count.toString(),
-                  formatMoney(row.revenue, settings.currency),
-                  formatMoney(row.profit, settings.currency),
-                ])}
+                  displaySalesRows
+                    .filter((sale) => sale.status === 'completed')
+                    .reduce(
+                      (map, sale) => {
+                        const user = sale.cashierId ? users.find((item) => item.id === sale.cashierId) : undefined;
+                        const key = sale.cashierId ?? `name:${sale.cashier}`;
+                        const current = map[key] ?? {
+                          cashier: user?.name ?? sale.cashier,
+                          count: 0,
+                          revenue: 0,
+                          profit: 0,
+                        };
+                        current.count += 1;
+                        current.revenue += sale.grandTotal;
+                        current.profit += profitForSale(sale);
+                        map[key] = current;
+                        return map;
+                      },
+                      {} as Record<string, { cashier: string; count: number; revenue: number; profit: number }>
+                    )
+                )
+                  .sort(([, left], [, right]) => right.revenue - left.revenue)
+                  .map(([, row]) => [
+                    row.cashier,
+                    row.count.toString(),
+                    formatMoney(row.revenue, settings.currency),
+                    formatMoney(row.profit, settings.currency),
+                  ])}
               />
             )}
 

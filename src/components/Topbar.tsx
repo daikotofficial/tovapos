@@ -243,10 +243,12 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
 
           <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground lg:flex">
             <Cloud size={12} />
-            <span className="font-tabular">
+            <span className="font-tabular" title={syncProgress.failed > 0 ? `${syncProgress.failed} synchronization group(s) need retry` : undefined}>
               {syncProgress.isSyncing
                 ? `Sending ${syncProgress.completed}/${syncProgress.total}`
-                : `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting`}
+                : syncProgress.failed > 0
+                  ? `${syncProgress.failed} sync retry${syncProgress.failed === 1 ? '' : 'ies'} pending`
+                  : `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting`}
             </span>
           </div>
 

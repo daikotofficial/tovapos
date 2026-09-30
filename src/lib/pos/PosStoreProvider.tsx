@@ -211,6 +211,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     latencyMs: null,
     lastCheckedAt: null,
   });
+  const [syncWakeVersion, setSyncWakeVersion] = useState(0);
   const [syncProgress, setSyncProgress] = useState<PosStoreValue['syncProgress']>({
     isSyncing: false,
     total: 0,
@@ -314,14 +315,22 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    const wakeSync = () => setSyncWakeVersion((version) => version + 1);
     const handleOnline = () => {
       setConnectivity((current) => ({ ...current, status: 'checking' }));
+      wakeSync();
       void checkHealth();
     };
     const handleOffline = () => void checkHealth();
-    const handleFocus = () => void checkHealth();
+    const handleFocus = () => {
+      wakeSync();
+      void checkHealth();
+    };
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') void checkHealth();
+      if (document.visibilityState === 'visible') {
+        wakeSync();
+        void checkHealth();
+      }
     };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -549,7 +558,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     if (!isHydrated || !isOnline || syncInFlightRef.current) return;
     const pending = syncQueue
       .filter(
-        (item) => (item.status === 'pending' || item.status === 'failed') && item.attempts < 5
+        (item) => item.status === 'pending' || item.status === 'failed'
       )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (pending.length === 0) return;
@@ -588,6 +597,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     })),
                     paymentMethod: payload.sale.paymentMethod,
                     cashTendered: payload.sale.cashTendered,
+                    paymentBreakdown: payload.sale.paymentBreakdown,
                     customerName: payload.sale.customerName,
                     loyaltyPointsToRedeem: payload.sale.loyaltyPointsRedeemed,
                     shiftId: payload.sale.shiftId,
@@ -778,7 +788,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                 setIsOnline(false);
                 setConnectivity((current) => ({
                   ...current,
-                  status: 'offline',
+                  status: navigator.onLine ? 'degraded' : 'offline',
                   latencyMs: null,
                   lastCheckedAt: new Date().toISOString(),
                 }));
@@ -795,7 +805,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     );
 
     return () => window.clearTimeout(timer);
-  }, [isHydrated, isOnline, syncQueue]);
+  }, [isHydrated, isOnline, syncQueue, syncWakeVersion]);
 
   const pendingSyncCount = useMemo(
     () => syncQueue.filter((item) => item.status === 'pending' || item.status === 'failed').length,
