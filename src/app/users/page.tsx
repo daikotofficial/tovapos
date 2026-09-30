@@ -66,7 +66,6 @@ const permissionGroups: { title: string; items: Permission[] }[] = [
       'expenses',
       'expense-heads',
       'reports',
-      'credit-sales',
       'export-reports',
       'view-profit',
       'view-cost-price',

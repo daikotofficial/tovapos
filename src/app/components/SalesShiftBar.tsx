@@ -21,19 +21,31 @@ export default function SalesShiftBar() {
   const [openingCash, setOpeningCash] = useState('');
   const [openingPurpose, setOpeningPurpose] = useState('');
   const [closingCash, setClosingCash] = useState('');
+  const [dontRemindToday, setDontRemindToday] = useState(false);
+  const reminderKey = currentUser
+    ? 'tovapos.sales-reminder.' + currentUser.id + '.' + businessDate() + '.' + (currentUser.lastLogin ?? currentUser.updatedAt ?? 'session')
+    : '';
 
   const refresh = () => setShift(currentUser ? getSalesShift(currentUser.id) : null);
   useEffect(() => {
-    refresh();
-    if (currentUser && process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
+    if (!currentUser) return;
+    const localShift = getSalesShift(currentUser.id);
+    setShift(localShift);
+    if (!localShift && !window.sessionStorage.getItem(reminderKey)) setMode('open');
+    if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
       void fetch('/api/commands/sales-shift?businessDate=' + businessDate(), { cache: 'no-store' })
         .then((response) => response.ok ? response.json() : null)
-        .then((serverShift) => { if (serverShift) saveSalesShift(serverShift as LocalSalesShift); })
+        .then((serverShift) => {
+          if (serverShift) {
+            saveSalesShift(serverShift as LocalSalesShift);
+            setMode(null);
+          }
+        })
         .catch(() => undefined);
     }
     window.addEventListener('tovapos:sales-shift', refresh);
     return () => window.removeEventListener('tovapos:sales-shift', refresh);
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.lastLogin, currentUser?.updatedAt, reminderKey]);
 
   const todaySales = useMemo(
     () => sales.filter((sale) => sale.status === 'completed' && sale.cashier === currentUser?.name && businessDate(new Date(sale.timestamp)) === businessDate()),
@@ -59,8 +71,10 @@ export default function SalesShiftBar() {
       if (!response.ok) { toast.error(payload?.error ?? 'Unable to open sales.'); return; }
       saveSalesShift(payload as LocalSalesShift);
     } else saveSalesShift(nextShift);
+    if (dontRemindToday && reminderKey) window.sessionStorage.setItem(reminderKey, '1');
     setOpeningCash('');
     setOpeningPurpose('');
+    setDontRemindToday(false);
     setMode(null);
     toast.success('Sales opened. Cash handover recorded.');
   };
@@ -104,6 +118,7 @@ export default function SalesShiftBar() {
         <div className="space-y-4">
           <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">Cash received</span><input autoFocus type="number" min="0" step="0.01" value={openingCash} onChange={(e) => setOpeningCash(e.target.value)} className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm" placeholder="0.00" /></label>
           <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">Purpose / handover note</span><textarea value={openingPurpose} onChange={(e) => setOpeningPurpose(e.target.value)} className="min-h-24 w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm" placeholder="e.g. Opening float handed over by James" /></label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={dontRemindToday} onChange={(e) => setDontRemindToday(e.target.checked)} className="h-4 w-4 rounded border-border text-primary" />Don't remind me again today</label>
         </div>
       </Modal>
 
