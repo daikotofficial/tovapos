@@ -16,7 +16,6 @@ import { getProductDiscountPercent, money, resolveTaxRate } from '@/lib/pos/sale
 import { loyaltyRedemption } from '@/lib/pos/loyalty';
 import { normalizeCustomerPhone } from '@/lib/pos/customer';
 import Modal from '@/components/ui/Modal';
-import NiceSelect from '@/components/ui/NiceSelect';
 import { getOpenSalesShift } from '@/lib/pos/sales-shift';
 
 export interface CartItem {
@@ -655,15 +654,38 @@ export default function CheckoutScreen() {
         >
           <label className="block space-y-1">
             <span className="text-xs font-medium text-muted-foreground">Sell as</span>
-            <NiceSelect
-              value={pendingSaleUnit}
-              onChange={(value) => setPendingSaleUnit(value as SaleUnit)}
-              options={[
-                { value: 'piece', label: `Piece - ${formatMoney(pendingPackProduct.sellingPrice, settings.currency)}` },
-                { value: pendingPackProduct.packUnit ?? 'pack', label: `${pendingPackProduct.packUnit === 'carton' ? 'Carton' : 'Pack'} - ${formatMoney(pendingPackProduct.packPrice ?? 0, settings.currency)}` },
-              ]}
-              className="min-h-[8rem] w-full"
-            />
+            <div role="radiogroup" aria-label="Quantity type" className="grid gap-2 sm:grid-cols-2">
+              {[
+                {
+                  value: 'piece' as SaleUnit,
+                  label: 'Piece',
+                  price: pendingPackProduct.sellingPrice,
+                },
+                {
+                  value: (pendingPackProduct.packUnit ?? 'pack') as SaleUnit,
+                  label: pendingPackProduct.packUnit === 'carton' ? 'Carton' : 'Pack',
+                  price: pendingPackProduct.packPrice ?? 0,
+                },
+              ].map((option) => {
+                const selected = pendingSaleUnit === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setPendingSaleUnit(option.value)}
+                    className={`flex min-h-16 items-center justify-between gap-3 rounded-lg border-2 px-3 py-3 text-left transition-colors ${selected ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background text-foreground hover:border-primary/50'}`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">{option.label}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">Price per {option.label.toLowerCase()}</span>
+                    </span>
+                    <span className="shrink-0 text-sm font-bold font-tabular">{formatMoney(option.price, settings.currency)}</span>
+                  </button>
+                );
+              })}
+            </div>
           </label>
         </Modal>
       )}
