@@ -97,8 +97,10 @@ export async function upsertTenantSaleIndex(
   tenantId: string,
   record: RecordData
 ): Promise<void> {
-  const items = array(record.items);
-  if (items.length === 0) throw new HttpError(400, 'A sale must contain items', 'VALIDATION_ERROR');
+  const items = array(record.items).filter((item) => Number(item.quantity) > 0);
+  if (items.length === 0 && text(record.status, 'completed') !== 'refunded') {
+    throw new HttpError(400, 'A sale must contain items', 'VALIDATION_ERROR');
+  }
   const timestamp = text(record.timestamp, new Date().toISOString());
   await client.query(
     `INSERT INTO pos_tenant_sales (

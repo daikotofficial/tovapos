@@ -107,11 +107,12 @@ export async function POST(request: NextRequest) {
 
       let remaining = quantity;
       const updatedSales: SaleTransaction[] = [];
-      const returnedItems: { saleId: string; quantity: number; amount: number }[] = [];
+      const returnedItems: { saleId: string; quantity: number; stockQuantity: number; amount: number }[] = [];
+      let restoredStockQuantity = 0;
       for (const row of salesResult.rows) {
         if (remaining <= 0) break;
         const sale = row.data as SaleTransaction;
-        const lines = sale.items as ReturnableLine[];
+        const lines = Array.isArray(sale.items) ? sale.items as ReturnableLine[] : [];
         let saleReturnedAmount = 0;
         let saleReturnedGross = 0;
         let saleReturnedDiscount = 0;
@@ -127,8 +128,9 @@ export async function POST(request: NextRequest) {
           );
           const originalTaxAmount = Number(line.originalTaxAmount ?? line.taxAmount ?? 0);
           const returnedQuantity = Math.min(remaining, line.quantity);
-          const ratio = originalQuantity > 0 ? returnedQuantity / originalQuantity : 0;
           const nextQuantity = line.quantity - returnedQuantity;
+          const unitsPerSale = Math.max(1, Number(line.unitsPerSale) || 1);
+          const returnedStockQuantity = returnedQuantity * unitsPerSale;
           const lineReturnTotal = money((originalLineTotal / Math.max(1, originalQuantity)) * returnedQuantity);
           const lineReturnGross = money(line.unitPrice * returnedQuantity);
           const lineReturnDiscount = money((originalDiscountAmount / Math.max(1, originalQuantity)) * returnedQuantity);
@@ -139,7 +141,8 @@ export async function POST(request: NextRequest) {
           saleReturnedGross += lineReturnGross;
           saleReturnedDiscount += lineReturnDiscount;
           saleReturnedTax += lineReturnTax;
-          returnedItems.push({ saleId: sale.id, quantity: returnedQuantity, amount: lineReturnTotal + (line.taxMode === 'exclusive' ? lineReturnTax : 0) });
+          restoredStockQuantity += returnedStockQuantity;
+          returnedItems.push({ saleId: sale.id, quantity: returnedQuantity, stockQuantity: returnedStockQuantity, amount: lineReturnTotal + (line.taxMode === 'exclusive' ? lineReturnTax : 0) });
           return {
             ...line,
             quantity: nextQuantity,
@@ -194,7 +197,7 @@ export async function POST(request: NextRequest) {
 
       const current = inventoryRow.data as InventoryItem;
       const beforeQty = Number(inventoryRow.current_qty);
-      const afterQty = beforeQty + quantity;
+      const afterQty = beforeQty + restoredStockQuantity;
       const now = new Date().toISOString();
       const updated: InventoryItem = {
         ...current,
@@ -225,7 +228,7 @@ export async function POST(request: NextRequest) {
         barcode: current.barcode,
         batchLot: current.batchLot,
         type: 'return',
-        quantityDelta: quantity,
+        quantityDelta: restoredStockQuantity,
         quantityBefore: beforeQty,
         quantityAfter: afterQty,
         unitCost: current.unitCost,
@@ -246,9 +249,9 @@ export async function POST(request: NextRequest) {
         `INSERT INTO pos_audit_log
           (tenant_id, user_id, action, entity_type, entity_id, operation_id, after_data, metadata)
          VALUES ($1, $2, 'sale.returned', 'inventory', $3, $4, $5::jsonb, $6::jsonb)`,
-        [auth.tenantId, auth.user.id, productId, operationId, JSON.stringify(updated), JSON.stringify({ quantity, reason, returnedItems })]
+        [auth.tenantId, auth.user.id, productId, operationId, JSON.stringify(updated), JSON.stringify({ quantity, restoredStockQuantity, reason, returnedItems })]
       );
-      const responseBody = { inventory: updated, movement, sales: updatedSales, returnedItems };
+      const responseBody = { inventory: updated, movement, sales: updatedSales, returnedItems, returnedQuantity: quantity, restoredStockQuantity };
       await client.query(
         `UPDATE pos_idempotency_keys SET response_status = 200, response_body = $3::jsonb, completed_at = now()
          WHERE tenant_id = $1 AND idempotency_key = $2`,
