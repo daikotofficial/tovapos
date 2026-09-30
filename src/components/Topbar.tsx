@@ -236,7 +236,7 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
                 : connectivity.status === 'checking'
                   ? 'Checking connection'
                   : connectivity.status === 'degraded'
-                    ? 'Connection unstable'
+                    ? 'Service connection degraded'
                     : 'Offline — sales can continue'}
             </span>
           </div>

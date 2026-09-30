@@ -297,7 +297,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           window.localStorage.setItem(OFFLINE_SINCE_KEY, new Date().toISOString());
         }
         healthFailuresRef.current += 1;
-        const status = healthFailuresRef.current >= 2 ? 'offline' : 'degraded';
+        const status = navigator.onLine
+          ? 'degraded'
+          : healthFailuresRef.current >= 2
+            ? 'offline'
+            : 'degraded';
         setIsOnline(false);
         setConnectivity((current) => ({
           ...current,
