@@ -1104,6 +1104,30 @@ export async function clearSalesCacheLocally(): Promise<void> {
   await replaceBrowserStore('sales', []);
 }
 
+/**
+ * Removes only local sale records and their unsent replay bundles. Inventory,
+ * products, and unrelated stock operations remain in the browser queue.
+ */
+export async function clearPendingSalesLocally(): Promise<number> {
+  const queue = await loadSyncQueue();
+  const saleOperationIds = new Set(
+    queue
+      .filter((item) => item.entity === 'sale' && item.status !== 'synced')
+      .map((item) => item.operationId)
+  );
+  const remainingQueue = queue.filter((item) => !saleOperationIds.has(item.operationId));
+  const movements = await getAllFromBrowser<StockMovement>('stockMovements');
+  await Promise.all([
+    replaceBrowserStore('sales', []),
+    replaceBrowserStore('syncQueue', remainingQueue),
+    replaceBrowserStore(
+      'stockMovements',
+      movements.filter((movement) => !saleOperationIds.has(movement.operationId))
+    ),
+  ]);
+  return saleOperationIds.size;
+}
+
 export async function cacheCustomersLocally(items: Customer[]): Promise<void> {
   await putManyInBrowser('customers', items);
 }

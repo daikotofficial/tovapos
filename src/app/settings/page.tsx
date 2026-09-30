@@ -26,7 +26,7 @@ import PermissionGate from '@/components/PermissionGate';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { BusinessSettings, BusinessMode } from '@/lib/pos/types';
-import { clearSalesCacheLocally } from '@/lib/pos/local-store';
+import { clearPendingSalesLocally } from '@/lib/pos/local-store';
 import { clearAllSalesShiftsLocally } from '@/lib/pos/sales-shift';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
@@ -975,7 +975,7 @@ function SettingsPageContent() {
 
 
 function SalesDataResetCard() {
-  const { currentUser, isOnline, pendingSyncCount } = usePosStore();
+  const { currentUser, isOnline } = usePosStore();
   const [open, setOpen] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [clearing, setClearing] = useState(false);
@@ -992,10 +992,6 @@ function SalesDataResetCard() {
       toast.error('Connect to the internet before clearing sales data.');
       return;
     }
-    if (pendingSyncCount > 0) {
-      toast.error('Wait for pending updates to finish before clearing sales data.');
-      return;
-    }
     setClearing(true);
     try {
       const response = await fetch('/api/commands/clear-sales', {
@@ -1008,10 +1004,12 @@ function SalesDataResetCard() {
         removed?: { sales?: number };
       } | null;
       if (!response.ok) throw new Error(payload?.error || 'Unable to clear sales data.');
-      await clearSalesCacheLocally();
+      const discardedPendingSales = await clearPendingSalesLocally();
       clearAllSalesShiftsLocally();
       toast.success(
-        String(payload?.removed?.sales ?? 0) + ' sales record(s) cleared. Products and stock were not changed.'
+        String(payload?.removed?.sales ?? 0) + ' sales record(s) cleared. ' +
+          (discardedPendingSales > 0 ? `${discardedPendingSales} pending test sale(s) discarded. ` : '') +
+          'Products and stock were not changed.'
       );
       setOpen(false);
       setConfirmation('');
@@ -1045,7 +1043,7 @@ function SalesDataResetCard() {
         {open && (
           <div className="border-t border-danger/20 px-4 py-4">
             <p className="text-xs leading-5 text-danger">
-              This is a permanent test-data cleanup. Do not use it for a live accounting reset. Pending offline updates must be completed first.
+              This resets sales, report, dashboard, and sales-shift data only. Pending test sales are discarded so they cannot return after the reset. Products, stock, and unrelated sync operations are preserved.
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
               <label className="min-w-0 flex-1 space-y-1">
@@ -1061,7 +1059,7 @@ function SalesDataResetCard() {
               <button
                 type="button"
                 onClick={clearSales}
-                disabled={clearing || !isOnline || pendingSyncCount > 0 || confirmation.trim() !== 'CLEAR SALES DATA'}
+                disabled={clearing || !isOnline || confirmation.trim() !== 'CLEAR SALES DATA'}
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-danger px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {clearing && <Loader2 size={15} className="animate-spin" />}
