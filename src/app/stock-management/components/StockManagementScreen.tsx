@@ -10,6 +10,7 @@ import AddStockModal from '@/app/inventory-management/components/AddStockModal';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { InventoryItem, StockBatch, StockMovement } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
+import { loadInventoryPage, lookupInventoryItem } from '@/lib/pos/local-store';
 
 const inputClass = 'w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/25';
 const labelClass = 'mb-1.5 block text-xs font-semibold text-muted-foreground';
@@ -29,6 +30,8 @@ export default function StockManagementScreen() {
   const [action, setAction] = useState<Action>('receive');
   const [showActionModal, setShowActionModal] = useState(false);
   const [showAddProduct, setShowAddProduct] = useState(false);
+  const [liveSuggestions, setLiveSuggestions] = useState<InventoryItem[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [batches, setBatches] = useState<StockBatch[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [audits, setAudits] = useState<{ id: number; action: string; metadata?: Record<string, unknown>; createdAt: string; userId: string }[]>([]);
@@ -48,11 +51,44 @@ export default function StockManagementScreen() {
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  const suggestions = useMemo(() => {
+  const localSuggestions = useMemo(() => {
     const value = query.trim().toLowerCase();
     if (!value) return inventory.slice(0, 8);
     return inventory.filter((item) => [item.name, item.sku, item.barcode ?? '', ...(item.skuAliases ?? []).map((alias) => alias.code), ...(item.barcodeAliases ?? []).map((alias) => alias.code)].some((field) => field.toLowerCase().includes(value))).slice(0, 8);
   }, [inventory, query]);
+
+  useEffect(() => {
+    const value = query.trim();
+    if (!value || selectedProduct) {
+      setLiveSuggestions([]);
+      setIsSearching(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const result = await loadInventoryPage({ q: value, limit: 8 });
+        if (!cancelled) setLiveSuggestions(result.items);
+      } catch (error) {
+        if (!cancelled) {
+          setLiveSuggestions([]);
+          console.warn('Live stock product search failed', error);
+        }
+      } finally {
+        if (!cancelled) setIsSearching(false);
+      }
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, selectedProduct]);
+
+  const suggestions = useMemo(() => {
+    const merged = [...liveSuggestions, ...localSuggestions];
+    return Array.from(new Map(merged.map((item) => [item.id, item])).values()).slice(0, 8);
+  }, [liveSuggestions, localSuggestions]);
 
   const loadBatches = async (product: InventoryItem) => {
     setSelectedProduct(product);
@@ -150,8 +186,8 @@ export default function StockManagementScreen() {
           </div>
           <div className="relative mt-5">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={query} onChange={(event) => { setQuery(event.target.value); if (selectedProduct && event.target.value !== selectedProduct.name) setSelectedProduct(null); }} onKeyDown={(event) => { if (event.key === 'Enter' && suggestions[0]) void loadBatches(suggestions[0]); }} className={`${inputClass} pl-10`} placeholder="Search or scan product name, SKU, or barcode" autoComplete="off" />
-            {query && !selectedProduct && suggestions.length > 0 && <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-modal">{suggestions.map((item) => <button key={item.id} type="button" onClick={() => void loadBatches(item)} className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left hover:bg-muted"><span className="min-w-0"><span className="block truncate text-sm font-semibold">{item.name}</span><span className="block truncate text-xs text-muted-foreground">{item.sku} {item.barcode ? `· ${item.barcode}` : ''}</span></span><span className="shrink-0 text-xs text-primary">Qty {item.currentQty}</span></button>)}</div>}
+            <input value={query} onChange={(event) => { setQuery(event.target.value); if (selectedProduct && event.target.value !== selectedProduct.name) setSelectedProduct(null); }} onKeyDown={async (event) => { if (event.key !== 'Enter') return; event.preventDefault(); const exact = await lookupInventoryItem(query); if (exact) { await loadBatches(exact); return; } if (suggestions[0]) await loadBatches(suggestions[0]); else toast.error(`No active product found for “${query.trim()}”.`); }} className={`${inputClass} pl-10`} placeholder="Search or scan product name, SKU, or barcode" autoComplete="off" />
+            {query && !selectedProduct && (suggestions.length > 0 || isSearching) && <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-modal">{isSearching && suggestions.length === 0 ? <p className="px-3 py-3 text-sm text-muted-foreground">Searching live inventory...</p> : suggestions.map((item) => <button key={item.id} type="button" onClick={() => void loadBatches(item)} className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left hover:bg-muted"><span className="min-w-0"><span className="block truncate text-sm font-semibold">{item.name}</span><span className="block truncate text-xs text-muted-foreground">{item.sku} {item.barcode ? `· ${item.barcode}` : ''}</span></span><span className="shrink-0 text-xs text-primary">Qty {item.currentQty}</span></button>)}</div>}
           </div>
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground"><ScanLine size={13} /> Scanner input is ready — scan into the search field and press Enter.</p>
         </section>
