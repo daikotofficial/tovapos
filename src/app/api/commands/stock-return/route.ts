@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
            WHERE tenant_id = $1 AND store_name = 'sales' AND record_id = $2`,
           [auth.tenantId, sale.id, JSON.stringify(sale)]
         );
-        await upsertTenantSaleIndex(client, auth.tenantId, sale as unknown as Record<string, unknown> & { id: string });
+        await upsertTenantSaleIndex(client, auth.tenantId, normalizeSaleForIndex(sale));
       }
       await client.query(
         `UPDATE pos_tenant_records SET data = $3::jsonb, version = version + 1, updated_at = now()
@@ -270,13 +270,31 @@ export async function POST(request: NextRequest) {
   }
 }
 
+function normalizeSaleForIndex(sale: SaleTransaction): Record<string, unknown> & { id: string } {
+  const items = Array.isArray(sale.items)
+    ? sale.items
+        .filter((line) => Number(line.quantity) > 0)
+        .map((line, index) => ({
+          ...line,
+          id: text(line.id) || `${sale.id}-return-${index}`,
+          quantity: Number(line.quantity),
+          unitPrice: Number(line.unitPrice) || 0,
+          unitCost: Number(line.unitCost) || 0,
+          discount: Math.min(100, Math.max(0, Number(line.discount) || 0)),
+          lineTotal: Math.max(0, Number(line.lineTotal) || 0),
+        }))
+    : [];
+  return { ...sale, items } as unknown as Record<string, unknown> & { id: string };
+}
+
 function normalizeReturnError(error: unknown): unknown {
   if (error instanceof HttpError) return error;
-  const candidate = error as { code?: unknown };
+  const candidate = error as { code?: unknown; message?: unknown };
   if (typeof candidate?.code === 'string' && ['22P02', '23502', '23503', '23505', '23514'].includes(candidate.code)) {
-    return new HttpError(409, 'This return could not be applied because the sale record is inconsistent. No changes were saved; refresh the sale history and try again.', 'RETURN_CONFLICT');
+    return new HttpError(409, 'This return could not be applied because the sale record is inconsistent. No changes were saved; refresh the product and try again.', 'RETURN_CONFLICT');
   }
-  return error;
+  console.error('Stock return transaction rolled back', error);
+  return new HttpError(409, 'The return was not saved. No stock or sales data was changed. Please refresh the product and try again.', 'RETURN_ROLLED_BACK');
 }
 
 function nextSaleStatus(nextGrandTotal: number, sale: SaleTransaction): 'unpaid' | 'partial' | 'paid' {
