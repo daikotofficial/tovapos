@@ -262,12 +262,14 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       ...inventoryData,
       id: editItem?.id ?? `inv-${Date.now()}`,
       sku: data.sku.trim(),
-      barcode: data.barcode?.trim() || data.sku.trim(),
+      barcode: editItem?.barcode || data.sku.trim(),
       batchLot: data.batchLot?.trim() || 'N/A',
       supplier: data.supplier?.trim() || 'Unassigned',
       supplierPhone: data.supplierPhone?.trim() || undefined,
       supplierInvoiceNumber: data.supplierInvoiceNumber?.trim() || undefined,
       manufactureDate: data.manufactureDate || '',
+      variantName: editItem?.variantName,
+      description: editItem?.description,
       expiryDate,
       currentQty: Number(data.currentQty) || 0,
       reorderLevel: Number(data.reorderLevel) || 1,
@@ -436,30 +438,6 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 Barcode scanners work like keyboards. Click Scan, then scan the product code.
               </p>
               {errors.sku && <p className={errorClass}>{errors.sku.message}</p>}
-            </div>
-            <div>
-              <label className={labelClass}>Barcode</label>
-              <input
-                {...register('barcode')}
-                className={`${inputClass} font-mono`}
-                placeholder="Barcode"
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Variant / Pack Size</label>
-              <input
-                {...register('variantName')}
-                className={inputClass}
-                placeholder="Pack size, color, or variant"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className={labelClass}>Description</label>
-              <textarea
-                {...register('description')}
-                className={`${inputClass} min-h-20`}
-                placeholder="Optional product notes, supplier description, or handling instruction"
-              />
             </div>
             <div>
               <div className="flex items-center justify-between gap-3">
