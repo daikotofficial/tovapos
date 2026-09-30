@@ -24,6 +24,7 @@ import PermissionGate from '@/components/PermissionGate';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { BusinessSettings, BusinessMode } from '@/lib/pos/types';
+import { clearSalesCacheLocally } from '@/lib/pos/local-store';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
 import {
@@ -979,7 +980,8 @@ function SalesDataResetCard() {
   if (!currentUser || !['owner', 'super-admin'].includes(currentUser.role)) return null;
 
   const clearSales = async () => {
-    if (confirmation !== 'CLEAR SALES DATA') {
+    const normalizedConfirmation = confirmation.trim();
+    if (normalizedConfirmation !== 'CLEAR SALES DATA') {
       toast.error('Type CLEAR SALES DATA exactly to continue.');
       return;
     }
@@ -996,13 +998,14 @@ function SalesDataResetCard() {
       const response = await fetch('/api/commands/clear-sales', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmation }),
+        body: JSON.stringify({ confirmation: normalizedConfirmation }),
       });
       const payload = (await response.json().catch(() => null)) as {
         error?: string;
         removed?: { sales?: number };
       } | null;
       if (!response.ok) throw new Error(payload?.error || 'Unable to clear sales data.');
+      await clearSalesCacheLocally();
       toast.success(
         String(payload?.removed?.sales ?? 0) + ' sales record(s) cleared. Products and stock were not changed.'
       );
@@ -1054,7 +1057,7 @@ function SalesDataResetCard() {
               <button
                 type="button"
                 onClick={clearSales}
-                disabled={clearing || !isOnline || pendingSyncCount > 0 || confirmation !== 'CLEAR SALES DATA'}
+                disabled={clearing || !isOnline || pendingSyncCount > 0 || confirmation.trim() !== 'CLEAR SALES DATA'}
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-danger px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {clearing && <Loader2 size={15} className="animate-spin" />}

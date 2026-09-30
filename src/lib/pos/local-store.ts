@@ -922,8 +922,8 @@ export async function loadSales(): Promise<SaleTransaction[]> {
   if (shouldUsePostgresStore()) {
     try {
       const sales = await apiRequest<SaleTransaction[]>('sales', undefined, { limit: 500 });
-      void putManyInBrowser('sales', sales).catch((error) =>
-        console.warn('Unable to cache sales in this browser', error)
+      void replaceBrowserStore('sales', sales).catch((error) =>
+        console.warn('Unable to replace cached sales in this browser', error)
       );
       return sales.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     } catch (error) {
@@ -1098,6 +1098,10 @@ export async function cacheInventoryLocally(items: InventoryItem[]): Promise<voi
 
 export async function cacheSalesLocally(items: SaleTransaction[]): Promise<void> {
   await putManyInBrowser('sales', items);
+}
+
+export async function clearSalesCacheLocally(): Promise<void> {
+  await replaceBrowserStore('sales', []);
 }
 
 export async function cacheCustomersLocally(items: Customer[]): Promise<void> {
