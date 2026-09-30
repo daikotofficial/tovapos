@@ -64,23 +64,23 @@ export default function StockManagementScreen() {
       setIsSearching(false);
       return;
     }
-    let cancelled = false;
+    const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setIsSearching(true);
       try {
-        const result = await loadInventoryPage({ q: value, limit: 8 });
-        if (!cancelled) setLiveSuggestions(result.items);
+        const result = await loadInventoryPage({ q: value, limit: 8, signal: controller.signal });
+        if (!controller.signal.aborted) setLiveSuggestions(result.items);
       } catch (error) {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLiveSuggestions([]);
           console.warn('Live stock product search failed', error);
         }
       } finally {
-        if (!cancelled) setIsSearching(false);
+        if (!controller.signal.aborted) setIsSearching(false);
       }
-    }, 180);
+    }, 120);
     return () => {
-      cancelled = true;
+      controller.abort();
       window.clearTimeout(timer);
     };
   }, [query, selectedProduct]);

@@ -109,6 +109,7 @@ export interface InventoryPageInput {
   limit?: number;
   includeTotal?: boolean;
   expiryAlertDays?: number;
+  signal?: AbortSignal;
 }
 
 function canUseIndexedDb(): boolean {
@@ -532,8 +533,9 @@ export async function loadInventoryPage(
 ): Promise<InventoryPageResult> {
   if (shouldUsePostgresStore()) {
     try {
-      const result = await apiRequest<InventoryPageResult>('inventory', undefined, {
-        ...input,
+      const { signal, ...params } = input;
+      const result = await apiRequest<InventoryPageResult>('inventory', { signal }, {
+        ...params,
         limit: input.limit ?? 100,
       });
       void putManyInBrowser('inventory', result.items).catch((error) =>
@@ -544,6 +546,7 @@ export async function loadInventoryPage(
         items: result.items.map(normalizeInventoryItem),
       };
     } catch (error) {
+      if (input.signal?.aborted) throw error;
       if (!isNetworkFailure(error)) throw error;
     }
   }
