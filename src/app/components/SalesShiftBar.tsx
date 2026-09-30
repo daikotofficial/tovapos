@@ -27,6 +27,20 @@ export default function SalesShiftBar() {
     : '';
 
   const refresh = () => setShift(currentUser ? getSalesShift(currentUser.id) : null);
+  const refreshAuthoritativeShift = async () => {
+    if (!currentUser || process.env.NEXT_PUBLIC_STORAGE_DRIVER !== 'postgres') return;
+    try {
+      const response = await fetch('/api/commands/sales-shift?businessDate=' + businessDate(), { cache: 'no-store' });
+      if (!response.ok) return;
+      const serverShift = await response.json();
+      if (serverShift) {
+        saveSalesShift(serverShift as LocalSalesShift);
+        setShift(serverShift as LocalSalesShift);
+      }
+    } catch {
+      // The close action itself will require connectivity and revalidate on the server.
+    }
+  };
   useEffect(() => {
     if (!currentUser) return;
     const localShift = getSalesShift(currentUser.id);
@@ -60,9 +74,13 @@ export default function SalesShiftBar() {
       && businessDate(new Date(sale.timestamp)) === businessDate()),
     [currentUser?.id, sales, shift]
   );
-  const totalSales = todaySales.reduce((sum, sale) => sum + sale.grandTotal, 0);
-  const cashSales = todaySales.reduce((sum, sale) => sum + cashCollectedForSale(sale), 0);
+  const localTotalSales = todaySales.reduce((sum, sale) => sum + sale.grandTotal, 0);
+  const localCashSales = todaySales.reduce((sum, sale) => sum + cashCollectedForSale(sale), 0);
+  const totalSales = shift?.totalSales ?? localTotalSales;
+  const cashSales = shift?.cashSales ?? localCashSales;
   const expectedCash = (shift?.openingCash ?? 0) + cashSales;
+  const paymentBreakdown = shift?.paymentBreakdown ?? {};
+  const nonCashSales = Math.max(0, totalSales - cashSales);
   const countedCash = Number(closingCash);
   const variance = Number.isFinite(countedCash) ? countedCash - expectedCash : 0;
   const balanced = closingCash !== '' && Math.abs(variance) < 0.005;
@@ -119,7 +137,7 @@ export default function SalesShiftBar() {
         </div>
         <div className="flex gap-2">
           {!shift && <button type="button" onClick={() => setMode('open')} className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white">Open Sales</button>}
-          {shift?.status === 'open' && <button type="button" onClick={() => { setClosingCash(expectedCash.toFixed(2)); setMode('close'); }} className="rounded-lg border border-primary px-3 py-2 text-sm font-semibold text-primary">Close Sales</button>}
+          {shift?.status === 'open' && <button type="button" onClick={async () => { await refreshAuthoritativeShift(); setMode('close'); }} className="rounded-lg border border-primary px-3 py-2 text-sm font-semibold text-primary">Close Sales</button>}
         </div>
       </div>
 
@@ -135,7 +153,13 @@ export default function SalesShiftBar() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">Total sales</p><p className="mt-1 text-lg font-bold">{formatMoney(totalSales, settings.currency)}</p></div>
-            <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">Expected cash</p><p className="mt-1 text-lg font-bold">{formatMoney(expectedCash, settings.currency)}</p></div>
+            <div className="rounded-lg bg-primary/10 p-3"><p className="text-xs text-muted-foreground">Expected cash at hand</p><p className="mt-1 text-lg font-bold text-primary">{formatMoney(expectedCash, settings.currency)}</p></div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+            <div className="rounded-lg border border-border p-2.5"><p className="text-muted-foreground">Opening cash</p><p className="mt-1 font-bold">{formatMoney(shift?.openingCash ?? 0, settings.currency)}</p></div>
+            <div className="rounded-lg border border-border p-2.5"><p className="text-muted-foreground">Cash sales</p><p className="mt-1 font-bold">{formatMoney(paymentBreakdown.cash ?? cashSales, settings.currency)}</p></div>
+            <div className="rounded-lg border border-border p-2.5"><p className="text-muted-foreground">Card / transfer</p><p className="mt-1 font-bold">{formatMoney((paymentBreakdown.card ?? 0) + (paymentBreakdown['bank-transfer'] ?? 0), settings.currency)}</p></div>
+            <div className="rounded-lg border border-border p-2.5"><p className="text-muted-foreground">Other non-cash</p><p className="mt-1 font-bold">{formatMoney(Math.max(0, nonCashSales - (paymentBreakdown.card ?? 0) - (paymentBreakdown['bank-transfer'] ?? 0)), settings.currency)}</p></div>
           </div>
           <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">Cash sales amount counted</span><input autoFocus type="number" min="0" step="0.01" value={closingCash} onChange={(e) => setClosingCash(e.target.value)} className={'w-full rounded-lg border bg-background px-3 py-2.5 text-sm ' + (closingCash !== '' && !balanced ? 'border-danger focus:ring-danger/30' : 'border-border')} placeholder="0.00" /></label>
           {closingCash !== '' && <div className={'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold ' + (balanced ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger')}>{balanced ? 'Cash balances exactly.' : <><AlertTriangle size={15} /> Short / over by {formatMoney(Math.abs(variance), settings.currency)}. Adjust the count before closing.</>}</div>}

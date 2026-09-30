@@ -47,7 +47,37 @@ export async function GET(request: NextRequest) {
        LIMIT 1`,
       [auth.tenantId, auth.user.id, businessDate]
     );
-    return NextResponse.json(result.rows[0]?.data ?? null);
+    const shift = result.rows[0]?.data as Record<string, unknown> | undefined;
+    if (!shift) return NextResponse.json(null);
+    const sales = await getPosPool().query(
+      `SELECT data FROM pos_tenant_records
+       WHERE tenant_id = $1 AND store_name = 'sales'
+         AND data->>'status' = 'completed'
+         AND data->>'cashierId' = $2
+         AND data->>'shiftId' = $3`,
+      [auth.tenantId, auth.user.id, shift.id]
+    );
+    const paymentBreakdown: Record<string, number> = { cash: 0, card: 0, 'bank-transfer': 0, mobile: 0, credit: 0 };
+    for (const row of sales.rows) {
+      const data = row.data as Record<string, unknown>;
+      if (data.paymentMethod === 'split' && data.paymentBreakdown && typeof data.paymentBreakdown === 'object') {
+        for (const [method, amount] of Object.entries(data.paymentBreakdown as Record<string, unknown>)) {
+          paymentBreakdown[method] = (paymentBreakdown[method] ?? 0) + Number(amount ?? 0);
+        }
+      } else {
+        const method = typeof data.paymentMethod === 'string' ? data.paymentMethod : 'cash';
+        paymentBreakdown[method] = (paymentBreakdown[method] ?? 0) + Number(data.grandTotal ?? 0);
+      }
+    }
+    const totalSales = sales.rows.reduce((sum, row) => sum + Number(row.data?.grandTotal ?? 0), 0);
+    const cashSales = paymentBreakdown.cash ?? 0;
+    return NextResponse.json({
+      ...shift,
+      totalSales,
+      cashSales,
+      paymentBreakdown,
+      expectedCash: Number(shift.openingCash ?? 0) + cashSales,
+    });
   } catch (error) {
     return errorResponse(error);
   }

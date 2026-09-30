@@ -10,6 +10,9 @@ export interface LocalSalesShift {
   closingCash?: number;
   expectedCash?: number;
   cashVariance?: number;
+  totalSales?: number;
+  cashSales?: number;
+  paymentBreakdown?: Record<string, number>;
   status: 'open' | 'closed';
 }
 
