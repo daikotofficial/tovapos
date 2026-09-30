@@ -48,8 +48,11 @@ export default function SalesShiftBar() {
   }, [currentUser?.id, currentUser?.lastLogin, currentUser?.updatedAt, reminderKey]);
 
   const todaySales = useMemo(
-    () => sales.filter((sale) => sale.status === 'completed' && sale.cashier === currentUser?.name && businessDate(new Date(sale.timestamp)) === businessDate()),
-    [currentUser?.name, sales]
+    () => sales.filter((sale) => sale.status === 'completed'
+      && sale.cashierId === currentUser?.id
+      && (!shift || sale.shiftId === shift.id)
+      && businessDate(new Date(sale.timestamp)) === businessDate()),
+    [currentUser?.id, sales, shift]
   );
   const totalSales = todaySales.reduce((sum, sale) => sum + sale.grandTotal, 0);
   const cashSales = todaySales.reduce((sum, sale) => sum + cashCollectedForSale(sale), 0);

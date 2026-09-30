@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bell,
   AlertTriangle,
@@ -30,6 +30,8 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
   const [currentTime, setCurrentTime] = useState('');
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
+  const notificationPanelRef = useRef<HTMLDivElement>(null);
+  const readStorageKey = `tovapos.readNotifications.${tenant?.id ?? 'local'}.${currentUser?.id ?? 'anonymous'}`;
   const notifications = useMemo(() => {
     const stockAlerts = inventory
       .filter((item) =>
@@ -75,9 +77,11 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
   ).length;
 
   useEffect(() => {
-    const raw = window.localStorage.getItem('tovapos.readNotifications');
-    if (raw) setReadIds(new Set(JSON.parse(raw) as string[]));
-  }, []);
+    const raw = window.localStorage.getItem(readStorageKey);
+    if (raw) {
+      try { setReadIds(new Set(JSON.parse(raw) as string[])); } catch { setReadIds(new Set()); }
+    } else setReadIds(new Set());
+  }, [readStorageKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,17 +97,33 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
       }
     };
     void loadNotifications();
+    const refreshOnFocus = () => { if (document.visibilityState === 'visible') void loadNotifications(); };
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnFocus);
     const interval = window.setInterval(loadNotifications, 60_000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnFocus);
     };
-  }, []);
+  }, [tenant?.id, currentUser?.id]);
 
   const saveReadIds = (next: Set<string>) => {
     setReadIds(next);
-    window.localStorage.setItem('tovapos.readNotifications', JSON.stringify([...next]));
+    window.localStorage.setItem(readStorageKey, JSON.stringify([...next]));
   };
+
+  useEffect(() => {
+    if (!showNotifs) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (notificationPanelRef.current && !notificationPanelRef.current.contains(event.target as Node)) {
+        setShowNotifs(false);
+      }
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
+  }, [showNotifs]);
 
   const markNotificationRead = (id: string) => {
     saveReadIds(new Set([...readIds, id]));
@@ -240,7 +260,7 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
           )}
 
           {/* Notifications */}
-          <div className="relative">
+          <div ref={notificationPanelRef} className="relative">
             <button
               onClick={() => setShowNotifs(!showNotifs)}
               className="relative flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground"

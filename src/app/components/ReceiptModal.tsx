@@ -41,6 +41,13 @@ function buildThermalReceiptText(sale: SaleTransaction, _currency: string, busin
   row('Cashier', sale.cashier, true);
   if (sale.customerName) row('Customer', sale.customerName, true);
   row('Payment', sale.paymentMethod.toUpperCase(), true);
+  if (sale.paymentMethod === 'split' && sale.paymentBreakdown) {
+    Object.entries(sale.paymentBreakdown)
+      .filter(([, amount]) => Number(amount) > 0)
+      .forEach(([method, amount]) => {
+        row(method === 'bank-transfer' ? 'Transfer' : method.replace(/-/g, ' '), money(Number(amount)));
+      });
+  }
   lines.push('-'.repeat(width));
   const descriptionWidth = 22;
   const quantityWidth = 4;
@@ -314,7 +321,7 @@ export default function ReceiptModal({
                     .filter(([, amount]) => Number(amount) > 0)
                     .map(([method, amount]) => (
                       <div key={method} className="flex justify-between">
-                        <span className="capitalize">{method.replace('-', ' ')}</span>
+                        <span className="capitalize">{method === 'bank-transfer' ? 'Transfer' : method}</span>
                         <span className="font-tabular">
                           {formatMoney(Number(amount), currency)}
                         </span>

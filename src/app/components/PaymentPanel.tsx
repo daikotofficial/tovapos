@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CreditCard,
   Banknote,
@@ -78,6 +78,18 @@ export default function PaymentPanel({
 }: PaymentPanelProps) {
   const { customers, hasPermission, settings } = usePosStore();
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [splitInputValues, setSplitInputValues] = useState<Partial<Record<SplitPaymentMethod, string>>>({});
+  useEffect(() => {
+    if (paymentMethod !== 'split') return;
+    setSplitInputValues(
+      Object.fromEntries(
+        (['cash', 'card', 'mobile', 'bank-transfer'] as SplitPaymentMethod[]).map((method) => [
+          method,
+          paymentBreakdown[method] && paymentBreakdown[method]! > 0 ? String(paymentBreakdown[method]) : '',
+        ])
+      ) as Partial<Record<SplitPaymentMethod, string>>
+    );
+  }, [paymentMethod]);
   const quickAmounts = QUICK_AMOUNTS_BY_CURRENCY[currency] ?? QUICK_AMOUNTS_BY_CURRENCY.NGN;
   const currencyPrefix = getCurrencyInputPrefix(currency);
   const tenderedAmount = Number(cashTendered);
@@ -416,8 +428,15 @@ export default function PaymentPanel({
                   type="number"
                   min="0"
                   step="0.01"
-                  value={paymentBreakdown[method] ?? ''}
-                  onChange={(event) => setPaymentBreakdown({ ...paymentBreakdown, [method]: Number(event.target.value) || 0 })}
+                  value={splitInputValues[method] ?? ''}
+                  onChange={(event) => {
+                    const raw = event.target.value;
+                    setSplitInputValues((previous) => ({ ...previous, [method]: raw }));
+                    setPaymentBreakdown({
+                      ...paymentBreakdown,
+                      [method]: raw === '' ? 0 : Math.max(0, Number(raw) || 0),
+                    });
+                  }}
                   className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm font-tabular"
                   placeholder="0.00"
                 />
