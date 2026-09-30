@@ -1140,6 +1140,38 @@ export async function cacheSyncQueueLocally(items: SyncQueueItem[]): Promise<voi
   await putManyInBrowser('syncQueue', items);
 }
 
+/** Remove one offline operation and its unsent stock movement cache without touching products. */
+export async function discardLocalSyncOperation(operationId: string): Promise<void> {
+  const [queue, movements] = await Promise.all([
+    loadSyncQueue(),
+    getAllFromBrowser<StockMovement>('stockMovements'),
+  ]);
+  await Promise.all([
+    replaceBrowserStore('syncQueue', queue.filter((item) => item.operationId !== operationId)),
+    replaceBrowserStore(
+      'stockMovements',
+      movements.filter((movement) => movement.operationId !== operationId)
+    ),
+  ]);
+}
+
+/** Remove queued updates for a product before queuing its deletion. */
+export async function discardPendingInventoryOperations(inventoryId: string): Promise<void> {
+  const queue = await loadSyncQueue();
+  const operationIds = new Set(
+    queue
+      .filter(
+        (item) =>
+          item.entity === 'inventory' &&
+          item.entityId === inventoryId &&
+          item.action !== 'delete' &&
+          item.status !== 'synced'
+      )
+      .map((item) => item.operationId)
+  );
+  await Promise.all([...operationIds].map((operationId) => discardLocalSyncOperation(operationId)));
+}
+
 export function createSyncQueueItem(
   input: Pick<SyncQueueItem, 'entity' | 'entityId' | 'action' | 'payload'> &
     Partial<Pick<SyncQueueItem, 'operationId' | 'conflictStrategy' | 'dependsOn'>>

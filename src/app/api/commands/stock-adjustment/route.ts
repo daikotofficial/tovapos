@@ -16,8 +16,6 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
-    assertPermission(auth, 'adjust-stock');
-    await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
     const body = (await request.json()) as Record<string, unknown>;
     const product = body.product as InventoryItem | undefined;
     if (!product?.id || !product.name?.trim() || !product.sku?.trim()) {
@@ -79,7 +77,20 @@ export async function POST(request: NextRequest) {
         [auth.tenantId, product.id]
       );
       const existing = existingResult.rows[0];
-      if (!existing) assertPermission(auth, 'add-product');
+      if (!existing && expectedUpdatedAt) {
+        throw new HttpError(
+          409,
+          'This product was deleted before the stock update was received. The stale update was not recreated.',
+          'INVENTORY_NOT_FOUND'
+        );
+      }
+      const productPermission = existing ? 'edit-product' : 'add-product';
+      assertPermission(auth, productPermission);
+      await assertTenantPlanPermission(auth.tenantId, productPermission);
+      if (existing && quantityDelta !== 0) {
+        assertPermission(auth, 'adjust-stock');
+        await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
+      }
       if (
         existing &&
         expectedUpdatedAt &&

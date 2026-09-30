@@ -37,6 +37,8 @@ import {
   cacheSalesLocally,
   cacheStockMovementsLocally,
   cacheSyncQueueLocally,
+  discardLocalSyncOperation,
+  discardPendingInventoryOperations,
   deleteUser as deleteStoredUser,
   deleteInventoryItem as deleteStoredInventory,
   deleteCustomer as deleteStoredCustomer,
@@ -98,6 +100,7 @@ interface PosStoreValue {
   syncProgress: { isSyncing: boolean; total: number; completed: number; failed: number };
   pendingSyncCount: number;
   retrySyncOperation: (operationId: string) => Promise<void>;
+  resolveFailedInventorySync: (operationId: string) => Promise<void>;
   cancelFailedOfflineSale: (operationId: string) => Promise<void>;
   activeUserId: string;
   currentUser: TovaUser | null;
@@ -558,7 +561,10 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     if (!isHydrated || !isOnline || syncInFlightRef.current) return;
     const pending = syncQueue
       .filter(
-        (item) => item.status === 'pending' || item.status === 'failed'
+        (item) =>
+          item.status === 'pending' ||
+          (item.status === 'failed' &&
+            !/changed before|was deleted|would make quantity negative|SKU or barcode/i.test(item.lastError ?? ''))
       )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (pending.length === 0) return;
@@ -835,6 +841,31 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           void cacheSalesLocally(next.filter((sale) => sale.id === saleItem.entityId));
           return next;
         });
+      }
+    },
+    [syncQueue]
+  );
+
+  const resolveFailedInventorySync = useCallback(
+    async (operationId: string) => {
+      const operationItems = syncQueue.filter((item) => item.operationId === operationId);
+      const inventoryItem = operationItems.find((item) => item.entity === 'inventory');
+      if (!inventoryItem || !operationItems.some((item) => item.status === 'failed')) {
+        throw new Error('Only a failed inventory update can be resolved this way.');
+      }
+      const authoritative = await loadInventoryByIds([inventoryItem.entityId]);
+      await discardLocalSyncOperation(operationId);
+      setSyncQueue((previous) => previous.filter((item) => item.operationId !== operationId));
+      setStockMovements((previous) => previous.filter((item) => item.operationId !== operationId));
+      if (authoritative[0]) {
+        await cacheInventoryLocally(authoritative);
+        setInventory((previous) => sortInventory([
+          ...previous.filter((item) => item.id !== inventoryItem.entityId),
+          authoritative[0],
+        ]));
+      } else {
+        await deleteStoredInventory(inventoryItem.entityId);
+        setInventory((previous) => previous.filter((item) => item.id !== inventoryItem.entityId));
       }
     },
     [syncQueue]
@@ -1215,6 +1246,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         }),
         idempotencyKey: `inventory-delete:${operationId}`,
       };
+      await discardPendingInventoryOperations(inventoryId);
       if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' && typeof navigator !== 'undefined' && isOnline) {
         const response = await fetch('/api/pos-store?store=inventory', {
           method: 'DELETE', headers: { 'Content-Type': 'application/json' },
@@ -2137,6 +2169,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       syncProgress,
       pendingSyncCount,
       retrySyncOperation,
+      resolveFailedInventorySync,
       cancelFailedOfflineSale,
       activeUserId,
       currentUser,
@@ -2179,6 +2212,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       syncProgress,
       pendingSyncCount,
       retrySyncOperation,
+      resolveFailedInventorySync,
       cancelFailedOfflineSale,
       activeUserId,
       currentUser,

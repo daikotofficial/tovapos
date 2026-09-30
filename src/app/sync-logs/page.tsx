@@ -13,7 +13,7 @@ import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import ListPagination from '@/components/ui/ListPagination';
 
 export default function SyncLogsPage() {
-  const { currentUser, isOnline, syncQueue, retrySyncOperation, cancelFailedOfflineSale } =
+  const { currentUser, isOnline, syncQueue, retrySyncOperation, resolveFailedInventorySync, cancelFailedOfflineSale } =
     usePosStore();
   const [workingId, setWorkingId] = useState('');
   const [rowsPerPage] = useRowsPerPage();
@@ -109,6 +109,7 @@ export default function SyncLogsPage() {
                     {visibleOperations.map((operation) => {
                       const busy = workingId === operation.operationId;
                       const productId = operation.sale?.items[0]?.inventoryItemId;
+                      const inventoryOperation = operation.items.find((item) => item.entity === 'inventory');
                       return (
                         <div key={operation.operationId} className="space-y-3 px-4 py-4 sm:px-5">
                           <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
@@ -159,6 +160,30 @@ export default function SyncLogsPage() {
                                   <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />{' '}
                                   Retry
                                 </button>
+                                {inventoryOperation && (
+                                  <button
+                                    type="button"
+                                    disabled={busy || !isOnline}
+                                    onClick={async () => {
+                                      const confirmed = await confirmAction({
+                                        title: 'Use the current server product?',
+                                        description:
+                                          'The offline update is based on an older product version. This will discard only that stale update and refresh this product from the server. Other products and stock are not changed.',
+                                        confirmLabel: 'Use server version',
+                                      });
+                                      if (confirmed) {
+                                        void run(
+                                          operation.operationId,
+                                          () => resolveFailedInventorySync(operation.operationId),
+                                          'Stale inventory update resolved using the server version'
+                                        );
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-md border border-warning/40 px-3 py-2 text-xs font-semibold text-warning disabled:opacity-50"
+                                  >
+                                    <RefreshCw size={14} /> Use server version
+                                  </button>
+                                )}
                                 {operation.sale && (
                                   <button
                                     type="button"
