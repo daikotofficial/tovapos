@@ -71,6 +71,7 @@ const navItems: NavItem[] = [
     permission: 'checkout',
     order: 1,
   },
+  { id: 'nav-my-sales-history', label: 'My Sales History', href: '/my-sales-history', icon: History, group: 'Operations', permission: 'checkout', order: 2 },
   {
     id: 'nav-inventory',
     label: 'Products & Inventory',

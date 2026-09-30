@@ -261,13 +261,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(responseBody);
     } catch (error) {
       await client.query('ROLLBACK');
-      throw error;
+      throw normalizeReturnError(error);
     } finally {
       client.release();
     }
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+function normalizeReturnError(error: unknown): unknown {
+  if (error instanceof HttpError) return error;
+  const candidate = error as { code?: unknown };
+  if (typeof candidate?.code === 'string' && ['22P02', '23502', '23503', '23505', '23514'].includes(candidate.code)) {
+    return new HttpError(409, 'This return could not be applied because the sale record is inconsistent. No changes were saved; refresh the sale history and try again.', 'RETURN_CONFLICT');
+  }
+  return error;
 }
 
 function nextSaleStatus(nextGrandTotal: number, sale: SaleTransaction): 'unpaid' | 'partial' | 'paid' {
