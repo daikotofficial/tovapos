@@ -81,10 +81,6 @@ export default function PaymentPanel({
   const [splitInputValues, setSplitInputValues] = useState<Partial<Record<SplitPaymentMethod, string>>>({});
   const [loyaltyInputValue, setLoyaltyInputValue] = useState(loyaltyPointsToRedeem > 0 ? String(loyaltyPointsToRedeem) : '');
   useEffect(() => {
-    setLoyaltyInputValue(loyaltyPointsToRedeem > 0 ? String(loyaltyPointsToRedeem) : '');
-  }, [selectedCustomer?.id]);
-
-  useEffect(() => {
     if (paymentMethod !== 'split') return;
     setSplitInputValues(
       Object.fromEntries(
@@ -107,6 +103,10 @@ export default function PaymentPanel({
       customer.name.toLowerCase() === customerName.trim().toLowerCase() ||
       normalizeCustomerPhone(customer.phone) === normalizeCustomerPhone(customerName)
   );
+  useEffect(() => {
+    setLoyaltyInputValue(loyaltyPointsToRedeem > 0 ? String(loyaltyPointsToRedeem) : '');
+  }, [selectedCustomer?.id]);
+
   const loyaltyEligible = Boolean(
     settings.loyaltyEnabled &&
     selectedCustomer &&
