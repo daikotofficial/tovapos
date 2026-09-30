@@ -38,7 +38,13 @@ export default function SalesShiftBar() {
         .then((serverShift) => {
           if (serverShift) {
             saveSalesShift(serverShift as LocalSalesShift);
+            setShift(serverShift as LocalSalesShift);
             setMode(null);
+          } else {
+            // The server is authoritative. Remove a stale browser shift after a reset
+            // or after this user has no shift for the current business date.
+            window.localStorage.removeItem('tovapos.sales-shift.' + currentUser.id + '.' + businessDate());
+            setShift(null);
           }
         })
         .catch(() => undefined);

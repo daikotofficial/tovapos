@@ -3,7 +3,7 @@
 import React, { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react';
 import AppLogo from '@/components/ui/AppLogo';
 
 function AdminInviteForm() {
@@ -11,6 +11,8 @@ function AdminInviteForm() {
   const token = searchParams.get('token') ?? '';
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [complete, setComplete] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -67,21 +69,27 @@ function AdminInviteForm() {
           )}
           <label className="block space-y-1">
             <span className="text-xs font-semibold text-muted-foreground">Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="h-11 w-full rounded-lg border border-border bg-background px-3 pr-10 text-sm"
+              />
+              <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+            </div>
           </label>
           <label className="block space-y-1">
             <span className="text-xs font-semibold text-muted-foreground">Confirm Password</span>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm"
-            />
+            <div className="relative">
+              <input
+                type={showConfirmPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                className="h-11 w-full rounded-lg border border-border bg-background px-3 pr-10 text-sm"
+              />
+              <button type="button" onClick={() => setShowConfirmPassword((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}>{showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+            </div>
           </label>
           {error && <p className="text-sm text-danger">{error}</p>}
           <button

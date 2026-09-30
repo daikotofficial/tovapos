@@ -17,6 +17,8 @@ import {
   ShieldCheck,
   Wifi,
   Trash2,
+  Eye,
+  EyeOff,
   Plus,
 } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
@@ -25,6 +27,7 @@ import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { BusinessSettings, BusinessMode } from '@/lib/pos/types';
 import { clearSalesCacheLocally } from '@/lib/pos/local-store';
+import { clearAllSalesShiftsLocally } from '@/lib/pos/sales-shift';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
 import {
@@ -1006,6 +1009,7 @@ function SalesDataResetCard() {
       } | null;
       if (!response.ok) throw new Error(payload?.error || 'Unable to clear sales data.');
       await clearSalesCacheLocally();
+      clearAllSalesShiftsLocally();
       toast.success(
         String(payload?.removed?.sales ?? 0) + ' sales record(s) cleared. Products and stock were not changed.'
       );
@@ -1077,6 +1081,9 @@ function AccountSecurityCard() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -1174,38 +1181,54 @@ function AccountSecurityCard() {
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="space-y-1">
                 <span className="text-xs text-muted-foreground">Current Password</span>
-                <input
-                  required
-                  type="password"
-                  value={currentPassword}
-                  onChange={(event) => setCurrentPassword(event.target.value)}
-                  autoComplete="current-password"
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
-                />
+                <div className="relative">
+                  <input
+                    required
+
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    value={currentPassword}
+                    onChange={(event) => setCurrentPassword(event.target.value)}
+                    autoComplete="current-password"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10"
+                  />
+                  <button type="button" onClick={() => setShowCurrentPassword(!showCurrentPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showCurrentPassword ? 'Hide Current password' : 'Show Current password'}>
+                    {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </label>
               <label className="space-y-1">
                 <span className="text-xs text-muted-foreground">New Password</span>
-                <input
-                  required
-                  minLength={10}
-                  type="password"
-                  value={newPassword}
-                  onChange={(event) => setNewPassword(event.target.value)}
-                  autoComplete="new-password"
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
-                />
+                <div className="relative">
+                  <input
+                    required
+                    minLength={10}
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    autoComplete="new-password"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10"
+                  />
+                  <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showNewPassword ? 'Hide New password' : 'Show New password'}>
+                    {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </label>
               <label className="space-y-1">
                 <span className="text-xs text-muted-foreground">Confirm New Password</span>
-                <input
-                  required
-                  minLength={10}
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  autoComplete="new-password"
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
-                />
+                <div className="relative">
+                  <input
+                    required
+                    minLength={10}
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    autoComplete="new-password"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10"
+                  />
+                  <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showConfirmPassword ? 'Hide Confirm new password' : 'Show Confirm new password'}>
+                    {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </label>
             </div>
             <p className="text-[11px] leading-5 text-muted-foreground">

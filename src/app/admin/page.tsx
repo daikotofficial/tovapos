@@ -26,6 +26,8 @@ import {
   Sun,
   Trash2,
   Users,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AppLogo from '@/components/ui/AppLogo';
@@ -133,6 +135,7 @@ export default function AdminPage() {
   const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [email, setEmail] = useState('admin@tovapos.com.ng');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState('');
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaSetup, setMfaSetup] = useState<{
@@ -163,6 +166,7 @@ export default function AdminPage() {
   const [inviteRole, setInviteRole] = useState<'admin' | 'support'>('support');
   const [inviteUrl, setInviteUrl] = useState('');
   const [currentAdminPassword, setCurrentAdminPassword] = useState('');
+  const [showCurrentAdminPassword, setShowCurrentAdminPassword] = useState(false);
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [planDrafts, setPlanDrafts] = useState<
     Record<string, { subscriptionPlanId: PlanId; subscriptionStatus: SubscriptionStatus }>
@@ -608,13 +612,16 @@ export default function AdminPage() {
           </label>
           <label className="mb-3 block space-y-1">
             <span className="text-xs font-semibold text-muted-foreground">Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="h-11 w-full rounded-lg border border-border bg-background px-3 text-sm"
-              autoComplete="current-password"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="h-11 w-full rounded-lg border border-border bg-background px-3 pr-10 text-sm"
+                autoComplete="current-password"
+              />
+              <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+            </div>
           </label>
           {(mfaRequired || otp) && (
             <label className="mb-3 block space-y-1">
@@ -1235,15 +1242,18 @@ export default function AdminPage() {
                     </p>
                   </div>
                   <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-                    <input
-                      type="password"
-                      value={currentAdminPassword}
-                      onChange={(event) => setCurrentAdminPassword(event.target.value)}
-                      className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                      placeholder="Current password"
-                      autoComplete="current-password"
-                      required
-                    />
+                    <div className="relative">
+                      <input
+                        type={showCurrentAdminPassword ? 'text' : 'password'}
+                        value={currentAdminPassword}
+                        onChange={(event) => setCurrentAdminPassword(event.target.value)}
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10 text-sm"
+                        placeholder="Current password"
+                        autoComplete="current-password"
+                        required
+                      />
+                      <button type="button" onClick={() => setShowCurrentAdminPassword((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showCurrentAdminPassword ? 'Hide current password' : 'Show current password'}>{showCurrentAdminPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                    </div>
                     <input
                       type="email"
                       value={newAdminEmail}

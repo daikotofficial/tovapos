@@ -46,6 +46,11 @@ export async function POST(request: NextRequest) {
          WHERE tenant_id = $1 AND store_name = 'sales'`,
         [auth.tenantId]
       );
+      const shifts = await client.query(
+        `DELETE FROM pos_tenant_records
+         WHERE tenant_id = $1 AND store_name = 'salesShifts'`,
+        [auth.tenantId]
+      );
       const indexItems = await client.query(
         'DELETE FROM pos_tenant_sale_items WHERE tenant_id = $1',
         [auth.tenantId]
@@ -66,6 +71,7 @@ export async function POST(request: NextRequest) {
             records: records.rowCount ?? 0,
             saleItems: indexItems.rowCount ?? 0,
             indexes: indexes.rowCount ?? 0,
+            shifts: shifts.rowCount ?? 0,
           }),
         ]
       );
@@ -77,6 +83,7 @@ export async function POST(request: NextRequest) {
           sales: indexes.rowCount ?? 0,
           saleItems: indexItems.rowCount ?? 0,
           storedSales: records.rowCount ?? 0,
+          shifts: shifts.rowCount ?? 0,
         },
       });
     } catch (error) {

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
@@ -266,6 +266,7 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<TovaUser | null>(null);
   const [form, setForm] = useState<TovaUser>(emptyUser());
   const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [rowsPerPage] = useRowsPerPage();
   const [page, setPage] = useState(1);
   const canDeleteUsers = currentUser?.role === 'owner' || currentUser?.role === 'super-admin';
@@ -298,12 +299,14 @@ export default function UsersPage() {
     setForm(user);
     setEditing(user);
     setLoginPassword('');
+    setShowLoginPassword(false);
   };
 
   const openEdit = (user: TovaUser) => {
     setForm(user);
     setEditing(user);
     setLoginPassword('');
+    setShowLoginPassword(false);
   };
 
   const save = async () => {
@@ -544,13 +547,18 @@ export default function UsersPage() {
                   ? 'New Password (optional)'
                   : 'Login Password'}
               </span>
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                placeholder="Minimum 10 characters"
-              />
+              <div className="relative">
+                <input
+                  type={showLoginPassword ? 'text' : 'password'}
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full px-3 py-2 pr-10 rounded-lg border border-border bg-background"
+                  placeholder="Minimum 10 characters"
+                />
+                <button type="button" onClick={() => setShowLoginPassword((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showLoginPassword ? 'Hide login password' : 'Show login password'}>
+                  {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </label>
             <label className="space-y-1">
               <span className="text-xs text-muted-foreground">Status</span>

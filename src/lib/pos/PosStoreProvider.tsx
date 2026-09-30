@@ -935,15 +935,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    if (pendingSyncCount > 0) {
-      throw new Error(
-        `Wait for ${pendingSyncCount} offline update${pendingSyncCount === 1 ? '' : 's'} to sync before signing out.`
-      );
-    }
-    const response = await fetch('/api/auth/logout', { method: 'POST', keepalive: true });
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(payload?.error ?? 'Sign out could not be completed. Please try again.');
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', keepalive: true });
+    } catch {
+      // Clear the local session even if a transient network/database failure prevents
+      // the best-effort server logout request from returning.
     }
     setLocalTenant('anonymous');
     window.localStorage.removeItem(OFFLINE_SINCE_KEY);

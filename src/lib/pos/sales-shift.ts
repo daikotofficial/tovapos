@@ -14,10 +14,12 @@ export interface LocalSalesShift {
 }
 
 export function businessDate(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return year + '-' + month + '-' + day;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 }
 
 function shiftKey(userId: string, date = businessDate()): string {
@@ -43,5 +45,16 @@ export function saveSalesShift(shift: LocalSalesShift): void {
 
 export function clearSalesShift(userId: string, date = businessDate()): void {
   window.localStorage.removeItem(shiftKey(userId, date));
+  window.dispatchEvent(new CustomEvent('tovapos:sales-shift'));
+}
+
+
+export function clearAllSalesShiftsLocally(): void {
+  if (typeof window === 'undefined') return;
+  const prefix = 'tovapos.sales-shift.';
+  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.localStorage.key(index);
+    if (key?.startsWith(prefix)) window.localStorage.removeItem(key);
+  }
   window.dispatchEvent(new CustomEvent('tovapos:sales-shift'));
 }
