@@ -662,6 +662,7 @@ export default function CheckoutScreen() {
                 { value: 'piece', label: `Piece - ${formatMoney(pendingPackProduct.sellingPrice, settings.currency)}` },
                 { value: pendingPackProduct.packUnit ?? 'pack', label: `${pendingPackProduct.packUnit === 'carton' ? 'Carton' : 'Pack'} - ${formatMoney(pendingPackProduct.packPrice ?? 0, settings.currency)}` },
               ]}
+              className="min-h-[8rem] w-full"
             />
           </label>
         </Modal>
