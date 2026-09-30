@@ -63,8 +63,8 @@ function SettingsPageContent() {
       if (!response.ok || !result?.ok) throw new Error(result?.error || 'Printer helper is not installed or running.');
       setPrinterReady(true);
       toast.success('Receipt printer is ready.');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Printer service could not start.');
+    } catch {
+      toast.error('Printer helper is not running on this computer. Start the installed TOVAPOS Printer Helper, then try again.');
     } finally { setStartingPrinter(false); }
   };
 
