@@ -8,6 +8,23 @@ import { formatMoney } from '@/lib/pos/money';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
 
+function formatReceiptTimestamp(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return value;
+  return (
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Africa/Lagos',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(parsed)).replace(',', '') + ' WAT'
+  );
+}
+
 function buildThermalReceiptText(sale: SaleTransaction, _currency: string, businessName: string, businessAddress: string | undefined, businessPhone: string | undefined, receiptFooter: string, taxLabel: string) {
   const width = 48;
   const money = (value: number) => new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0);
@@ -129,6 +146,8 @@ export default function ReceiptModal({
   receiptFooter,
   taxLabel,
 }: ReceiptModalProps) {
+  const receiptTimestamp = formatReceiptTimestamp(sale.timestamp);
+
   const handlePrint = async () => {
     const receiptPaper = document.querySelector<HTMLElement>(
       '[data-print-target="receipt"] .receipt-paper'
@@ -222,31 +241,33 @@ export default function ReceiptModal({
         {/* Receipt Paper */}
         <div className="receipt-paper bg-white border border-border rounded-xl overflow-hidden">
           {/* Header */}
-          <div className="text-center px-6 py-4 border-b border-dashed border-border bg-muted/20">
+          <div className="receipt-print-header text-center px-6 py-4 border-b border-dashed border-border bg-muted/20">
             {showLogo && businessLogo && (
               <AppImage
                 src={businessLogo}
                 alt={`${businessName} logo`}
                 width={56}
                 height={56}
-                className="mx-auto mb-2 h-14 w-14 object-contain"
+                className="receipt-print-logo mx-auto mb-2 h-14 w-14 object-contain"
                 unoptimized
               />
             )}
+            <p className="receipt-print-brand text-[10px] font-semibold uppercase tracking-wide text-foreground">TOVAPOS</p>
             <p className="text-base font-bold text-foreground">{businessName}</p>
             {showBusinessDetails && (businessAddress || businessPhone) && (
-              <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-                {[businessAddress, businessPhone].filter(Boolean).join(' · ')}
-              </p>
+              <div className="mt-1 text-[10px] leading-4 text-muted-foreground">
+                {businessAddress && <p>{businessAddress}</p>}
+                {businessPhone && <p>{businessPhone}</p>}
+              </div>
             )}
             <p className="text-xs font-mono text-muted-foreground mt-1">{sale.transactionId}</p>
           </div>
 
           {/* Meta */}
-          <div className="px-6 py-3 border-b border-dashed border-border">
+          <div className="receipt-print-meta px-6 py-3 border-b border-dashed border-border">
             <div className="grid grid-cols-2 gap-y-1 text-xs">
               <span className="text-muted-foreground">Date:</span>
-              <span className="font-medium text-foreground text-right">{sale.timestamp}</span>
+              <span className="font-medium text-foreground text-right">{receiptTimestamp}</span>
               <span className="text-muted-foreground">Cashier:</span>
               <span className="font-medium text-foreground text-right">{sale.cashier}</span>
               {showCustomer && (
@@ -261,28 +282,41 @@ export default function ReceiptModal({
               <span className="font-medium text-foreground text-right uppercase">
                 {sale.paymentMethod}
               </span>
+              {sale.paymentMethod === 'split' && sale.paymentBreakdown &&
+                Object.entries(sale.paymentBreakdown)
+                  .filter(([, amount]) => Number(amount) > 0)
+                  .map(([method, amount]) => (
+                    <React.Fragment key={`receipt-payment-${method}`}>
+                      <span className="text-muted-foreground capitalize">
+                        {method === 'bank-transfer' ? 'Transfer' : method}
+                      </span>
+                      <span className="font-medium text-foreground text-right font-tabular">
+                        {formatMoney(Number(amount), currency)}
+                      </span>
+                    </React.Fragment>
+                  ))}
             </div>
           </div>
 
           {/* Items */}
-          <div className="px-3 py-3 border-b border-dashed border-border">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+          <div className="receipt-print-items px-3 py-3 border-b border-dashed border-border">
+            <p className="receipt-print-items-title text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
               Items Sold
             </p>
-            <div className="grid grid-cols-[minmax(0,1fr)_8mm_18mm_20mm] gap-x-2 border-b border-border pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="receipt-print-item-head grid grid-cols-[minmax(0,1fr)_8mm_18mm_20mm] gap-x-2 border-b border-border pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
               <span>Description</span>
               <span className="text-right">Qty</span>
               <span className="text-right">Price</span>
               <span className="text-right">Total</span>
             </div>
-            <div className="mt-2 space-y-2">
+            <div className="receipt-print-item-list mt-2 space-y-2">
               {sale.items.map((item) => {
                 const lineTotal = item.unitPrice * item.quantity * (1 - item.discount / 100);
 
                 return (
                   <div
                     key={`receipt-${item.id}`}
-                    className="grid grid-cols-[minmax(0,1fr)_8mm_18mm_20mm] items-start gap-x-2 text-[10px]"
+                    className="receipt-print-item-row grid grid-cols-[minmax(0,1fr)_8mm_18mm_20mm] items-start gap-x-2 text-[10px]"
                   >
                     <div className="min-w-0">
                       <p className="font-medium leading-tight text-foreground break-words">
@@ -306,7 +340,7 @@ export default function ReceiptModal({
           </div>
 
           {/* Totals */}
-          <div className="px-6 py-3 border-b border-dashed border-border">
+          <div className="receipt-print-totals px-6 py-3 border-b border-dashed border-border">
             <div className="space-y-1 text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Subtotal</span>
@@ -314,21 +348,6 @@ export default function ReceiptModal({
                   {formatMoney(sale.subtotal, currency)}
                 </span>
               </div>
-              {sale.paymentMethod === 'split' && sale.paymentBreakdown && (
-                <div className="mt-2 border-t border-dashed border-border pt-2">
-                  <p className="text-muted-foreground">Payment split</p>
-                  {Object.entries(sale.paymentBreakdown)
-                    .filter(([, amount]) => Number(amount) > 0)
-                    .map(([method, amount]) => (
-                      <div key={method} className="flex justify-between">
-                        <span className="capitalize">{method === 'bank-transfer' ? 'Transfer' : method}</span>
-                        <span className="font-tabular">
-                          {formatMoney(Number(amount), currency)}
-                        </span>
-                      </div>
-                    ))}
-                </div>
-              )}
               {sale.discountTotal > 0 && (
                 <div className="flex justify-between text-success">
                   <span>Discount</span>
@@ -382,11 +401,8 @@ export default function ReceiptModal({
           </div>
 
           {/* Footer */}
-          <div className="text-center px-6 py-4 bg-muted/10">
+          <div className="receipt-print-footer text-center px-6 py-4 bg-muted/10">
             <p className="text-xs text-muted-foreground">{receiptFooter}</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              Keep this receipt for returns and reconciliation
-            </p>
           </div>
         </div>
 

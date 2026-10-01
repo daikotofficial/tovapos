@@ -45,6 +45,37 @@ export async function GET(request: NextRequest) {
       values.push(to);
       where.push(`timestamp < ($${values.length}::date + interval '1 day')`);
     }
+    const summaryResult = await getPosPool().query(
+      `SELECT
+         COALESCE(SUM(grand_total), 0)::numeric AS total,
+         COALESCE(SUM(CASE
+           WHEN payment_method = 'cash' THEN grand_total
+           WHEN payment_method = 'split' THEN COALESCE((data->'paymentBreakdown'->>'cash')::numeric, 0)
+           ELSE 0
+         END), 0)::numeric AS cash,
+         COALESCE(SUM(CASE
+           WHEN payment_method = 'card' THEN grand_total
+           WHEN payment_method = 'split' THEN COALESCE((data->'paymentBreakdown'->>'card')::numeric, 0)
+           ELSE 0
+         END), 0)::numeric AS card,
+         COALESCE(SUM(CASE
+           WHEN payment_method = 'bank-transfer' THEN grand_total
+           WHEN payment_method = 'split' THEN COALESCE((data->'paymentBreakdown'->>'bank-transfer')::numeric, 0)
+           ELSE 0
+         END), 0)::numeric AS transfer,
+         COALESCE(SUM(CASE
+           WHEN payment_method = 'split' THEN grand_total
+             - COALESCE((data->'paymentBreakdown'->>'cash')::numeric, 0)
+             - COALESCE((data->'paymentBreakdown'->>'card')::numeric, 0)
+             - COALESCE((data->'paymentBreakdown'->>'bank-transfer')::numeric, 0)
+           WHEN payment_method IN ('cash', 'card', 'bank-transfer') THEN 0
+           ELSE grand_total
+         END), 0)::numeric AS other
+       FROM pos_tenant_sales
+       WHERE ${where.join(' AND ')}`,
+      values,
+    );
+
     values.push(500);
     const result = await getPosPool().query(
       `SELECT data
@@ -55,7 +86,18 @@ export async function GET(request: NextRequest) {
       values,
     );
 
-    return NextResponse.json({ rows: result.rows.map((row) => row.data), limit: 500 });
+    const summary = summaryResult.rows[0] ?? {};
+    return NextResponse.json({
+      rows: result.rows.map((row) => row.data),
+      limit: 500,
+      summary: {
+        total: Number(summary.total ?? 0),
+        cash: Number(summary.cash ?? 0),
+        card: Number(summary.card ?? 0),
+        transfer: Number(summary.transfer ?? 0),
+        other: Number(summary.other ?? 0),
+      },
+    });
   } catch (error) {
     return errorResponse(error);
   }

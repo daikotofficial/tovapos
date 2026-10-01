@@ -57,6 +57,92 @@
     box-shadow: none !important;
     color: #000 !important;
     background: #fff !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace !important;
+    font-size: 11px !important;
+    line-height: 1.28 !important;
+  }
+
+  .receipt-print-root .receipt-print-header {
+    padding: 4mm 4mm 3mm !important;
+    border-bottom: 1px dashed #000 !important;
+    background: #fff !important;
+  }
+
+  .receipt-print-root .receipt-print-logo {
+    display: none !important;
+  }
+
+  .receipt-print-root .receipt-print-brand {
+    margin-bottom: 1mm !important;
+    font-size: 10px !important;
+    letter-spacing: 0.04em !important;
+  }
+
+  .receipt-print-root .receipt-print-header .text-base {
+    font-size: 13px !important;
+    line-height: 1.2 !important;
+  }
+
+  .receipt-print-root .receipt-print-header .text-xs {
+    font-size: 10px !important;
+  }
+
+  .receipt-print-root .receipt-print-meta {
+    display: grid !important;
+    grid-template-columns: 24mm minmax(0, 1fr) !important;
+    gap: 1px 0 !important;
+    padding: 3mm 4mm !important;
+    border-bottom: 1px dashed #000 !important;
+  }
+
+  .receipt-print-root .receipt-print-meta > * {
+    min-width: 0 !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .receipt-print-root .receipt-print-items,
+  .receipt-print-root .receipt-print-totals {
+    padding: 3mm 4mm !important;
+    border-bottom: 1px dashed #000 !important;
+  }
+
+  .receipt-print-root .receipt-print-items-title {
+    margin-bottom: 2mm !important;
+    font-size: 10px !important;
+    letter-spacing: 0.08em !important;
+  }
+
+  .receipt-print-root .receipt-print-item-head {
+    padding-bottom: 1.5mm !important;
+    border-bottom: 1px solid #000 !important;
+    font-size: 9px !important;
+  }
+
+  .receipt-print-root .receipt-print-item-list {
+    margin-top: 0 !important;
+  }
+
+  .receipt-print-root .receipt-print-item-row {
+    padding: 2mm 0 !important;
+    border-bottom: 1px dashed #b5b5b5 !important;
+  }
+
+  .receipt-print-root .receipt-print-item-row:last-child {
+    border-bottom: 0 !important;
+  }
+
+  .receipt-print-root .receipt-print-totals .text-xs {
+    font-size: 11px !important;
+  }
+
+  .receipt-print-root .receipt-print-footer {
+    padding: 4mm 4mm 5mm !important;
+    background: #fff !important;
+  }
+
+  .receipt-print-root .receipt-print-footer .text-xs {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
   }
 }
 
