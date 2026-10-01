@@ -460,7 +460,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         storedSettings,
         storedQueue,
       ] = await Promise.all([
-        can('inventory') || can('checkout') || can('reports')
+        can('inventory') || can('add-product') || can('edit-product') || can('adjust-stock') || can('delete-product') || can('checkout') || can('reports')
           ? safely('Inventory', loadInventory([]), [])
           : Promise.resolve([]),
         can('reports') || can('credit-sales') || can('refunds')
@@ -1058,9 +1058,6 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         throw new Error(
           'An active subscription is required to manage products. Please subscribe to continue.'
         );
-      }
-      if (!hasPermission('inventory')) {
-        throw new Error('Your role is not allowed to manage products.');
       }
       const existingItem = inventory.find((existing) => existing.id === item.id);
       if (!existingItem && !hasPermission('add-product')) {

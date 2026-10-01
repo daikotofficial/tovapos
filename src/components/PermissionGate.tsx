@@ -6,14 +6,15 @@ import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission } from '@/lib/pos/types';
 
 interface PermissionGateProps {
-  permission: Permission;
+  permission: Permission | Permission[];
   children: React.ReactNode;
 }
 
 export default function PermissionGate({ permission, children }: PermissionGateProps) {
   const { hasPermission, currentUser } = usePosStore();
-
-  if (hasPermission(permission)) return <>{children}</>;
+  const permissions = Array.isArray(permission) ? permission : [permission];
+  if (permissions.some((item) => hasPermission(item))) return <>{children}</>;
+  const permissionLabel = permissions.length === 1 ? permissions[0] : permissions.join(' or ');
 
   return (
     <div className="px-3 py-4 sm:p-6">
@@ -23,7 +24,7 @@ export default function PermissionGate({ permission, children }: PermissionGateP
           <div>
             <p className="font-semibold">Permission required</p>
             <p className="mt-1 text-sm leading-6">
-              {currentUser?.name ?? 'This user'} does not have the {permission} permission. Ask an
+              {currentUser?.name ?? 'This user'} does not have the {permissionLabel} permission. Ask an
               owner or manager to update the role in Users & Permissions.
             </p>
           </div>

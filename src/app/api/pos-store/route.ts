@@ -50,7 +50,7 @@ type PosRecord = Record<string, unknown> & { id?: unknown };
 type InventoryCursor = { name: string; id: string };
 
 const READ_PERMISSIONS: Partial<Record<string, Permission[]>> = {
-  inventory: ['inventory', 'checkout', 'reports'],
+  inventory: ['inventory', 'add-product', 'edit-product', 'adjust-stock', 'delete-product', 'checkout', 'reports'],
   stockMovements: ['inventory', 'reports'],
   users: ['users'],
   customers: ['customers', 'checkout'],

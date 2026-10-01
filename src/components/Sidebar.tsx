@@ -40,7 +40,7 @@ interface NavItem {
   badge?: number;
   badgeColor?: string;
   group: string;
-  permission: Permission;
+  permission: Permission | Permission[];
   order: number;
   adminOnly?: boolean;
 }
@@ -89,7 +89,7 @@ const navItems: NavItem[] = [
     href: '/stock-management',
     icon: Boxes,
     group: 'Operations',
-    permission: 'adjust-stock',
+    permission: ['add-product', 'adjust-stock'],
     order: 3,
   },
   {
@@ -342,7 +342,9 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
             .filter(
               (n) =>
                 n.group === group &&
-                hasPermission(n.permission) &&
+                (Array.isArray(n.permission)
+                  ? n.permission.some((permission) => hasPermission(permission))
+                  : hasPermission(n.permission)) &&
                 (!n.adminOnly ||
                   currentUser?.role === 'owner' ||
                   currentUser?.role === 'super-admin')

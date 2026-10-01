@@ -20,11 +20,11 @@ const mobileNavItems: {
   label: string;
   href: string;
   icon: React.ElementType;
-  permission: Permission;
+  permission: Permission | Permission[];
 }[] = [
   { label: 'Home', href: '/dashboard', icon: LayoutDashboard, permission: 'dashboard' },
   { label: 'Sales', href: '/sales', icon: ShoppingCart, permission: 'checkout' },
-  { label: 'Stock', href: '/inventory-management', icon: Package, permission: 'inventory' },
+  { label: 'Stock', href: '/stock-management', icon: Package, permission: ['add-product', 'adjust-stock'] },
   { label: 'Reports', href: '/reports', icon: TrendingUp, permission: 'reports' },
   { label: 'Support', href: '/support', icon: LifeBuoy, permission: 'dashboard' },
 ];
@@ -119,7 +119,9 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
         <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
           {mobileNavItems
-            .filter((item) => hasPermission(item.permission))
+            .filter((item) => (Array.isArray(item.permission)
+              ? item.permission.some((permission) => hasPermission(permission))
+              : hasPermission(item.permission)))
             .map((item) => {
               const Icon = item.icon;
               const active = pathname === item.href;
