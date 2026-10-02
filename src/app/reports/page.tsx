@@ -227,6 +227,21 @@ function paymentMethodLabel(
   return method.replace('-', ' ');
 }
 
+function paymentAmountsForSale(sale: SaleTransaction): Record<string, number> {
+  if (sale.paymentMethod === 'split' && sale.paymentBreakdown) {
+    const amounts = Object.fromEntries(
+      Object.entries(sale.paymentBreakdown)
+        .filter(([, amount]) => Number(amount) > 0)
+        .map(([method, amount]) => [method, Number(amount)])
+    );
+    const accounted = Object.values(amounts).reduce((sum, amount) => sum + amount, 0);
+    const difference = Number((sale.grandTotal - accounted).toFixed(2));
+    if (Math.abs(difference) >= 0.01) amounts.other = (amounts.other ?? 0) + difference;
+    return amounts;
+  }
+  return { [sale.paymentMethod]: sale.grandTotal };
+}
+
 function toDateInputValue(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -495,7 +510,9 @@ function ReportsContent() {
   const [range, setRange] = useState<ReportRange>(() => createRange('1m'));
   const [draftRange, setDraftRange] = useState<ReportRange>(() => createRange('1m'));
   const [cashierId, setCashierId] = useState('all');
+  const [cashierName, setCashierName] = useState('');
   const [draftCashierId, setDraftCashierId] = useState('all');
+  const [draftCashierName, setDraftCashierName] = useState('');
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
   const [serverReportRows, setServerReportRows] = useState<Record<string, unknown[]>>({});
@@ -519,7 +536,8 @@ function ReportsContent() {
 
   useEffect(() => {
     setDraftCashierId(cashierId);
-  }, [cashierId]);
+    setDraftCashierName(cashierName);
+  }, [cashierId, cashierName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -554,6 +572,7 @@ function ReportsContent() {
         const rowReports = [
           'sales',
           'sales-by-cashier',
+          'sales-by-cashier-detail',
           'credit-sales',
           'expenses',
           'sales-by-product',
@@ -567,16 +586,16 @@ function ReportsContent() {
         const results = await Promise.all(
           rowReports.map(async (report) => [
             report,
-            (
-              await loadReportRows({
-                report,
-                from,
-                to,
-                cashierId: report === 'sales-by-cashier' && cashierId !== 'all' ? cashierId : undefined,
-                cashierName: report === 'sales-by-cashier' && cashierId !== 'all' ? users.find((user) => user.id === cashierId)?.name : undefined,
-                limit: 100,
-              })
-            ).rows,
+            report === 'sales-by-cashier-detail' && cashierId === 'all'
+              ? []
+              : (await loadReportRows({
+                  report,
+                  from,
+                  to,
+                  cashierId: (report === 'sales-by-cashier' || report === 'sales-by-cashier-detail') && cashierId !== 'all' ? cashierId : undefined,
+                  cashierName: (report === 'sales-by-cashier' || report === 'sales-by-cashier-detail') && cashierId !== 'all' ? cashierName : undefined,
+                  limit: report === 'sales-by-cashier-detail' ? 500 : 100,
+                })).rows,
           ])
         );
         if (!cancelled) setServerReportRows(Object.fromEntries(results));
@@ -588,7 +607,7 @@ function ReportsContent() {
     return () => {
       cancelled = true;
     };
-  }, [cashierId, range.from, range.preset, range.to, reportRefreshToken, users]);
+  }, [cashierId, cashierName, range.from, range.preset, range.to, reportRefreshToken, users]);
 
   const data = useMemo(() => {
     const completedSales = sales.filter(
@@ -745,6 +764,7 @@ function ReportsContent() {
   ]);
 
   const serverSalesRows = (serverReportRows.sales ?? []) as SaleTransaction[];
+  const serverCashierDetailRows = (serverReportRows['sales-by-cashier-detail'] ?? []) as SaleTransaction[];
   const serverCashierRows = (serverReportRows['sales-by-cashier'] ?? []) as {
     cashierId: string;
     cashier: string;
@@ -793,6 +813,20 @@ function ReportsContent() {
             return map;
           }, {} as Record<string, { cashierId: string; cashier: string; transactions: number; revenue: number; profit: number }>)
       ).map(([, row]) => row);
+  const cashierDetailItemRows = serverCashierDetailRows.flatMap((sale) =>
+    sale.items.map((item) => ({ sale, item }))
+  );
+  const cashierDetailPaymentTotals = Object.entries(
+    serverCashierDetailRows.reduce((totals, sale) => {
+      Object.entries(paymentAmountsForSale(sale)).forEach(([method, amount]) => {
+        totals[method] = (totals[method] ?? 0) + amount;
+      });
+      return totals;
+    }, {} as Record<string, number>)
+  ).sort(([, left], [, right]) => right - left);
+  const cashierDetailTotal = serverCashierDetailRows.reduce((sum, sale) => sum + sale.grandTotal, 0);
+  const cashierDetailUnits = cashierDetailItemRows.reduce((sum, row) => sum + row.item.quantity, 0);
+
   const displayCreditSalesRows =
     serverCreditSalesRows.length > 0 ? serverCreditSalesRows : data.creditSales;
   const displayExpenseRows =
@@ -875,7 +909,8 @@ function ReportsContent() {
     draftRange.from !== range.from ||
     draftRange.to !== range.to ||
     draftRange.preset !== range.preset ||
-    draftCashierId !== cashierId;
+    draftCashierId !== cashierId ||
+    draftCashierName !== cashierName;
   const applyCustomRange = () => {
     if (!draftRange.from || !draftRange.to) {
       toast.error('Select both a start date and an end date.');
@@ -887,6 +922,7 @@ function ReportsContent() {
     }
     setRange({ ...draftRange, preset: 'custom' });
     setCashierId(draftCashierId);
+    setCashierName(draftCashierName);
     toast.success(`Date range applied: ${draftRange.from} to ${draftRange.to}`);
   };
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
@@ -902,11 +938,27 @@ function ReportsContent() {
       .map(([value, label]) => ({ value, label })),
   ];
   const selectedCashierName =
-    users.find((user) => user.id === cashierId)?.name ??
+    cashierName ||
+    users.find((user) => user.id === cashierId)?.name ||
     serverCashierRows.find((row) => row.cashierId === cashierId)?.cashier;
 
   const exportTable = useMemo(() => {
     if (activeView === 'sales-by-cashier') {
+      if (cashierId !== 'all') {
+        return {
+          filename: 'cashier-sales-detail-report',
+          headers: ['Date', 'Receipt', 'Item', 'Qty', 'Unit Price', 'Line Total', 'Payment'],
+          rows: cashierDetailItemRows.map(({ sale, item }) => [
+            new Date(sale.timestamp).toLocaleString(),
+            sale.transactionId,
+            item.name,
+            item.quantity.toString(),
+            item.unitPrice.toFixed(2),
+            item.lineTotal.toFixed(2),
+            paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
+          ]),
+        };
+      }
       return {
         filename: 'sales-by-cashier-report',
         headers: ['Cashier', 'Transactions', 'Revenue', 'Profit'],
@@ -1322,7 +1374,14 @@ function ReportsContent() {
                   {activeView === 'sales-by-cashier' && (
                     <label className="min-w-[190px] space-y-1">
                       <span className="text-[10px] font-bold uppercase text-muted-foreground">Cashier</span>
-                      <NiceSelect value={draftCashierId} onChange={setDraftCashierId} options={cashierOptions} />
+                      <NiceSelect
+                        value={draftCashierId}
+                        onChange={(value) => {
+                          setDraftCashierId(value);
+                          setDraftCashierName(cashierOptions.find((option) => option.value === value)?.label ?? '');
+                        }}
+                        options={cashierOptions}
+                      />
                     </label>
                   )}
                   <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1416,27 +1475,47 @@ function ReportsContent() {
               </p>
             </section>
 
-            <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
-              {summaryCards.map((card) => {
-                const Icon = card.icon;
-                return (
-                  <article
-                    key={card.label}
-                    className="rounded-xl border border-border bg-white p-4 shadow-card"
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-bold uppercase text-muted-foreground">
-                        {card.label}
-                      </p>
-                      <Icon size={17} className={card.tone} />
-                    </div>
-                    <p className={`mt-2 text-2xl font-bold font-tabular ${card.tone}`}>
-                      {card.value}
-                    </p>
-                  </article>
-                );
-              })}
-            </section>
+            {activeView === 'sales-by-cashier' && cashierId !== 'all' ? (
+              <section className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  {[
+                    ['Transactions', serverCashierDetailRows.length.toString()],
+                    ['Items sold', cashierDetailUnits.toString()],
+                    ['Total sales', formatMoney(cashierDetailTotal, settings.currency)],
+                    ['Gross profit', formatMoney(serverCashierDetailRows.reduce((sum, sale) => sum + profitForSale(sale), 0), settings.currency)],
+                    ['Cashier', selectedCashierName ?? 'Selected cashier'],
+                  ].map(([label, value]) => (
+                    <article key={label} className="rounded-xl border border-border bg-white p-4 shadow-card">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
+                      <p className="mt-2 truncate text-xl font-bold font-tabular text-foreground">{value}</p>
+                    </article>
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {cashierDetailPaymentTotals.map(([method, amount]) => (
+                    <article key={method} className="rounded-lg border border-border bg-muted/20 px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase text-muted-foreground">{method === 'bank-transfer' ? 'Transfer' : method.replace('-', ' ')}</p>
+                      <p className="mt-1 text-lg font-bold font-tabular">{formatMoney(amount, settings.currency)}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : (
+              <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+                {summaryCards.map((card) => {
+                  const Icon = card.icon;
+                  return (
+                    <article key={card.label} className="rounded-xl border border-border bg-white p-4 shadow-card">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold uppercase text-muted-foreground">{card.label}</p>
+                        <Icon size={17} className={card.tone} />
+                      </div>
+                      <p className={`mt-2 text-2xl font-bold font-tabular ${card.tone}`}>{card.value}</p>
+                    </article>
+                  );
+                })}
+              </section>
+            )}
 
             {activeView === 'overview' && (
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
@@ -1754,21 +1833,35 @@ function ReportsContent() {
               />
             )}
 
-            {activeView === 'sales-by-cashier' && (
+            {activeView === 'sales-by-cashier' && cashierId === 'all' && (
               <ReportTable
-                title="Sales by cashier"
-                subtitle="Cashier totals for the selected period"
+                title="Cashier summary"
+                subtitle="Select a cashier above to inspect the itemized statement."
                 headers={['Cashier', 'Transactions', 'Revenue', 'Profit']}
-                empty="No cashier sales recorded yet."
-                rows={displayCashierRows
-                  .slice()
-                  .sort((left, right) => right.revenue - left.revenue)
-                  .map((row) => [
-                    row.cashier,
-                    row.transactions.toString(),
-                    formatMoney(row.revenue, settings.currency),
-                    formatMoney(row.profit, settings.currency),
-                  ])}
+                empty="No cashier sales recorded in this period."
+                rows={displayCashierRows.slice().sort((left, right) => right.revenue - left.revenue).map((row) => [
+                  row.cashier,
+                  row.transactions.toString(),
+                  formatMoney(row.revenue, settings.currency),
+                  formatMoney(row.profit, settings.currency),
+                ])}
+              />
+            )}
+            {activeView === 'sales-by-cashier' && cashierId !== 'all' && (
+              <ReportTable
+                title={`Itemized sales — ${selectedCashierName ?? 'Cashier'}`}
+                subtitle="Every item sold in the selected period; returned/refunded sales are excluded from completed sales."
+                headers={['Date', 'Receipt', 'Item', 'Qty', 'Unit Price', 'Line Total', 'Payment']}
+                empty="No completed sales for this cashier in the selected period."
+                rows={cashierDetailItemRows.map(({ sale, item }) => [
+                  new Date(sale.timestamp).toLocaleString(),
+                  sale.transactionId,
+                  item.name,
+                  item.quantity.toString(),
+                  formatMoney(item.unitPrice, settings.currency),
+                  formatMoney(item.lineTotal, settings.currency),
+                  paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
+                ])}
               />
             )}
 

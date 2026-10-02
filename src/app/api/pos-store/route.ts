@@ -298,12 +298,23 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
 
   if (
     report === 'sales' ||
+    report === 'sales-by-cashier-detail' ||
     report === 'credit-sales' ||
     report === 'refunds' ||
     report === 'voided'
   ) {
     appendDateRange(params, 'timestamp', values, where);
-    if (report === 'sales') where.push("status = 'completed'");
+    if (report === 'sales' || report === 'sales-by-cashier-detail') where.push("status = 'completed'");
+    if (report === 'sales-by-cashier-detail' && cashierId) {
+      values.push(cashierId);
+      const cashierIdParam = `$${values.length}`;
+      if (cashierName) {
+        values.push(cashierName);
+        where.push(`(data->>'cashierId' = ${cashierIdParam} OR (NULLIF(data->>'cashierId', '') IS NULL AND cashier = $${values.length}))`);
+      } else {
+        where.push(`data->>'cashierId' = ${cashierIdParam}`);
+      }
+    }
     if (report === 'credit-sales') {
       where.push("status = 'completed'");
       where.push("(payment_method = 'credit' OR amount_due > 0)");
