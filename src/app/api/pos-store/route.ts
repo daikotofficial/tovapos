@@ -254,6 +254,40 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   const values: unknown[] = [auth.tenantId];
   const where: string[] = ['tenant_id = $1'];
 
+  if (report === 'vat') {
+    appendDateRange(params, 'timestamp', values, where);
+    where.push("status = 'completed'");
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `WITH sale_rows AS (
+         SELECT id, timestamp, status, data
+         FROM pos_tenant_sales
+         WHERE tenant_id = $1
+         UNION ALL
+         SELECT records.record_id AS id,
+                (records.data->>'timestamp')::timestamptz AS timestamp,
+                coalesce(records.data->>'status', 'completed') AS status,
+                records.data
+         FROM pos_tenant_records records
+         WHERE records.tenant_id = $1
+           AND records.store_name = 'sales'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM pos_tenant_sales indexed
+             WHERE indexed.tenant_id = records.tenant_id
+               AND indexed.id = records.record_id
+           )
+       )
+       SELECT data
+       FROM sale_rows
+       WHERE ${where.slice(1).join(' AND ')}
+       ORDER BY timestamp DESC, id DESC
+       LIMIT $${values.length - 1} OFFSET $${values.length}`,
+      values
+    );
+    return NextResponse.json({ rows: result.rows.map((row) => row.data), limit, offset });
+  }
+
   if (report === 'sales-by-cashier') {
     appendDateRange(params, 'timestamp', values, where);
     where.push("status = 'completed'");

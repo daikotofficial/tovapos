@@ -31,7 +31,7 @@ import {
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import RowsPerPageSelect from '@/components/ui/RowsPerPageSelect';
-import type { InputVatRecord, Permission, SaleTransaction } from '@/lib/pos/types';
+import type { InputVatRecord, Permission, SaleLineItem, SaleTransaction } from '@/lib/pos/types';
 import { toast } from 'sonner';
 
 type ReportView = string;
@@ -571,6 +571,7 @@ function ReportsContent() {
       try {
         const rowReports = [
           'sales',
+          'vat',
           'sales-by-cashier',
           'sales-by-cashier-detail',
           'credit-sales',
@@ -594,7 +595,7 @@ function ReportsContent() {
                   to,
                   cashierId: (report === 'sales-by-cashier' || report === 'sales-by-cashier-detail') && cashierId !== 'all' ? cashierId : undefined,
                   cashierName: (report === 'sales-by-cashier' || report === 'sales-by-cashier-detail') && cashierId !== 'all' ? cashierName : undefined,
-                  limit: report === 'sales-by-cashier-detail' ? 500 : 100,
+                  limit: report === 'sales-by-cashier-detail' || report === 'vat' || report === 'input-vat' ? 500 : 100,
                 })).rows,
           ])
         );
@@ -764,6 +765,7 @@ function ReportsContent() {
   ]);
 
   const serverSalesRows = (serverReportRows.sales ?? []) as SaleTransaction[];
+  const serverVatRows = (serverReportRows.vat ?? []) as SaleTransaction[];
   const serverCashierDetailRows = (serverReportRows['sales-by-cashier-detail'] ?? []) as SaleTransaction[];
   const serverCashierRows = (serverReportRows['sales-by-cashier'] ?? []) as {
     cashierId: string;
@@ -797,6 +799,23 @@ function ReportsContent() {
   const serverInputVatRows = (serverReportRows['input-vat'] ?? []) as InputVatRecord[];
 
   const displaySalesRows = serverSalesRows.length > 0 ? serverSalesRows : data.completedSales;
+  const vatSalesRows = serverVatRows.length > 0 ? serverVatRows : displaySalesRows;
+  const vatCollected = vatSalesRows
+    .filter((sale) => sale.status === 'completed')
+    .reduce((sum, sale) => sum + Number(sale.taxAmount || 0), 0);
+  const vatPaid = serverInputVatRows
+    .filter((record) => record.status === 'recorded')
+    .reduce((sum, record) => sum + Number(record.inputVatAmount || 0), 0);
+  const vatRemittable = vatCollected - vatPaid;
+  const vatOutputRows: { sale: SaleTransaction; item: SaleLineItem | null; vat: number }[] = [];
+  vatSalesRows.forEach((sale) => {
+    const taxableItems = sale.items.filter((item) => Number(item.taxAmount || 0) > 0);
+    if (taxableItems.length > 0) {
+      taxableItems.forEach((item) => vatOutputRows.push({ sale, item, vat: Number(item.taxAmount || 0) }));
+    } else if (Number(sale.taxAmount || 0) > 0) {
+      vatOutputRows.push({ sale, item: null, vat: Number(sale.taxAmount || 0) });
+    }
+  });
   const hasServerCashierRows = Object.prototype.hasOwnProperty.call(serverReportRows, 'sales-by-cashier');
   const displayCashierRows = hasServerCashierRows
     ? serverCashierRows
@@ -1475,7 +1494,22 @@ function ReportsContent() {
               </p>
             </section>
 
-            {activeView === 'sales-by-cashier' && cashierId !== 'all' ? (
+            {activeView === 'vat' ? (
+              <section className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  {[
+                    ['VAT collected', vatCollected, 'text-primary'],
+                    ['VAT paid', vatPaid, 'text-warning'],
+                    ['VAT remittable', vatRemittable, vatRemittable >= 0 ? 'text-success' : 'text-danger'],
+                  ].map(([label, value, tone]) => (
+                    <article key={String(label)} className="rounded-xl border border-border bg-white p-4 shadow-card">
+                      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
+                      <p className={`mt-2 text-2xl font-bold font-tabular ${tone}`}>{formatMoney(Number(value), settings.currency)}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : activeView === 'sales-by-cashier' && cashierId !== 'all' ? (
               <section className="space-y-3">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
                   {[
@@ -1985,25 +2019,29 @@ function ReportsContent() {
 
             {activeView === 'vat' && (
               <ReportTable
-                title="VAT / Tax report"
-                subtitle={`Output VAT from sales and input VAT paid to vendors. No net-off is calculated.`}
-                headers={['Type', 'Reference', 'Date', 'VAT Amount', 'Base / Total']}
-                empty="No VAT records yet."
+                title="VAT reconciliation"
+                subtitle="Only VAT-bearing sales items and recorded input VAT are included for the selected period."
+                headers={['Type', 'Reference', 'Date', 'Item / Vendor', 'VAT Amount', 'Tax Base']}
+                empty="No VAT collected or paid in this period."
                 rows={[
-                  ...data.completedSales.map((sale) => [
-                    'Output VAT',
+                  ...vatOutputRows.map(({ sale, item, vat }): string[] => [
+                    'VAT collected',
                     sale.transactionId,
                     new Date(sale.timestamp).toLocaleString(),
-                    formatMoney(sale.taxAmount, settings.currency),
-                    formatMoney(sale.grandTotal, settings.currency),
+                    item?.name ?? 'Sale VAT',
+                    formatMoney(vat, settings.currency),
+                    formatMoney(item?.lineTotal ?? sale.grandTotal, settings.currency),
                   ]),
-                  ...serverInputVatRows.map((record) => [
-                    'Input VAT',
-                    record.invoiceNumber ?? record.recordNumber,
-                    record.date,
-                    formatMoney(record.inputVatAmount, settings.currency),
-                    formatMoney(record.goodsAmount, settings.currency),
-                  ]),
+                  ...serverInputVatRows
+                    .filter((record) => record.status === 'recorded')
+                    .map((record): string[] => [
+                      'VAT paid',
+                      record.invoiceNumber ?? record.recordNumber,
+                      record.date,
+                      record.vendorName,
+                      formatMoney(record.inputVatAmount, settings.currency),
+                      formatMoney(record.goodsAmount, settings.currency),
+                    ]),
                 ]}
               />
             )}
