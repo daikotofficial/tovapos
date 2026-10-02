@@ -326,9 +326,29 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     }
     detailValues.push(limit, offset);
     const detailResult = await getPosPool().query(
-      `SELECT data
-       FROM pos_tenant_sales
-       WHERE ${detailWhere.join(' AND ')}
+      `WITH sale_rows AS (
+         SELECT id, timestamp, cashier, status, data
+         FROM pos_tenant_sales
+         WHERE tenant_id = $1
+         UNION ALL
+         SELECT records.record_id AS id,
+                (records.data->>'timestamp')::timestamptz AS timestamp,
+                coalesce(records.data->>'cashier', '') AS cashier,
+                coalesce(records.data->>'status', 'completed') AS status,
+                records.data
+         FROM pos_tenant_records records
+         WHERE records.tenant_id = $1
+           AND records.store_name = 'sales'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM pos_tenant_sales indexed
+             WHERE indexed.tenant_id = records.tenant_id
+               AND indexed.id = records.record_id
+           )
+       )
+       SELECT data
+       FROM sale_rows
+       WHERE ${detailWhere.slice(1).join(' AND ')}
        ORDER BY timestamp DESC, id DESC
        LIMIT $${detailValues.length - 1} OFFSET $${detailValues.length}`,
       detailValues
