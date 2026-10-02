@@ -262,7 +262,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
       const cashierIdParam = `$${values.length}`;
       if (cashierName) {
         values.push(cashierName);
-        where.push(`(data->>'cashierId' = ${cashierIdParam} OR (NULLIF(data->>'cashierId', '') IS NULL AND cashier = $${values.length}))`);
+        where.push(`(data->>'cashierId' = ${cashierIdParam} OR lower(trim(cashier)) = lower(trim($${values.length})) OR lower(trim(data->>'cashier')) = lower(trim($${values.length})))`);
       } else {
         where.push(`data->>'cashierId' = ${cashierIdParam}`);
       }
@@ -296,25 +296,52 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     });
   }
 
+  if (report === 'sales-by-cashier-detail') {
+    const detailValues: unknown[] = [auth.tenantId];
+    const detailWhere: string[] = [
+      'tenant_id = $1',
+      "store_name = 'sales'",
+      "data->>'status' = 'completed'",
+    ];
+    appendDateRange(params, "(data->>'timestamp')::timestamptz", detailValues, detailWhere);
+    if (cashierId) {
+      detailValues.push(cashierId);
+      const detailCashierIdParam = `$${detailValues.length}`;
+      if (cashierName) {
+        detailValues.push(cashierName);
+        const detailCashierNameParam = `$${detailValues.length}`;
+        detailWhere.push(`(
+          data->>'cashierId' = ${detailCashierIdParam}
+          OR lower(regexp_replace(trim(data->>'cashier'), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
+        )`);
+      } else {
+        detailWhere.push(`data->>'cashierId' = ${detailCashierIdParam}`);
+      }
+    }
+    detailValues.push(limit, offset);
+    const detailResult = await getPosPool().query(
+      `SELECT data
+       FROM pos_tenant_records
+       WHERE ${detailWhere.join(' AND ')}
+       ORDER BY (data->>'timestamp')::timestamptz DESC, record_id DESC
+       LIMIT $${detailValues.length - 1} OFFSET $${detailValues.length}`,
+      detailValues
+    );
+    return NextResponse.json({
+      rows: detailResult.rows.map((row) => protectSaleFinancials(row.data, auth)),
+      limit,
+      offset,
+    });
+  }
+
   if (
     report === 'sales' ||
-    report === 'sales-by-cashier-detail' ||
     report === 'credit-sales' ||
     report === 'refunds' ||
     report === 'voided'
   ) {
     appendDateRange(params, 'timestamp', values, where);
-    if (report === 'sales' || report === 'sales-by-cashier-detail') where.push("status = 'completed'");
-    if (report === 'sales-by-cashier-detail' && cashierId) {
-      values.push(cashierId);
-      const cashierIdParam = `$${values.length}`;
-      if (cashierName) {
-        values.push(cashierName);
-        where.push(`(data->>'cashierId' = ${cashierIdParam} OR (NULLIF(data->>'cashierId', '') IS NULL AND cashier = $${values.length}))`);
-      } else {
-        where.push(`data->>'cashierId' = ${cashierIdParam}`);
-      }
-    }
+    if (report === 'sales') where.push("status = 'completed'");
     if (report === 'credit-sales') {
       where.push("status = 'completed'");
       where.push("(payment_method = 'credit' OR amount_due > 0)");
