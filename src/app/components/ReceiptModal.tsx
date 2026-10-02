@@ -175,7 +175,7 @@ export default function ReceiptModal({
     await document.fonts.ready;
     const pageStyle = document.createElement('style');
     pageStyle.id = 'receipt-print-page-style';
-    pageStyle.textContent = '@media print { @page { size: 80mm auto; margin: 0 !important; } html, body { width: 80mm !important; min-width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; } body > * { display: none !important; } body > .receipt-print-root { display: block !important; width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; left: 0 !important; top: 0 !important; visibility: visible !important; } .receipt-print-root .receipt-paper { display: block !important; width: 80mm !important; max-width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; color: #000 !important; background: #fff !important; font-family: Arial, Helvetica, sans-serif !important; font-size: 11px !important; line-height: 1.25 !important; } .receipt-print-root .receipt-paper * { color: #000 !important; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }';
+    pageStyle.textContent = '@media print { @page { size: 80mm auto; margin: 0 !important; } html, body { width: 80mm !important; min-width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; } body > * { display: none !important; } body > .receipt-print-root { display: block !important; width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; position: static !important; left: 0 !important; top: 0 !important; visibility: visible !important; } .receipt-print-root .receipt-paper { display: block !important; width: 80mm !important; max-width: 80mm !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; color: #000 !important; background: #fff !important; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, \'Liberation Mono\', \'Courier New\', monospace !important; font-size: 11px !important; line-height: 1.25 !important; } .receipt-print-root .receipt-paper * { color: #000 !important; } * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }';
     document.head.appendChild(pageStyle);
 
     window.addEventListener('afterprint', cleanup, { once: true });
@@ -265,37 +265,37 @@ export default function ReceiptModal({
 
           {/* Meta */}
           <div className="receipt-print-meta px-6 py-3 border-b border-dashed border-border">
-            <div className="grid grid-cols-2 gap-y-1 text-xs">
+            <div className="receipt-meta-row text-xs">
               <span className="text-muted-foreground">Date:</span>
-              <span className="font-medium text-foreground text-right">{receiptTimestamp}</span>
-              <span className="text-muted-foreground">Cashier:</span>
-              <span className="font-medium text-foreground text-right">{sale.cashier}</span>
-              {showCustomer && (
-                <>
-                  <span className="text-muted-foreground">Customer:</span>
-                  <span className="font-medium text-foreground text-right">
-                    {sale.customerName || 'Walk-in Customer'}
-                  </span>
-                </>
-              )}
-              <span className="text-muted-foreground">Payment:</span>
-              <span className="font-medium text-foreground text-right uppercase">
-                {sale.paymentMethod}
-              </span>
-              {sale.paymentMethod === 'split' && sale.paymentBreakdown &&
-                Object.entries(sale.paymentBreakdown)
-                  .filter(([, amount]) => Number(amount) > 0)
-                  .map(([method, amount]) => (
-                    <React.Fragment key={`receipt-payment-${method}`}>
-                      <span className="text-muted-foreground capitalize">
-                        {method === 'bank-transfer' ? 'Transfer' : method}
-                      </span>
-                      <span className="font-medium text-foreground text-right font-tabular">
-                        {formatMoney(Number(amount), currency)}
-                      </span>
-                    </React.Fragment>
-                  ))}
+              <span className="font-medium text-foreground">{receiptTimestamp}</span>
             </div>
+            <div className="receipt-meta-row text-xs">
+              <span className="text-muted-foreground">Cashier:</span>
+              <span className="font-medium text-foreground">{sale.cashier}</span>
+            </div>
+            {showCustomer && (
+              <div className="receipt-meta-row text-xs">
+                <span className="text-muted-foreground">Customer:</span>
+                <span className="font-medium text-foreground">{sale.customerName || 'Walk-in Customer'}</span>
+              </div>
+            )}
+            <div className="receipt-meta-row text-xs">
+              <span className="text-muted-foreground">Payment:</span>
+              <span className="font-medium text-foreground uppercase">{sale.paymentMethod}</span>
+            </div>
+            {sale.paymentMethod === 'split' && sale.paymentBreakdown &&
+              Object.entries(sale.paymentBreakdown)
+                .filter(([, amount]) => Number(amount) > 0)
+                .map(([method, amount]) => (
+                  <div className="receipt-meta-row text-xs" key={`receipt-payment-${method}`}>
+                    <span className="text-muted-foreground capitalize">
+                      {method === 'bank-transfer' ? 'Transfer' : method}
+                    </span>
+                    <span className="font-medium text-foreground font-tabular">
+                      {formatMoney(Number(amount), currency)}
+                    </span>
+                  </div>
+                ))}
           </div>
 
           {/* Items */}

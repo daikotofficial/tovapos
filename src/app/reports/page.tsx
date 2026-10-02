@@ -493,6 +493,8 @@ function ReportsContent() {
       : 'overview';
   const [range, setRange] = useState<ReportRange>(() => createRange('1m'));
   const [draftRange, setDraftRange] = useState<ReportRange>(() => createRange('1m'));
+  const [cashierId, setCashierId] = useState('all');
+  const [draftCashierId, setDraftCashierId] = useState('all');
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
   const [serverReportRows, setServerReportRows] = useState<Record<string, unknown[]>>({});
@@ -513,6 +515,10 @@ function ReportsContent() {
   useEffect(() => {
     setDraftRange(range);
   }, [range]);
+
+  useEffect(() => {
+    setDraftCashierId(cashierId);
+  }, [cashierId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -546,6 +552,7 @@ function ReportsContent() {
       try {
         const rowReports = [
           'sales',
+          'sales-by-cashier',
           'credit-sales',
           'expenses',
           'sales-by-product',
@@ -564,6 +571,8 @@ function ReportsContent() {
                 report,
                 from,
                 to,
+                cashierId: report === 'sales-by-cashier' && cashierId !== 'all' ? cashierId : undefined,
+                cashierName: report === 'sales-by-cashier' && cashierId !== 'all' ? users.find((user) => user.id === cashierId)?.name : undefined,
                 limit: 100,
               })
             ).rows,
@@ -578,7 +587,7 @@ function ReportsContent() {
     return () => {
       cancelled = true;
     };
-  }, [range.from, range.preset, range.to, reportRefreshToken]);
+  }, [cashierId, range.from, range.preset, range.to, reportRefreshToken, users]);
 
   const data = useMemo(() => {
     const completedSales = sales.filter(
@@ -735,6 +744,13 @@ function ReportsContent() {
   ]);
 
   const serverSalesRows = (serverReportRows.sales ?? []) as SaleTransaction[];
+  const serverCashierRows = (serverReportRows['sales-by-cashier'] ?? []) as {
+    cashierId: string;
+    cashier: string;
+    transactions: number;
+    revenue: number;
+    profit: number;
+  }[];
   const serverCreditSalesRows = (serverReportRows['credit-sales'] ?? []) as SaleTransaction[];
   const serverExpenseRows = (serverReportRows.expenses ?? []) as typeof expenses;
   const serverProductRows = (serverReportRows['sales-by-product'] ?? []) as {
@@ -760,6 +776,22 @@ function ReportsContent() {
   const serverInputVatRows = (serverReportRows['input-vat'] ?? []) as InputVatRecord[];
 
   const displaySalesRows = serverSalesRows.length > 0 ? serverSalesRows : data.completedSales;
+  const hasServerCashierRows = Object.prototype.hasOwnProperty.call(serverReportRows, 'sales-by-cashier');
+  const displayCashierRows = hasServerCashierRows
+    ? serverCashierRows
+    : Object.entries(
+        data.completedSales
+          .filter((sale) => cashierId === 'all' || sale.cashierId === cashierId || (!sale.cashierId && sale.cashier === users.find((user) => user.id === cashierId)?.name))
+          .reduce((map, sale) => {
+            const key = sale.cashierId ?? `name:${sale.cashier}`;
+            const current = map[key] ?? { cashierId: key, cashier: sale.cashier, transactions: 0, revenue: 0, profit: 0 };
+            current.transactions += 1;
+            current.revenue += sale.grandTotal;
+            current.profit += profitForSale(sale);
+            map[key] = current;
+            return map;
+          }, {} as Record<string, { cashierId: string; cashier: string; transactions: number; revenue: number; profit: number }>)
+      ).map(([, row]) => row);
   const displayCreditSalesRows =
     serverCreditSalesRows.length > 0 ? serverCreditSalesRows : data.creditSales;
   const displayExpenseRows =
@@ -841,7 +873,8 @@ function ReportsContent() {
   const draftHasChanges =
     draftRange.from !== range.from ||
     draftRange.to !== range.to ||
-    draftRange.preset !== range.preset;
+    draftRange.preset !== range.preset ||
+    draftCashierId !== cashierId;
   const applyCustomRange = () => {
     if (!draftRange.from || !draftRange.to) {
       toast.error('Select both a start date and an end date.');
@@ -852,11 +885,33 @@ function ReportsContent() {
       return;
     }
     setRange({ ...draftRange, preset: 'custom' });
+    setCashierId(draftCashierId);
     toast.success(`Date range applied: ${draftRange.from} to ${draftRange.to}`);
   };
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
+  const cashierOptions = [
+    { value: 'all', label: 'All cashiers' },
+    ...users
+      .slice()
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((user) => ({ value: user.id, label: user.name })),
+  ];
+  const selectedCashier = users.find((user) => user.id === cashierId);
 
   const exportTable = useMemo(() => {
+    if (activeView === 'sales-by-cashier') {
+      return {
+        filename: 'sales-by-cashier-report',
+        headers: ['Cashier', 'Transactions', 'Revenue', 'Profit'],
+        rows: displayCashierRows.map((row) => [
+          row.cashier,
+          row.transactions.toString(),
+          row.revenue.toFixed(2),
+          row.profit.toFixed(2),
+        ]),
+      };
+    }
+
     if (activeView === 'sales') {
       return {
         filename: 'sales-report',
@@ -1092,6 +1147,7 @@ function ReportsContent() {
     displayPaymentRows,
     displayProductRows,
     displaySalesRows,
+    displayCashierRows,
     inventory,
   ]);
 
@@ -1105,6 +1161,7 @@ function ReportsContent() {
       ['Organization', settings.businessName || 'TOVAPOS'],
       ['Report', reportTitle],
       ['Range', rangeLabel],
+      ...(activeView === 'sales-by-cashier' ? [['Cashier', selectedCashier?.name ?? 'All cashiers']] : []),
       ['Generated', generatedAt],
     ];
     const fullRows = [...metadataRows, [], exportTable.headers, ...exportTable.rows];
@@ -1255,6 +1312,12 @@ function ReportsContent() {
                 </div>
 
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                  {activeView === 'sales-by-cashier' && (
+                    <label className="min-w-[190px] space-y-1">
+                      <span className="text-[10px] font-bold uppercase text-muted-foreground">Cashier</span>
+                      <NiceSelect value={draftCashierId} onChange={setDraftCashierId} options={cashierOptions} />
+                    </label>
+                  )}
                   <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                     <label className="space-y-1">
                       <span className="text-[10px] font-bold uppercase text-muted-foreground">
@@ -1690,32 +1753,12 @@ function ReportsContent() {
                 subtitle="Cashier totals for the selected period"
                 headers={['Cashier', 'Transactions', 'Revenue', 'Profit']}
                 empty="No cashier sales recorded yet."
-                rows={Object.entries(
-                  displaySalesRows
-                    .filter((sale) => sale.status === 'completed')
-                    .reduce(
-                      (map, sale) => {
-                        const user = sale.cashierId ? users.find((item) => item.id === sale.cashierId) : undefined;
-                        const key = sale.cashierId ?? `name:${sale.cashier}`;
-                        const current = map[key] ?? {
-                          cashier: user?.name ?? sale.cashier,
-                          count: 0,
-                          revenue: 0,
-                          profit: 0,
-                        };
-                        current.count += 1;
-                        current.revenue += sale.grandTotal;
-                        current.profit += profitForSale(sale);
-                        map[key] = current;
-                        return map;
-                      },
-                      {} as Record<string, { cashier: string; count: number; revenue: number; profit: number }>
-                    )
-                )
-                  .sort(([, left], [, right]) => right.revenue - left.revenue)
-                  .map(([, row]) => [
+                rows={displayCashierRows
+                  .slice()
+                  .sort((left, right) => right.revenue - left.revenue)
+                  .map((row) => [
                     row.cashier,
-                    row.count.toString(),
+                    row.transactions.toString(),
                     formatMoney(row.revenue, settings.currency),
                     formatMoney(row.profit, settings.currency),
                   ])}

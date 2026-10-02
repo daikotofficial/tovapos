@@ -690,6 +690,8 @@ export async function loadReportRows<T = unknown>(input: {
   report: string;
   from?: string;
   to?: string;
+  cashierId?: string;
+  cashierName?: string;
   limit?: number;
   offset?: number;
 }): Promise<ReportRowsResult<T>> {
@@ -698,6 +700,8 @@ export async function loadReportRows<T = unknown>(input: {
       report: input.report,
       from: input.from,
       to: input.to,
+      cashierId: input.cashierId,
+      cashierName: input.cashierName,
       limit: input.limit ?? 100,
       offset: input.offset ?? 0,
     });

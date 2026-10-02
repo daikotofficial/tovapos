@@ -88,16 +88,34 @@
   }
 
   .receipt-print-root .receipt-print-meta {
-    display: grid !important;
-    grid-template-columns: 24mm minmax(0, 1fr) !important;
-    gap: 1px 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1px !important;
     padding: 3mm 4mm !important;
     border-bottom: 1px dashed #000 !important;
   }
 
-  .receipt-print-root .receipt-print-meta > * {
+  .receipt-print-root .receipt-meta-row {
+    display: flex !important;
+    width: 100% !important;
     min-width: 0 !important;
-    overflow-wrap: anywhere !important;
+    align-items: baseline !important;
+    line-height: 1.28 !important;
+  }
+
+  .receipt-print-root .receipt-meta-row > :first-child {
+    flex: 0 0 12ch !important;
+    min-width: 12ch !important;
+    white-space: nowrap !important;
+  }
+
+  .receipt-print-root .receipt-meta-row > :last-child {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-align: right !important;
+    white-space: nowrap !important;
+    text-overflow: clip !important;
   }
 
   .receipt-print-root .receipt-print-items,

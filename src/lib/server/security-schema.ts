@@ -388,6 +388,10 @@ export async function ensureSecuritySchema(): Promise<void> {
           ON pos_tenant_sales (tenant_id, timestamp DESC);
         CREATE INDEX IF NOT EXISTS pos_tenant_sales_status_idx
           ON pos_tenant_sales (tenant_id, status, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS pos_tenant_sales_cashier_id_idx
+          ON pos_tenant_sales (tenant_id, (data->>'cashierId'));
+        CREATE INDEX IF NOT EXISTS pos_tenant_sales_cashier_name_idx
+          ON pos_tenant_sales (tenant_id, cashier);
 
         CREATE TABLE IF NOT EXISTS pos_tenant_sale_items (
           tenant_id text NOT NULL,

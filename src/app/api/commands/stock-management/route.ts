@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import type { InventoryCodeAlias, InventoryItem, StockBatch, StockMovement } from '@/lib/pos/types';
 import { computeStockStatus } from '@/lib/pos/stock';
@@ -79,9 +79,40 @@ export async function POST(request: NextRequest) {
     if (!action) throw new HttpError(400, 'Stock action is invalid', 'VALIDATION_ERROR');
     const productId = text(body.productId);
     if (!productId) throw new HttpError(400, 'Product is required', 'VALIDATION_ERROR');
+    const operationId = /^[A-Za-z0-9:_-]{8,160}$/.test(String(body.operationId ?? ''))
+      ? String(body.operationId)
+      : randomUUID();
+    const idempotencyKey = `stock-management:${operationId}`;
+    const requestHash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
     const client = await getPosPool().connect();
     try {
       await client.query('BEGIN');
+      const claimed = await client.query(
+        `INSERT INTO pos_idempotency_keys
+          (tenant_id, idempotency_key, operation_type, request_hash)
+         VALUES ($1, $2, 'stock-management', $3)
+         ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+         RETURNING idempotency_key`,
+        [auth.tenantId, idempotencyKey, requestHash]
+      );
+      if (claimed.rowCount === 0) {
+        const replay = await client.query(
+          `SELECT request_hash, response_status, response_body
+           FROM pos_idempotency_keys
+           WHERE tenant_id = $1 AND idempotency_key = $2
+           FOR UPDATE`,
+          [auth.tenantId, idempotencyKey]
+        );
+        const previous = replay.rows[0];
+        if (!previous || previous.request_hash !== requestHash) {
+          throw new HttpError(409, 'Stock operation conflicts with an existing operation', 'IDEMPOTENCY_CONFLICT');
+        }
+        if (!previous.response_body) {
+          throw new HttpError(409, 'Stock operation is already processing', 'OPERATION_IN_PROGRESS');
+        }
+        await client.query('COMMIT');
+        return NextResponse.json(previous.response_body, { status: previous.response_status ?? 200 });
+      }
       const result = await client.query(
         `SELECT * FROM pos_tenant_inventory WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
         [auth.tenantId, productId]
@@ -147,11 +178,18 @@ export async function POST(request: NextRequest) {
       }
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockBatches', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, batch.id, JSON.stringify(batch)]);
       await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
-      const movement: StockMovement = { id: `move-${randomUUID()}`, operationId: `stock-${randomUUID()}`, inventoryItemId: productId, productName: current.name, sku: batch.sku, barcode: batch.barcode, batchLot: current.batchLot, type: action === 'receive' ? 'receive' : 'return', quantityDelta, quantityBefore: beforeQty, quantityAfter: updated.currentQty, unitCost: batch.unitCost, unitPrice: batch.sellingPrice, referenceId: batch.id, referenceLabel: action === 'receive' ? 'Stock receipt' : 'Supplier return', reason: notes ? `${reason} — ${notes}` : reason, batchId: batch.id, supplier: batch.supplier, supplierPhone: batch.supplierPhone, invoiceNumber: batch.invoiceNumber, valueBefore: beforeValue, valueAfter: updated.currentQty * updated.unitCost, createdAt: now, createdBy: auth.user.name, syncStatus: 'synced' };
+      const movement: StockMovement = { id: `move-${randomUUID()}`, operationId, inventoryItemId: productId, productName: current.name, sku: batch.sku, barcode: batch.barcode, batchLot: current.batchLot, type: action === 'receive' ? 'receive' : 'return', quantityDelta, quantityBefore: beforeQty, quantityAfter: updated.currentQty, unitCost: batch.unitCost, unitPrice: batch.sellingPrice, referenceId: batch.id, referenceLabel: action === 'receive' ? 'Stock receipt' : 'Supplier return', reason: notes ? `${reason} — ${notes}` : reason, batchId: batch.id, supplier: batch.supplier, supplierPhone: batch.supplierPhone, invoiceNumber: batch.invoiceNumber, valueBefore: beforeValue, valueAfter: updated.currentQty * updated.unitCost, createdAt: now, createdBy: auth.user.name, syncStatus: 'synced' };
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockMovements', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, movement.id, JSON.stringify(movement)]);
-      await client.query(`INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, metadata) VALUES ($1, $2, $3, 'inventory', $4, $5::jsonb)`, [auth.tenantId, auth.user.id, action === 'receive' ? 'stock.received' : 'stock.returned', productId, JSON.stringify({ beforeQty, afterQty: updated.currentQty, beforeValue, afterValue: updated.currentQty * updated.unitCost, batch, movement, notes: text(body.notes), sku: batch.sku, barcode: batch.barcode })]);
+      await client.query(`INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, operation_id, metadata) VALUES ($1, $2, $3, 'inventory', $4, $5, $6::jsonb)`, [auth.tenantId, auth.user.id, action === 'receive' ? 'stock.received' : 'stock.returned', productId, operationId, JSON.stringify({ beforeQty, afterQty: updated.currentQty, beforeValue, afterValue: updated.currentQty * updated.unitCost, batch, movement, notes: text(body.notes), sku: batch.sku, barcode: batch.barcode })]);
+      const responseBody = { inventory: updated, batch, movement };
+      await client.query(
+        `UPDATE pos_idempotency_keys
+         SET response_status = 200, response_body = $3::jsonb, completed_at = now()
+         WHERE tenant_id = $1 AND idempotency_key = $2`,
+        [auth.tenantId, idempotencyKey, JSON.stringify(responseBody)]
+      );
       await client.query('COMMIT');
-      return NextResponse.json({ inventory: updated, batch, movement });
+      return NextResponse.json(responseBody);
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   } catch (error) { return errorResponse(error); }
 }

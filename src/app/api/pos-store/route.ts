@@ -243,12 +243,56 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   const report = params.get('report') ?? 'sales';
   const limit = clampLimit(params.get('limit'));
   const offset = clampOffset(params.get('offset'));
+  const cashierId = params.get('cashierId')?.trim();
+  const cashierName = params.get('cashierName')?.trim();
   if (report === 'refunds') assertPermission(auth, 'refunds');
   if (report === 'credit-sales') assertPermission(auth, 'credit-sales');
   if (report === 'expenses') assertPermission(auth, 'expenses');
   if (report === 'input-vat') assertPermission(auth, 'manage-tax');
   const values: unknown[] = [auth.tenantId];
   const where: string[] = ['tenant_id = $1'];
+
+  if (report === 'sales-by-cashier') {
+    appendDateRange(params, 'timestamp', values, where);
+    where.push("status = 'completed'");
+    if (cashierId) {
+      values.push(cashierId);
+      const cashierIdParam = `$${values.length}`;
+      if (cashierName) {
+        values.push(cashierName);
+        where.push(`(data->>'cashierId' = ${cashierIdParam} OR (NULLIF(data->>'cashierId', '') IS NULL AND cashier = $${values.length}))`);
+      } else {
+        where.push(`data->>'cashierId' = ${cashierIdParam}`);
+      }
+    }
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `
+      SELECT
+        COALESCE(NULLIF(data->>'cashierId', ''), 'name:' || cashier) AS "cashierId",
+        cashier,
+        count(*)::bigint AS transactions,
+        coalesce(sum(gross_profit), 0)::float8 AS profit,
+        coalesce(sum(grand_total), 0)::float8 AS revenue
+      FROM pos_tenant_sales
+      WHERE ${where.join(' AND ')}
+      GROUP BY COALESCE(NULLIF(data->>'cashierId', ''), 'name:' || cashier), cashier
+      ORDER BY revenue DESC, cashier ASC
+      LIMIT $${values.length - 1} OFFSET $${values.length}
+      `,
+      values
+    );
+    return NextResponse.json({
+      rows: result.rows.map((row) => ({
+        ...row,
+        transactions: Number(row.transactions ?? 0),
+        revenue: Number(row.revenue ?? 0),
+        profit: authAllows(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
+      })),
+      limit,
+      offset,
+    });
+  }
 
   if (
     report === 'sales' ||

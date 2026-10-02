@@ -145,7 +145,7 @@ export default function StockManagementScreen() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(action === 'return'
           ? { operationId, productId: selectedProduct.id, quantity: parsedQuantity, reason, notes }
-          : { action, productId: selectedProduct.id, quantity: parsedQuantity, unitCost: Number(unitCost), sellingPrice: sellingPrice ? Number(sellingPrice) : undefined, expiryDate, sku, barcode, supplier, supplierPhone, invoiceNumber, reason, notes }),
+          : { operationId, action, productId: selectedProduct.id, quantity: parsedQuantity, unitCost: Number(unitCost), sellingPrice: sellingPrice ? Number(sellingPrice) : undefined, expiryDate, sku, barcode, supplier, supplierPhone, invoiceNumber, reason, notes }),
       });
       const payload = (await response.json()) as { inventory?: InventoryItem; movement?: StockMovement; error?: string };
       if (!response.ok || !payload.inventory) throw new Error(payload.error ?? 'Unable to save stock transaction');
