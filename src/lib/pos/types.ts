@@ -290,6 +290,7 @@ export interface ReconcileCreditSaleInput {
 }
 
 export type Permission =
+  | 'view-only'
   | 'dashboard'
   | 'checkout'
   | 'add-product'

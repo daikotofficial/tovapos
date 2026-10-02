@@ -4,6 +4,7 @@ import type { InventoryItem, SaleTransaction, StockMovement } from '@/lib/pos/ty
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
+  assertWritePermission,
   assertTenantPlanPermission,
   assertSameOrigin,
   errorResponse,
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
-    assertPermission(auth, 'refunds');
+    assertWritePermission(auth, 'refunds');
     await assertTenantPlanPermission(auth.tenantId, 'refunds');
     const body = (await request.json()) as Record<string, unknown>;
     const saleId = typeof body.saleId === 'string' ? body.saleId : '';

@@ -14,6 +14,7 @@ export interface SubscriptionPlan {
 }
 
 const starterPermissions: Permission[] = [
+  'view-only',
   'dashboard',
   'checkout',
   'add-product',

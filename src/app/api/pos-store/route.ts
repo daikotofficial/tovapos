@@ -6,6 +6,8 @@ import type { Permission } from '@/lib/pos/types';
 import { hashPasswordServer, passwordStrengthError } from '@/lib/server/password';
 import {
   assertPermission,
+  assertWritePermission,
+  isViewOnlyUser,
   assertAnyPermission,
   assertSameOrigin,
   assertTenantActive,
@@ -50,16 +52,16 @@ type PosRecord = Record<string, unknown> & { id?: unknown };
 type InventoryCursor = { name: string; id: string };
 
 const READ_PERMISSIONS: Partial<Record<string, Permission[]>> = {
-  inventory: ['inventory', 'add-product', 'edit-product', 'adjust-stock', 'delete-product', 'checkout', 'reports'],
-  stockMovements: ['inventory', 'reports'],
+  inventory: ['view-only', 'inventory', 'add-product', 'edit-product', 'adjust-stock', 'delete-product', 'checkout', 'reports'],
+  stockMovements: ['view-only', 'inventory', 'reports'],
   users: ['users'],
-  customers: ['customers', 'checkout'],
-  vendors: ['vendors', 'inventory'],
-  expenses: ['expenses', 'reports'],
-  inputVat: ['manage-tax', 'reports'],
-  hospitalityServices: ['checkout', 'customers'],
-  hospitalityReservations: ['checkout', 'customers'],
-  hospitalityGuests: ['checkout', 'customers'],
+  customers: ['view-only', 'customers', 'checkout'],
+  vendors: ['view-only', 'vendors', 'inventory'],
+  expenses: ['view-only', 'expenses', 'reports'],
+  inputVat: ['view-only', 'manage-tax', 'reports'],
+  hospitalityServices: ['view-only', 'checkout', 'customers'],
+  hospitalityReservations: ['view-only', 'checkout', 'customers'],
+  hospitalityGuests: ['view-only', 'checkout', 'customers'],
 };
 
 const WRITE_PERMISSIONS: Partial<Record<string, Permission>> = {
@@ -785,6 +787,9 @@ export async function GET(request: NextRequest) {
     const auth = await requireAuth(request);
     const storeName = getStoreName(request);
     await assertRetailOnlyFeature(auth, storeName);
+    if (isViewOnlyUser(auth) && (storeName === 'settings' || storeName === 'users')) {
+      throw new HttpError(403, 'View-only accounts cannot access administration data', 'FORBIDDEN');
+    }
     const permission = READ_PERMISSIONS[storeName];
     if (storeName === 'users') {
       if (
@@ -871,8 +876,8 @@ export async function PUT(request: NextRequest) {
       records.length === 1 &&
       records[0]?.id === auth.user.id &&
       !records[0]?.newPassword;
-    if (permission && storeName !== 'settings' && !selfProfileRequest) {
-      assertPermission(auth, permission);
+    if (permission && (!selfProfileRequest || isViewOnlyUser(auth))) {
+      assertWritePermission(auth, permission);
       await assertTenantPlanPermission(auth.tenantId, permission);
     }
 
@@ -1296,14 +1301,12 @@ export async function DELETE(request: NextRequest) {
       throw new HttpError(405, 'Financial records cannot be directly deleted', 'DELETE_FORBIDDEN');
     }
     if (storeName === 'inventory') {
-      if (!['owner', 'super-admin', 'manager'].includes(auth.user.role)) {
-        throw new HttpError(403, 'Only an admin or manager can delete products', 'PRODUCT_DELETE_FORBIDDEN');
-      }
+      assertWritePermission(auth, 'delete-product');
       await assertTenantPlanPermission(auth.tenantId, 'delete-product');
     }
     const permission = WRITE_PERMISSIONS[storeName];
     if (permission && storeName !== 'inventory') {
-      assertPermission(auth, permission);
+      assertWritePermission(auth, permission);
       await assertTenantPlanPermission(auth.tenantId, permission);
     }
     const { id } = await request.json();

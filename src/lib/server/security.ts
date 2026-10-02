@@ -159,24 +159,33 @@ export function assertTenantActive(auth: AuthContext): void {
   }
 }
 
+function isPrivilegedUser(auth: AuthContext): boolean {
+  return auth.user.role === 'owner' || auth.user.role === 'super-admin';
+}
+
+export function isViewOnlyUser(auth: AuthContext): boolean {
+  return !isPrivilegedUser(auth) && auth.user.permissions.includes('view-only');
+}
+
+function isViewablePermission(permission: Permission): boolean {
+  return permission !== 'settings' && permission !== 'users';
+}
+
 export function assertPermission(auth: AuthContext, permission: Permission): void {
-  if (
-    auth.user.role !== 'owner' &&
-    auth.user.role !== 'super-admin' &&
-    !auth.user.permissions.includes(permission)
-  ) {
-    throw new HttpError(403, 'You do not have permission for this action', 'FORBIDDEN');
-  }
+  if (isViewOnlyUser(auth) && isViewablePermission(permission)) return;
+  if (isPrivilegedUser(auth) || auth.user.permissions.includes(permission)) return;
+  throw new HttpError(403, 'You do not have permission for this action', 'FORBIDDEN');
 }
 
 export function assertAnyPermission(auth: AuthContext, permissions: Permission[]): void {
-  if (
-    auth.user.role !== 'owner' &&
-    auth.user.role !== 'super-admin' &&
-    !permissions.some((permission) => auth.user.permissions.includes(permission))
-  ) {
-    throw new HttpError(403, 'You do not have permission for this action', 'FORBIDDEN');
-  }
+  if (isViewOnlyUser(auth) && permissions.some(isViewablePermission)) return;
+  if (isPrivilegedUser(auth) || permissions.some((permission) => auth.user.permissions.includes(permission))) return;
+  throw new HttpError(403, 'You do not have permission for this action', 'FORBIDDEN');
+}
+
+export function assertWritePermission(auth: AuthContext, permission: Permission): void {
+  if (isPrivilegedUser(auth) || auth.user.permissions.includes(permission)) return;
+  throw new HttpError(403, 'You do not have permission for this action', 'FORBIDDEN');
 }
 
 export async function assertTenantPlanPermission(

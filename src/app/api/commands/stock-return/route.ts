@@ -9,6 +9,7 @@ import {
   assertTenantActive,
   assertTenantPlanPermission,
   assertPermission,
+  assertWritePermission,
   errorResponse,
   HttpError,
   requireAuth,
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
     assertTenantActive(auth);
-    assertPermission(auth, 'adjust-stock');
+    assertWritePermission(auth, 'adjust-stock');
     await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
 
     const body = (await request.json()) as Record<string, unknown>;

@@ -11,9 +11,9 @@ interface PermissionGateProps {
 }
 
 export default function PermissionGate({ permission, children }: PermissionGateProps) {
-  const { hasPermission, currentUser } = usePosStore();
+  const { hasViewPermission, currentUser } = usePosStore();
   const permissions = Array.isArray(permission) ? permission : [permission];
-  if (permissions.some((item) => hasPermission(item))) return <>{children}</>;
+  if (permissions.some((item) => hasViewPermission(item))) return <>{children}</>;
   const permissionLabel = permissions.length === 1 ? permissions[0] : permissions.join(' or ');
 
   return (

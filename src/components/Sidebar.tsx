@@ -216,7 +216,7 @@ const navItems: NavItem[] = [
     href: '/settings',
     icon: Settings,
     group: 'Admin',
-    permission: 'dashboard',
+    permission: 'settings',
     order: 5,
   },
 ];
@@ -274,7 +274,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { inventory, hasPermission, currentUser, signOut, settings, activeBusinessMode } =
+  const { inventory, hasViewPermission, currentUser, signOut, settings, activeBusinessMode } =
     usePosStore();
   const canUseHospitality = activeBusinessMode === 'hospitality';
   const visibleNavItems = navItems.filter((item) => {
@@ -343,8 +343,8 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
               (n) =>
                 n.group === group &&
                 (Array.isArray(n.permission)
-                  ? n.permission.some((permission) => hasPermission(permission))
-                  : hasPermission(n.permission)) &&
+                  ? n.permission.some((permission) => hasViewPermission(permission))
+                  : hasViewPermission(n.permission)) &&
                 (!n.adminOnly ||
                   currentUser?.role === 'owner' ||
                   currentUser?.role === 'super-admin')
@@ -353,11 +353,11 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
           const showReports =
             group === 'Insights' &&
             activeBusinessMode !== 'hospitality' &&
-            hasPermission('reports');
+            hasViewPermission('reports');
           const showHospitalityReports =
             group === 'Insights' &&
             activeBusinessMode === 'hospitality' &&
-            hasPermission('reports');
+            hasViewPermission('reports');
           if (items.length === 0 && !showReports && !showHospitalityReports) return null;
           return (
             <div key={`group-${group}`} className="mb-1">
@@ -396,7 +396,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
                   {!collapsed && reportsOpen && (
                     <div className="ml-6 mt-1 space-y-1 border-l border-border pl-2">
                       {reportItems
-                        .filter((report) => !report.permission || hasPermission(report.permission))
+                        .filter((report) => !report.permission || hasViewPermission(report.permission))
                         .map((report) => {
                           const isReportActive =
                             pathname === '/reports' && report.href.includes(`view=${activeReport}`);

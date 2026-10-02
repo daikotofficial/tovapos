@@ -4,6 +4,7 @@ import type { InventoryItem, StockMovement } from '@/lib/pos/types';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
+  assertWritePermission,
   assertTenantPlanPermission,
   assertSameOrigin,
   errorResponse,
@@ -85,10 +86,10 @@ export async function POST(request: NextRequest) {
         );
       }
       const productPermission = existing ? 'edit-product' : 'add-product';
-      assertPermission(auth, productPermission);
+      assertWritePermission(auth, productPermission);
       await assertTenantPlanPermission(auth.tenantId, productPermission);
       if (existing && quantityDelta !== 0) {
-        assertPermission(auth, 'adjust-stock');
+        assertWritePermission(auth, 'adjust-stock');
         await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
       }
       if (

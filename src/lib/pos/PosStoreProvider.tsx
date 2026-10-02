@@ -114,6 +114,7 @@ interface PosStoreValue {
     emailDeliveryFailed?: boolean;
   }>;
   hasPermission: (permission: Permission) => boolean;
+  hasViewPermission: (permission: Permission) => boolean;
   upsertInventoryItem: (item: InventoryItem) => Promise<InventoryItem>;
   deleteInventoryItem: (inventoryId: string) => Promise<void>;
   applyInventorySnapshot: (item: InventoryItem, movement?: StockMovement) => Promise<void>;
@@ -441,6 +442,8 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         session.user.role === 'owner' ||
         session.user.role === 'super-admin' ||
         session.user.permissions.includes(permission);
+      const canView = (permission: Permission) =>
+        can(permission) || (session.user.permissions.includes('view-only') && permission !== 'settings' && permission !== 'users');
       const safely = async <T,>(label: string, task: Promise<T>, fallback: T): Promise<T> => {
         try {
           return await task;
@@ -460,23 +463,23 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         storedSettings,
         storedQueue,
       ] = await Promise.all([
-        can('inventory') || can('add-product') || can('edit-product') || can('adjust-stock') || can('delete-product') || can('checkout') || can('reports')
+        canView('inventory') || can('add-product') || can('edit-product') || can('adjust-stock') || can('delete-product') || can('checkout') || canView('reports')
           ? safely('Inventory', loadInventory([]), [])
           : Promise.resolve([]),
-        can('reports') || can('credit-sales') || can('refunds')
+        canView('reports') || can('credit-sales') || can('refunds')
           ? safely('Sales', loadSales(), [])
           : Promise.resolve([]),
-        can('inventory') || can('reports')
+        canView('inventory') || canView('reports')
           ? safely('Stock history', loadStockMovements(), [])
           : Promise.resolve([]),
         safely('User account', loadUsers(defaultUsers), [session.user]),
-        can('expenses') || can('reports')
+        canView('expenses') || canView('reports')
           ? safely('Expenses', loadExpenses(), [])
           : Promise.resolve([]),
-        can('customers') || can('checkout')
+        canView('customers') || can('checkout')
           ? safely('Customers', loadCustomers(defaultCustomers), [])
           : Promise.resolve([]),
-        can('vendors') || can('inventory')
+        canView('vendors') || canView('inventory')
           ? safely('Suppliers', loadVendors(defaultVendors), [])
           : Promise.resolve([]),
         safely('Business settings', loadSettings(defaultSettings), defaultSettings),
@@ -1050,6 +1053,13 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       return roleAllows && planAllowsPermission(settings.subscriptionPlanId, permission);
     },
     [currentUser, isAuthenticated, settings.subscriptionPlanId]
+  );
+
+  const hasViewPermission = useCallback(
+    (permission: Permission) =>
+      hasPermission(permission) ||
+      Boolean(currentUser?.permissions.includes('view-only') && permission !== 'settings' && permission !== 'users'),
+    [currentUser?.permissions, hasPermission]
   );
 
   const upsertInventoryItem = useCallback(
@@ -2176,6 +2186,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       signOut,
       registerBusiness,
       hasPermission,
+      hasViewPermission,
       upsertInventoryItem,
       deleteInventoryItem,
       applyInventorySnapshot,

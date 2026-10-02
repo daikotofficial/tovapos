@@ -4,6 +4,7 @@ import type { CreditPaymentMethod, SaleTransaction } from '@/lib/pos/types';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
+  assertWritePermission,
   assertTenantPlanPermission,
   assertSameOrigin,
   errorResponse,
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
-    assertPermission(auth, 'credit-sales');
+    assertWritePermission(auth, 'credit-sales');
     await assertTenantPlanPermission(auth.tenantId, 'credit-sales');
     const body = (await request.json()) as Record<string, unknown>;
     const saleId = typeof body.saleId === 'string' ? body.saleId : '';

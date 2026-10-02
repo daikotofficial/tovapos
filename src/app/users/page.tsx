@@ -14,6 +14,7 @@ import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import ListPagination from '@/components/ui/ListPagination';
 
 const permissions: Permission[] = [
+  'view-only',
   'dashboard',
   'checkout',
   'add-product',
@@ -43,6 +44,10 @@ const permissions: Permission[] = [
 ];
 
 const permissionGroups: { title: string; items: Permission[] }[] = [
+  {
+    title: 'Read-only access',
+    items: ['view-only'],
+  },
   {
     title: 'Dashboard & POS',
     items: ['dashboard', 'checkout', 'credit-sales', 'give-discount', 'void-sale', 'refunds'],
@@ -176,7 +181,7 @@ const defaultPermissionsByRole: Record<UserRole, Permission[]> = {
     'view-profit',
   ],
   'expense-clerk': ['dashboard', 'expenses', 'expense-heads', 'reports'],
-  auditor: ['dashboard', 'reports', 'export-reports', 'view-profit'],
+  auditor: ['view-only'],
   viewer: ['dashboard', 'reports'],
   receptionist: [
     'dashboard',
@@ -215,6 +220,7 @@ const hospitalityDefaultPermissions: Partial<Record<UserRole, Permission[]>> = {
 };
 
 const permissionLabels: Record<Permission, string> = {
+  'view-only': 'View-only access (no actions; reports can be downloaded)',
   dashboard: 'View dashboard',
   checkout: 'Sell product',
   'add-product': 'Add product',

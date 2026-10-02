@@ -474,6 +474,7 @@ function ReportsContent() {
     settings,
     activeBusinessMode,
     hasPermission,
+    hasViewPermission,
   } = usePosStore();
   const hospitalityOnly = activeBusinessMode === 'hospitality';
   const requestedView = searchParams.get('view') as ReportView | null;
@@ -488,7 +489,7 @@ function ReportsContent() {
   const requestedPermission = requestedView ? requiredPermission[requestedView] : undefined;
   const activeView: ReportView =
     reports.some((report) => report.id === requestedView) &&
-    (!requestedPermission || hasPermission(requestedPermission))
+    (!requestedPermission || hasViewPermission(requestedPermission))
       ? requestedView!
       : 'overview';
   const [range, setRange] = useState<ReportRange>(() => createRange('1m'));
@@ -891,12 +892,18 @@ function ReportsContent() {
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
   const cashierOptions = [
     { value: 'all', label: 'All cashiers' },
-    ...users
-      .slice()
-      .sort((left, right) => left.name.localeCompare(right.name))
-      .map((user) => ({ value: user.id, label: user.name })),
+    ...Array.from(
+      new Map([
+        ...users.map((user) => [user.id, user.name] as const),
+        ...serverCashierRows.map((row) => [row.cashierId, row.cashier] as const),
+      ]).entries()
+    )
+      .sort(([, left], [, right]) => left.localeCompare(right))
+      .map(([value, label]) => ({ value, label })),
   ];
-  const selectedCashier = users.find((user) => user.id === cashierId);
+  const selectedCashierName =
+    users.find((user) => user.id === cashierId)?.name ??
+    serverCashierRows.find((row) => row.cashierId === cashierId)?.cashier;
 
   const exportTable = useMemo(() => {
     if (activeView === 'sales-by-cashier') {
@@ -1161,7 +1168,7 @@ function ReportsContent() {
       ['Organization', settings.businessName || 'TOVAPOS'],
       ['Report', reportTitle],
       ['Range', rangeLabel],
-      ...(activeView === 'sales-by-cashier' ? [['Cashier', selectedCashier?.name ?? 'All cashiers']] : []),
+      ...(activeView === 'sales-by-cashier' ? [['Cashier', selectedCashierName ?? 'All cashiers']] : []),
       ['Generated', generatedAt],
     ];
     const fullRows = [...metadataRows, [], exportTable.headers, ...exportTable.rows];
@@ -1273,7 +1280,7 @@ function ReportsContent() {
                     options={reports
                       .filter((report) => {
                         const permission = requiredPermission[report.id];
-                        return !permission || hasPermission(permission);
+                        return !permission || hasViewPermission(permission);
                       })
                       .map((report) => ({
                         value: report.id,
@@ -1362,7 +1369,7 @@ function ReportsContent() {
                     </button>
                   </div>
 
-                  {hasPermission('export-reports') && (
+                  {(hasPermission('export-reports') || hasViewPermission('export-reports')) && (
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"

@@ -13,6 +13,7 @@ import { loyaltyEarnedForSale, loyaltyRedemption } from '@/lib/pos/loyalty';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
+  assertWritePermission,
   assertTenantActive,
   assertTenantPlanPermission,
   assertSameOrigin,
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
     assertTenantActive(auth);
-    assertPermission(auth, 'checkout');
+    assertWritePermission(auth, 'checkout');
     await assertTenantPlanPermission(auth.tenantId, 'checkout');
     const body = (await request.json()) as Record<string, unknown>;
     const operationId =
@@ -140,7 +141,7 @@ export async function POST(request: NextRequest) {
       throw new HttpError(400, 'Payment method or tendered amount is invalid', 'VALIDATION_ERROR');
     }
     if (paymentMethod === 'credit') {
-      assertPermission(auth, 'credit-sales');
+      assertWritePermission(auth, 'credit-sales');
       await assertTenantPlanPermission(auth.tenantId, 'credit-sales');
     }
     const customerName =
@@ -238,7 +239,7 @@ export async function POST(request: NextRequest) {
           throw new HttpError(409, `${row.name} is expired`, 'PRODUCT_EXPIRED');
         }
         if (requested.discount > 0 && settings.allowCashierDiscounts === false) {
-          assertPermission(auth, 'give-discount');
+          assertWritePermission(auth, 'give-discount');
         }
         // Piece sales must never go below the recorded piece cost. Pack/carton
         // prices are deliberate bundle prices and are validated against their

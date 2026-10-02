@@ -34,7 +34,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const { isHydrated, isAuthenticated, hasPermission } = usePosStore();
+  const { isHydrated, isAuthenticated, hasViewPermission } = usePosStore();
 
   React.useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -120,8 +120,8 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
         <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
           {mobileNavItems
             .filter((item) => (Array.isArray(item.permission)
-              ? item.permission.some((permission) => hasPermission(permission))
-              : hasPermission(item.permission)))
+              ? item.permission.some((permission) => hasViewPermission(permission))
+              : hasViewPermission(item.permission)))
             .map((item) => {
               const Icon = item.icon;
               const active = pathname === item.href;

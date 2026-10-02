@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import {
   assertPermission,
+  assertWritePermission,
   assertSameOrigin,
   assertTenantActive,
   errorResponse,
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
     assertTenantActive(auth);
-    assertPermission(auth, 'checkout');
+    assertWritePermission(auth, 'checkout');
     const businessDate = request.nextUrl.searchParams.get('businessDate') ?? '';
     if (!validDate(businessDate) || businessDate !== currentBusinessDate()) throw new HttpError(400, 'Business date is invalid or not today', 'VALIDATION_ERROR');
     const result = await getPosPool().query(
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest) {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
     assertTenantActive(auth);
-    assertPermission(auth, 'checkout');
+    assertWritePermission(auth, 'checkout');
     const body = (await request.json()) as Record<string, unknown>;
     const action = body.action;
     const businessDate = body.businessDate;

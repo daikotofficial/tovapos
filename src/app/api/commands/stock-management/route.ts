@@ -9,6 +9,7 @@ import {
   assertTenantActive,
   assertTenantPlanPermission,
   assertPermission,
+  assertWritePermission,
   errorResponse,
   HttpError,
   requireAuth,
@@ -45,7 +46,7 @@ async function authorize(request: NextRequest) {
   assertSameOrigin(request);
   const auth = await requireAuth(request);
   assertTenantActive(auth);
-  assertPermission(auth, 'adjust-stock');
+  assertWritePermission(auth, 'adjust-stock');
   await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
   return auth;
 }
