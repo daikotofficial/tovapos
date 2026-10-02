@@ -194,17 +194,17 @@
 }
 
 :root[data-theme='dark'] {
-  --background: #071210;
-  --foreground: #eefcf8;
+  --background: #080b0d;
+  --foreground: #f3f6f7;
   --primary-foreground: #ffffff;
-  --secondary: #12231f;
-  --secondary-foreground: #d6e7e3;
-  --muted: #10201d;
-  --muted-foreground: #a7bbb6;
-  --card: #0d1b18;
-  --card-foreground: #f2fffb;
-  --border: #25423c;
-  --input: #25423c;
+  --secondary: #171d22;
+  --secondary-foreground: #d9e0e3;
+  --muted: #151b20;
+  --muted-foreground: #9ca8ae;
+  --card: #11161a;
+  --card-foreground: #f3f6f7;
+  --border: #2a353c;
+  --input: #2a353c;
   --success: #22c55e;
   --warning: #fbbf24;
   --danger: #f87171;
@@ -221,6 +221,10 @@
   body {
     max-width: 100%;
     overflow-x: hidden;
+  }
+
+  html {
+    background-color: var(--background);
   }
 
   body {

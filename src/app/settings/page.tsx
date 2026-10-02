@@ -106,6 +106,7 @@ function SettingsPageContent() {
     const nextTheme = form.themeMode ?? 'light';
     root.dataset.theme = nextTheme;
     window.localStorage.setItem('tovapos.themeMode', nextTheme);
+    document.cookie = `tovapos.themeMode=${encodeURIComponent(nextTheme)};path=/;max-age=31536000;samesite=lax`;
     if (form.themeColor) {
       root.style.setProperty('--primary', form.themeColor);
       root.style.setProperty('--ring', form.themeColor);

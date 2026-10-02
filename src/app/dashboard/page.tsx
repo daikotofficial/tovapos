@@ -513,28 +513,6 @@ export default function DashboardPage() {
                     <span className="rounded-md bg-white/10 px-3 py-1 text-xs font-semibold text-white/70">Updated {metricsUpdatedAt ? metricsUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'waiting'}</span>
                     <button type="button" onClick={() => void refreshMetrics()} disabled={isRefreshingMetrics} className="inline-flex items-center gap-1.5 rounded-md border border-white/15 px-3 py-1 text-xs font-semibold text-white/80 hover:bg-white/10 disabled:opacity-60"><RefreshCw size={13} className={isRefreshingMetrics ? 'animate-spin' : ''} /> Refresh</button>
                   </div>
-                  <div className="mt-4 grid min-w-0 gap-3 sm:mt-5 sm:grid-cols-3">
-                    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-                      <p className="text-[11px] font-bold uppercase text-white/50">Month Revenue</p>
-                      <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
-                        {formatMoney(data.monthRevenue, settings.currency)}
-                      </p>
-                    </div>
-                    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-                      <p className="text-[11px] font-bold uppercase text-white/50">Gross Profit</p>
-                      <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
-                        {formatMoney(data.grossProfit, settings.currency)}
-                      </p>
-                    </div>
-                    <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-3">
-                      <p className="text-[11px] font-bold uppercase text-white/50">
-                        Potential Stock Profit
-                      </p>
-                      <p className="mt-1 break-words text-lg font-bold font-tabular sm:text-xl">
-                        {formatMoney(data.potentialMargin, settings.currency)}
-                      </p>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="min-w-0 rounded-lg border border-white/10 bg-white/[0.06] p-4">
@@ -749,60 +727,6 @@ export default function DashboardPage() {
               </div>
             </section>
 
-            <section className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-3">
-              {[
-                {
-                  label: 'Operational health',
-                  icon: ShieldCheck,
-                  lines: [
-                    `${data.completedSales.length} completed sale${data.completedSales.length === 1 ? '' : 's'}`,
-                    `${data.recordedExpenses.length} recorded expense${data.recordedExpenses.length === 1 ? '' : 's'}`,
-                    `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting to be sent`,
-                  ],
-                },
-                {
-                  label: 'Inventory posture',
-                  icon: PackageCheck,
-                  lines: [
-                    `${formatMoney(data.retailStockValue, settings.currency)} retail value`,
-                    `${formatMoney(data.stockValue, settings.currency)} cost value`,
-                    `${formatMoney(data.potentialMargin, settings.currency)} potential gross margin`,
-                  ],
-                },
-                {
-                  label: 'Profit bridge',
-                  icon: TrendingUp,
-                  lines: [
-                    `${formatMoney(data.revenue, settings.currency)} revenue`,
-                    `${formatMoney(data.grossProfit, settings.currency)} gross profit`,
-                    `${formatMoney(data.netProfit, settings.currency)} after expenses`,
-                  ],
-                },
-              ].map((panel) => {
-                const Icon = panel.icon;
-                return (
-                  <article
-                    key={panel.label}
-                    className="min-w-0 rounded-lg border border-border bg-white p-4 shadow-card sm:rounded-xl"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Icon size={18} className="text-primary" />
-                      <p className="text-sm font-bold">{panel.label}</p>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {panel.lines.map((line) => (
-                        <div
-                          key={line}
-                          className="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground"
-                        >
-                          {line}
-                        </div>
-                      ))}
-                    </div>
-                  </article>
-                );
-              })}
-            </section>
           </div>
         )}
       </PermissionGate>

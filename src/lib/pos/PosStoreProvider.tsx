@@ -937,6 +937,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     const themeMode = settings.themeMode ?? 'light';
     root.dataset.theme = themeMode;
     window.localStorage.setItem('tovapos.themeMode', themeMode);
+    document.cookie = `tovapos.themeMode=${encodeURIComponent(themeMode)};path=/;max-age=31536000;samesite=lax`;
   }, [isHydrated, settings.fontFamily, settings.themeColor, settings.themeMode]);
 
   const setActiveUserId = useCallback(

@@ -192,11 +192,16 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     (function () {
       try {
         var path = window.location.pathname || '';
-        var theme = path.indexOf('/admin') === 0
-          ? window.localStorage.getItem('tovapos.adminTheme')
-          : window.localStorage.getItem('tovapos.themeMode');
+        var storageKey = path.indexOf('/admin') === 0 ? 'tovapos.adminTheme' : 'tovapos.themeMode';
+        var cookieEntry = document.cookie.split('; ').find(function (item) {
+          return item.indexOf(storageKey + '=') === 0;
+        });
+        var cookieTheme = cookieEntry ? decodeURIComponent(cookieEntry.slice(storageKey.length + 1)) : null;
+        var theme = window.localStorage.getItem(storageKey) || cookieTheme;
         if (theme !== 'dark' && theme !== 'light') theme = 'light';
         document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+        document.documentElement.style.backgroundColor = theme === 'dark' ? '#080b0d' : '#f8fafc';
       } catch (_) {
         document.documentElement.dataset.theme = 'light';
       }
