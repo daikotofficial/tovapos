@@ -300,10 +300,12 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     const detailValues: unknown[] = [auth.tenantId];
     const detailWhere: string[] = [
       'tenant_id = $1',
-      "store_name = 'sales'",
-      "data->>'status' = 'completed'",
+      "status = 'completed'",
     ];
-    appendDateRange(params, "(data->>'timestamp')::timestamptz", detailValues, detailWhere);
+    // Use the same indexed sales source as the cashier summary. Older sales may
+    // have cashier identity in the indexed column even when their JSON payload
+    // predates cashierId, so matching only data->>'cashierId' silently hides them.
+    appendDateRange(params, 'timestamp', detailValues, detailWhere);
     if (cashierId) {
       detailValues.push(cashierId);
       const detailCashierIdParam = `$${detailValues.length}`;
@@ -312,18 +314,22 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         const detailCashierNameParam = `$${detailValues.length}`;
         detailWhere.push(`(
           data->>'cashierId' = ${detailCashierIdParam}
+          OR lower(regexp_replace(trim(cashier), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
           OR lower(regexp_replace(trim(data->>'cashier'), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
         )`);
       } else {
-        detailWhere.push(`data->>'cashierId' = ${detailCashierIdParam}`);
+        detailWhere.push(`(
+          data->>'cashierId' = ${detailCashierIdParam}
+          OR cashier = ${detailCashierIdParam}
+        )`);
       }
     }
     detailValues.push(limit, offset);
     const detailResult = await getPosPool().query(
       `SELECT data
-       FROM pos_tenant_records
+       FROM pos_tenant_sales
        WHERE ${detailWhere.join(' AND ')}
-       ORDER BY (data->>'timestamp')::timestamptz DESC, record_id DESC
+       ORDER BY timestamp DESC, id DESC
        LIMIT $${detailValues.length - 1} OFFSET $${detailValues.length}`,
       detailValues
     );
