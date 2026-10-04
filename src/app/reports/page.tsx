@@ -872,45 +872,6 @@ function ReportsContent() {
       ? serverVoidedRows
       : sales.filter((sale) => sale.status === 'voided' && isWithinRange(sale.timestamp, range));
 
-  const summaryCards = [
-    {
-      label: 'Sales Collected',
-      value: formatMoney(data.revenue, settings.currency),
-      icon: TrendingUp,
-      tone: 'text-success',
-    },
-    {
-      label: 'Credit Due',
-      value: formatMoney(data.receivables, settings.currency),
-      icon: Users,
-      tone: 'text-warning',
-    },
-    {
-      label: 'Gross Profit',
-      value: formatMoney(data.grossProfit, settings.currency),
-      icon: BarChart3,
-      tone: 'text-primary',
-    },
-    {
-      label: 'Expenses',
-      value: formatMoney(data.expenseTotal, settings.currency),
-      icon: TrendingDown,
-      tone: 'text-danger',
-    },
-    {
-      label: 'Net Profit',
-      value: formatMoney(data.netProfit, settings.currency),
-      icon: CircleDollarSign,
-      tone: data.netProfit >= 0 ? 'text-success' : 'text-danger',
-    },
-    {
-      label: 'Product Value',
-      value: formatMoney(data.stockRetailValue, settings.currency),
-      icon: Boxes,
-      tone: 'text-primary',
-    },
-  ];
-
   const maxPayment = Math.max(
     ...data.paymentTotals.map((item) => item.total + item.creditCollected),
     1
@@ -1351,37 +1312,64 @@ function ReportsContent() {
               </div>
             </section>
 
-            <section className="rounded-xl border border-border bg-white p-4 shadow-card">
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex h-9 items-center gap-2 rounded-md bg-muted px-3 text-xs font-bold uppercase text-muted-foreground">
-                    <Calendar size={14} />
-                    Period
+            <section className="rounded-xl border border-border bg-white p-4 shadow-card sm:p-5">
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                      <Calendar size={14} className="text-primary" />
+                      Reporting period
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {rangePresets.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => {
+                            const nextRange = createRange(preset.id);
+                            setDraftRange(nextRange);
+                            setRange(nextRange);
+                          }}
+                          className={`h-9 rounded-md border px-3 text-sm font-semibold transition-colors ${
+                            range.preset === preset.id
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border bg-white text-muted-foreground hover:bg-muted hover:text-foreground'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  {rangePresets.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => {
-                        const nextRange = createRange(preset.id);
-                        setDraftRange(nextRange);
-                        setRange(nextRange);
-                      }}
-                      className={`h-9 rounded-md border px-3 text-sm font-semibold transition-colors ${
-                        range.preset === preset.id
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border bg-white text-muted-foreground hover:bg-muted hover:text-foreground'
-                      }`}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
+
+                  {(hasPermission('export-reports') || hasViewPermission('export-reports')) && (
+                    <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                      <span className="mr-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Export
+                      </span>
+                      {(['csv', 'excel', 'pdf', 'json'] as const).map((format) => (
+                        <button
+                          key={format}
+                          type="button"
+                          onClick={() => exportReport(format)}
+                          className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition-colors ${
+                            format === 'csv'
+                              ? 'border-primary bg-primary text-white hover:bg-primary/90'
+                              : 'border-border bg-white text-muted-foreground hover:bg-muted hover:text-foreground'
+                          }`}
+                        >
+                          <Download size={14} />
+                          {format.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                <div className="grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-[minmax(210px,1fr)_minmax(160px,180px)_minmax(160px,180px)_auto] lg:items-end">
                   {activeView === 'sales-by-cashier' && (
-                    <label className="min-w-[190px] space-y-1">
-                      <span className="text-[10px] font-bold uppercase text-muted-foreground">Cashier</span>
+                    <label className="space-y-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Cashier</span>
                       <NiceSelect
                         value={draftCashierId}
                         onChange={(value) => {
@@ -1392,86 +1380,32 @@ function ReportsContent() {
                       />
                     </label>
                   )}
-                  <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-                    <label className="space-y-1">
-                      <span className="text-[10px] font-bold uppercase text-muted-foreground">
-                        From
-                      </span>
-                      <DatePicker
-                        value={draftRange.from}
-                        onChange={(from) =>
-                          setDraftRange((current) => ({
-                            ...current,
-                            from,
-                            preset: 'custom',
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-[10px] font-bold uppercase text-muted-foreground">
-                        To
-                      </span>
-                      <DatePicker
-                        value={draftRange.to}
-                        onChange={(to) =>
-                          setDraftRange((current) => ({
-                            ...current,
-                            to,
-                            preset: 'custom',
-                          }))
-                        }
-                      />
-                    </label>
-                  </div>
-
-                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
-                    <button
-                      type="button"
-                      onClick={applyCustomRange}
-                      disabled={!draftRange.from || !draftRange.to || !draftHasChanges}
-                      className="h-10 rounded-md bg-primary px-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Apply range
-                    </button>
-                  </div>
-
-                  {(hasPermission('export-reports') || hasViewPermission('export-reports')) && (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => exportReport('csv')}
-                        className="flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary/90"
-                      >
-                        <Download size={14} />
-                        CSV
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => exportReport('excel')}
-                        className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <Download size={14} />
-                        Excel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => exportReport('pdf')}
-                        className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <Download size={14} />
-                        PDF
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => exportReport('json')}
-                        className="flex h-9 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <Download size={14} />
-                        JSON
-                      </button>
-                    </div>
-                  )}
+                  <label className="space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">From</span>
+                    <DatePicker
+                      value={draftRange.from}
+                      onChange={(from) =>
+                        setDraftRange((current) => ({ ...current, from, preset: 'custom' }))
+                      }
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">To</span>
+                    <DatePicker
+                      value={draftRange.to}
+                      onChange={(to) =>
+                        setDraftRange((current) => ({ ...current, to, preset: 'custom' }))
+                      }
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={applyCustomRange}
+                    disabled={!draftRange.from || !draftRange.to || !draftHasChanges}
+                    className="h-10 rounded-md bg-primary px-4 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Apply filters
+                  </button>
                 </div>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
@@ -1523,22 +1457,7 @@ function ReportsContent() {
                   ))}
                 </div>
               </section>
-            ) : (
-              <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
-                {summaryCards.map((card) => {
-                  const Icon = card.icon;
-                  return (
-                    <article key={card.label} className="rounded-xl border border-border bg-white p-4 shadow-card">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold uppercase text-muted-foreground">{card.label}</p>
-                        <Icon size={17} className={card.tone} />
-                      </div>
-                      <p className={`mt-2 text-2xl font-bold font-tabular ${card.tone}`}>{card.value}</p>
-                    </article>
-                  );
-                })}
-              </section>
-            )}
+            ) : null}
 
             {activeView === 'overview' && (
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
