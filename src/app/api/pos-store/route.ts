@@ -51,6 +51,38 @@ const STORE_ALIASES: Record<string, string> = {
 type PosRecord = Record<string, unknown> & { id?: unknown };
 type InventoryCursor = { name: string; id: string };
 
+// Sales are written to the indexed table for fast reporting, while older
+// deployments and records created during sync can still exist only in the
+// canonical tenant-records table. Reports must read both sources without
+// double-counting records that have already been indexed.
+const SALES_SOURCE_CTE = `
+WITH sale_rows AS (
+  SELECT tenant_id, id, timestamp, cashier, status, grand_total, gross_profit,
+         amount_due, tax_amount, payment_method, data
+  FROM pos_tenant_sales
+  WHERE tenant_id = $1
+  UNION ALL
+  SELECT records.tenant_id, records.record_id AS id,
+         (records.data->>'timestamp')::timestamptz AS timestamp,
+         coalesce(records.data->>'cashier', '') AS cashier,
+         coalesce(records.data->>'status', 'completed') AS status,
+         coalesce(nullif(records.data->>'grandTotal', '')::float8, 0) AS grand_total,
+         coalesce(nullif(records.data->>'grossProfit', '')::float8, 0) AS gross_profit,
+         coalesce(nullif(records.data->>'amountDue', '')::float8, 0) AS amount_due,
+         coalesce(nullif(records.data->>'taxAmount', '')::float8, 0) AS tax_amount,
+         coalesce(records.data->>'paymentMethod', '') AS payment_method,
+         records.data
+  FROM pos_tenant_records records
+  WHERE records.tenant_id = $1
+    AND records.store_name = 'sales'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM pos_tenant_sales indexed
+      WHERE indexed.tenant_id = records.tenant_id
+        AND indexed.id = records.record_id
+    )
+)`;
+
 const READ_PERMISSIONS: Partial<Record<string, Permission[]>> = {
   inventory: ['view-only', 'inventory', 'add-product', 'edit-product', 'adjust-stock', 'delete-product', 'checkout', 'reports'],
   stockMovements: ['view-only', 'inventory', 'reports'],
@@ -247,10 +279,6 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   const offset = clampOffset(params.get('offset'));
   const cashierId = params.get('cashierId')?.trim();
   const cashierName = params.get('cashierName')?.trim();
-  if (report === 'refunds') assertPermission(auth, 'refunds');
-  if (report === 'credit-sales') assertPermission(auth, 'credit-sales');
-  if (report === 'expenses') assertPermission(auth, 'expenses');
-  if (report === 'input-vat') assertPermission(auth, 'manage-tax');
   const values: unknown[] = [auth.tenantId];
   const where: string[] = ['tenant_id = $1'];
 
@@ -304,13 +332,14 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     values.push(limit, offset);
     const result = await getPosPool().query(
       `
+      ${SALES_SOURCE_CTE}
       SELECT
         COALESCE(NULLIF(data->>'cashierId', ''), 'name:' || cashier) AS "cashierId",
         cashier,
         count(*)::bigint AS transactions,
         coalesce(sum(gross_profit), 0)::float8 AS profit,
         coalesce(sum(grand_total), 0)::float8 AS revenue
-      FROM pos_tenant_sales
+      FROM sale_rows
       WHERE ${where.join(' AND ')}
       GROUP BY COALESCE(NULLIF(data->>'cashierId', ''), 'name:' || cashier), cashier
       ORDER BY revenue DESC, cashier ASC
@@ -411,8 +440,9 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     values.push(limit, offset);
     const result = await getPosPool().query(
       `
+      ${SALES_SOURCE_CTE}
       SELECT data
-      FROM pos_tenant_sales
+      FROM sale_rows
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY timestamp DESC, id DESC
       LIMIT $${values.length - 1} OFFSET $${values.length}
@@ -541,13 +571,14 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     values.push(limit, offset);
     const result = await getPosPool().query(
       `
+      ${SALES_SOURCE_CTE}
       SELECT
         payment_method AS method,
         count(*)::bigint AS count,
         coalesce(sum(grand_total) FILTER (WHERE payment_method <> 'credit'), 0)::float8 AS collected,
         coalesce(sum(amount_due), 0)::float8 AS receivable,
         coalesce(sum(grand_total), 0)::float8 AS total
-      FROM pos_tenant_sales
+      FROM sale_rows
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       GROUP BY payment_method
       ORDER BY total DESC
@@ -569,6 +600,7 @@ async function getSalesMetrics(request: NextRequest, auth: AuthContext) {
   const rangeSql = `WHERE ${salesWhere.join(' AND ')}`;
   const salesResult = await getPosPool().query(
     `
+    ${SALES_SOURCE_CTE}
     SELECT
       count(*) FILTER (WHERE status = 'completed')::bigint AS completed_count,
       count(*) FILTER (WHERE status = 'refunded')::bigint AS refunded_count,
@@ -579,7 +611,7 @@ async function getSalesMetrics(request: NextRequest, auth: AuthContext) {
       coalesce(sum(tax_amount) FILTER (WHERE status = 'completed' AND payment_method <> 'credit'), 0)::float8 AS vat_collected,
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed' AND payment_method = 'cash'), 0)::float8 AS cash_sales,
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed' AND payment_method <> 'cash'), 0)::float8 AS non_cash_sales
-    FROM pos_tenant_sales
+    FROM sale_rows
     ${rangeSql}
     `,
     values
@@ -667,8 +699,9 @@ async function getSalesPage(request: NextRequest, auth: AuthContext) {
   const offset = clampOffset(request.nextUrl.searchParams.get('offset'));
   const result = await getPosPool().query(
     `
+    ${SALES_SOURCE_CTE}
     SELECT data
-    FROM pos_tenant_sales
+    FROM sale_rows
     WHERE tenant_id = $1
     ORDER BY timestamp DESC, id DESC
     LIMIT $2 OFFSET $3
@@ -974,7 +1007,10 @@ export async function PUT(request: NextRequest) {
       records.length === 1 &&
       records[0]?.id === auth.user.id &&
       !records[0]?.newPassword;
-    if (permission && (!selfProfileRequest || isViewOnlyUser(auth))) {
+    // Every authenticated user may update their own profile name. This is
+    // deliberately limited to a single self-profile request; role,
+    // permissions, status, and password changes remain protected below.
+    if (permission && !selfProfileRequest) {
       assertWritePermission(auth, permission);
       await assertTenantPlanPermission(auth.tenantId, permission);
     }

@@ -31,7 +31,7 @@ import {
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import RowsPerPageSelect from '@/components/ui/RowsPerPageSelect';
-import type { InputVatRecord, Permission, SaleLineItem, SaleTransaction } from '@/lib/pos/types';
+import type { InputVatRecord, SaleLineItem, SaleTransaction } from '@/lib/pos/types';
 import { toast } from 'sonner';
 
 type ReportView = string;
@@ -243,7 +243,10 @@ function paymentAmountsForSale(sale: SaleTransaction): Record<string, number> {
 }
 
 function toDateInputValue(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function createRange(preset: ReportPreset): ReportRange {
@@ -493,18 +496,9 @@ function ReportsContent() {
   } = usePosStore();
   const hospitalityOnly = activeBusinessMode === 'hospitality';
   const requestedView = searchParams.get('view') as ReportView | null;
-  const requiredPermission: Partial<Record<ReportView, Permission>> = {
-    'credit-sales': 'credit-sales',
-    profit: 'view-profit',
-    expenses: 'expenses',
-    suppliers: 'vendors',
-    refunds: 'refunds',
-    vat: 'manage-tax',
-  };
-  const requestedPermission = requestedView ? requiredPermission[requestedView] : undefined;
   const activeView: ReportView =
     reports.some((report) => report.id === requestedView) &&
-    (!requestedPermission || hasViewPermission(requestedPermission))
+    hasViewPermission('reports')
       ? requestedView!
       : 'overview';
   const [range, setRange] = useState<ReportRange>(() => createRange('1m'));
@@ -1348,12 +1342,7 @@ function ReportsContent() {
                     value={activeView}
                     onChange={(value) => router.push(`/reports?view=${value}`)}
                     className="mt-1"
-                    options={reports
-                      .filter((report) => {
-                        const permission = requiredPermission[report.id];
-                        return !permission || hasViewPermission(permission);
-                      })
-                      .map((report) => ({
+                    options={reports.map((report) => ({
                         value: report.id,
                         label: report.label,
                       }))}

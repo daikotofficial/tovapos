@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   TrendingUp,
   Users,
+  UserCircle,
   Settings,
   LogOut,
   LayoutDashboard,
@@ -40,7 +41,7 @@ interface NavItem {
   badge?: number;
   badgeColor?: string;
   group: string;
-  permission: Permission | Permission[];
+  permission?: Permission | Permission[];
   order: number;
   adminOnly?: boolean;
 }
@@ -211,8 +212,16 @@ const navItems: NavItem[] = [
     order: 4,
   },
   {
+    id: 'nav-account',
+    label: 'My Account',
+    href: '/settings#account-security',
+    icon: UserCircle,
+    group: 'Admin',
+    order: 4.5,
+  },
+  {
     id: 'nav-settings',
-    label: 'Settings',
+    label: 'Business Settings',
     href: '/settings',
     icon: Settings,
     group: 'Admin',
@@ -228,13 +237,12 @@ const reportItems: ReportNavItem[] = [
     id: 'report-credit-sales',
     label: 'Credit Sales',
     href: '/reports?view=credit-sales',
-    permission: 'credit-sales',
   },
   { id: 'report-cashier', label: 'By Cashier', href: '/reports?view=sales-by-cashier' },
   { id: 'report-product', label: 'By Product', href: '/reports?view=sales-by-product' },
   { id: 'report-category', label: 'By Category', href: '/reports?view=sales-by-category' },
   { id: 'report-payment', label: 'Payments', href: '/reports?view=payment-methods' },
-  { id: 'report-profit', label: 'Profit', href: '/reports?view=profit', permission: 'view-profit' },
+  { id: 'report-profit', label: 'Profit', href: '/reports?view=profit' },
   { id: 'report-inventory', label: 'Inventory', href: '/reports?view=inventory' },
   { id: 'report-low-stock', label: 'Low Stock', href: '/reports?view=low-stock' },
   { id: 'report-expiring', label: 'Expiring', href: '/reports?view=expiring' },
@@ -244,18 +252,16 @@ const reportItems: ReportNavItem[] = [
     id: 'report-expenses',
     label: 'Expenses',
     href: '/reports?view=expenses',
-    permission: 'expenses',
   },
   { id: 'report-customers', label: 'Customers', href: '/reports?view=customers' },
   {
     id: 'report-suppliers',
     label: 'Suppliers',
     href: '/reports?view=suppliers',
-    permission: 'vendors',
   },
   { id: 'report-tax', label: 'VAT / Tax', href: '/reports?view=vat' },
   { id: 'report-discounts', label: 'Discounts', href: '/reports?view=discounts' },
-  { id: 'report-refunds', label: 'Refunds', href: '/reports?view=refunds', permission: 'refunds' },
+  { id: 'report-refunds', label: 'Refunds', href: '/reports?view=refunds' },
   { id: 'report-voided', label: 'Voided Sales', href: '/reports?view=voided' },
   { id: 'report-closing', label: 'Cashier Closing', href: '/reports?view=cashier-closing' },
   { id: 'report-eod', label: 'End of Day', href: '/reports?view=end-of-day' },
@@ -342,9 +348,10 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
             .filter(
               (n) =>
                 n.group === group &&
-                (Array.isArray(n.permission)
-                  ? n.permission.some((permission) => hasViewPermission(permission))
-                  : hasViewPermission(n.permission)) &&
+                (!n.permission ||
+                  (Array.isArray(n.permission)
+                    ? n.permission.some((permission) => hasViewPermission(permission))
+                    : hasViewPermission(n.permission))) &&
                 (!n.adminOnly ||
                   currentUser?.role === 'owner' ||
                   currentUser?.role === 'super-admin')

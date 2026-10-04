@@ -253,12 +253,16 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
           </div>
 
           {currentUser && (
-            <div className="hidden h-8 max-w-[220px] items-center gap-2 rounded-md bg-primary/10 px-3 text-xs font-semibold text-primary xl:flex">
+            <Link
+              href="/settings#account-security"
+              className="hidden h-8 max-w-[220px] items-center gap-2 rounded-md bg-primary/10 px-3 text-xs font-semibold text-primary hover:bg-primary/15 xl:flex"
+              title="Open your account settings"
+            >
               <span className="truncate">{currentUser.name}</span>
               <span className="capitalize text-primary/70">
                 {currentUser.role.replace('-', ' ')}
               </span>
-            </div>
+            </Link>
           )}
 
           {/* Notifications */}

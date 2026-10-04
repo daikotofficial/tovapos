@@ -165,7 +165,9 @@ function SettingsPageContent() {
           : 'Manage your retail business, products, sales, inventory, and receipts'
       }
     >
-      <AccountSecurityCard />
+      <div id="account-security">
+        <AccountSecurityCard />
+      </div>
       <SalesDataResetCard />
       <PermissionGate permission="settings">
         <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
