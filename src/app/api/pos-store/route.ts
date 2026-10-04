@@ -923,18 +923,38 @@ export async function GET(request: NextRequest) {
     }
     const permission = READ_PERMISSIONS[storeName];
     if (storeName === 'users') {
-      if (
-        auth.user.role !== 'owner' &&
-        auth.user.role !== 'super-admin' &&
-        !auth.user.permissions.includes('users')
-      ) {
+      const isUserAdministrator =
+        auth.user.role === 'owner' ||
+        auth.user.role === 'super-admin' ||
+        auth.user.permissions.includes('users');
+      const canViewCashierDirectory =
+        isUserAdministrator ||
+        auth.user.permissions.includes('reports') ||
+        isViewOnlyUser(auth);
+      if (!canViewCashierDirectory) {
         return NextResponse.json([auth.user]);
       }
       const users = await getPosPool().query(
         `SELECT * FROM pos_app_users WHERE tenant_id = $1 ORDER BY lower(name), id`,
         [auth.tenantId]
       );
-      return NextResponse.json(users.rows.map(publicUser));
+      if (isUserAdministrator) return NextResponse.json(users.rows.map(publicUser));
+
+      // Report users need stable cashier ids/names for filtering, but do not
+      // need access to private account details or permission assignments.
+      return NextResponse.json(
+        users.rows.map((row) => {
+          const user = publicUser(row);
+          if (user.id === auth.user.id) return user;
+          return {
+            ...user,
+            email: '',
+            phone: undefined,
+            permissions: [],
+            pin: '',
+          };
+        })
+      );
     }
     if (permission) assertAnyPermission(auth, permission);
     if (
