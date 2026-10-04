@@ -918,7 +918,11 @@ export async function GET(request: NextRequest) {
     const auth = await requireAuth(request);
     const storeName = getStoreName(request);
     await assertRetailOnlyFeature(auth, storeName);
-    if (isViewOnlyUser(auth) && (storeName === 'settings' || storeName === 'users')) {
+    if (
+      isViewOnlyUser(auth) &&
+      (storeName === 'settings' ||
+        (storeName === 'users' && !auth.user.permissions.includes('reports')))
+    ) {
       throw new HttpError(403, 'View-only accounts cannot access administration data', 'FORBIDDEN');
     }
     const permission = READ_PERMISSIONS[storeName];
