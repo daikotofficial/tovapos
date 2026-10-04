@@ -794,13 +794,6 @@ function ReportsContent() {
 
   const displaySalesRows = serverSalesRows.length > 0 ? serverSalesRows : data.completedSales;
   const vatSalesRows = serverVatRows.length > 0 ? serverVatRows : displaySalesRows;
-  const vatCollected = vatSalesRows
-    .filter((sale) => sale.status === 'completed')
-    .reduce((sum, sale) => sum + Number(sale.taxAmount || 0), 0);
-  const vatPaid = serverInputVatRows
-    .filter((record) => record.status === 'recorded')
-    .reduce((sum, record) => sum + Number(record.inputVatAmount || 0), 0);
-  const vatRemittable = vatCollected - vatPaid;
   const vatOutputRows: { sale: SaleTransaction; item: SaleLineItem | null; vat: number }[] = [];
   vatSalesRows.forEach((sale) => {
     const taxableItems = sale.items.filter((item) => Number(item.taxAmount || 0) > 0);
@@ -829,16 +822,6 @@ function ReportsContent() {
   const cashierDetailItemRows = serverCashierDetailRows.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
   );
-  const cashierDetailPaymentTotals = Object.entries(
-    serverCashierDetailRows.reduce((totals, sale) => {
-      Object.entries(paymentAmountsForSale(sale)).forEach(([method, amount]) => {
-        totals[method] = (totals[method] ?? 0) + amount;
-      });
-      return totals;
-    }, {} as Record<string, number>)
-  ).sort(([, left], [, right]) => right - left);
-  const cashierDetailTotal = serverCashierDetailRows.reduce((sum, sale) => sum + sale.grandTotal, 0);
-  const cashierDetailUnits = cashierDetailItemRows.reduce((sum, row) => sum + row.item.quantity, 0);
 
   const displayCreditSalesRows =
     serverCreditSalesRows.length > 0 ? serverCreditSalesRows : data.creditSales;
@@ -1416,48 +1399,6 @@ function ReportsContent() {
                 balances show their current state.
               </p>
             </section>
-
-            {activeView === 'vat' ? (
-              <section className="space-y-3">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  {[
-                    ['VAT collected', vatCollected, 'text-primary'],
-                    ['VAT paid', vatPaid, 'text-warning'],
-                    ['VAT remittable', vatRemittable, vatRemittable >= 0 ? 'text-success' : 'text-danger'],
-                  ].map(([label, value, tone]) => (
-                    <article key={String(label)} className="rounded-xl border border-border bg-white p-4 shadow-card">
-                      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
-                      <p className={`mt-2 text-2xl font-bold font-tabular ${tone}`}>{formatMoney(Number(value), settings.currency)}</p>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ) : activeView === 'sales-by-cashier' && cashierId !== 'all' ? (
-              <section className="space-y-3">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                  {[
-                    ['Transactions', serverCashierDetailRows.length.toString()],
-                    ['Items sold', cashierDetailUnits.toString()],
-                    ['Total sales', formatMoney(cashierDetailTotal, settings.currency)],
-                    ['Gross profit', formatMoney(serverCashierDetailRows.reduce((sum, sale) => sum + profitForSale(sale), 0), settings.currency)],
-                    ['Cashier', selectedCashierName ?? 'Selected cashier'],
-                  ].map(([label, value]) => (
-                    <article key={label} className="rounded-xl border border-border bg-white p-4 shadow-card">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
-                      <p className="mt-2 truncate text-xl font-bold font-tabular text-foreground">{value}</p>
-                    </article>
-                  ))}
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {cashierDetailPaymentTotals.map(([method, amount]) => (
-                    <article key={method} className="rounded-lg border border-border bg-muted/20 px-4 py-3">
-                      <p className="text-[10px] font-bold uppercase text-muted-foreground">{method === 'bank-transfer' ? 'Transfer' : method.replace('-', ' ')}</p>
-                      <p className="mt-1 text-lg font-bold font-tabular">{formatMoney(amount, settings.currency)}</p>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ) : null}
 
             {activeView === 'overview' && (
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">

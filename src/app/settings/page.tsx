@@ -16,7 +16,6 @@ import {
   Settings,
   ShieldCheck,
   Wifi,
-  Trash2,
   Eye,
   EyeOff,
   Plus,
@@ -26,8 +25,6 @@ import PermissionGate from '@/components/PermissionGate';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { BusinessSettings, BusinessMode } from '@/lib/pos/types';
-import { clearPendingSalesLocally } from '@/lib/pos/local-store';
-import { clearAllSalesShiftsLocally } from '@/lib/pos/sales-shift';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
 import {
@@ -51,25 +48,11 @@ function SettingsPageContent() {
   const [saved, setSaved] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [payingPlan, setPayingPlan] = useState<SubscriptionPlanId | null>(null);
-  const [printerReady, setPrinterReady] = useState(false);
-  const [startingPrinter, setStartingPrinter] = useState(false);
   const searchParams = useSearchParams();
   const isHospitality = settings.businessMode === 'hospitality';
   const isOnPremise = isOnPremiseDeployment();
   const productUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
   const planOptions = Object.values(subscriptionPlans);
-  const startPrinter = async () => {
-    setStartingPrinter(true);
-    try {
-      const response = await fetch('http://127.0.0.1:4318/health');
-      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!response.ok || !result?.ok) throw new Error(result?.error || 'Printer helper is not installed or running.');
-      setPrinterReady(true);
-      toast.success('Receipt printer is ready.');
-    } catch {
-      toast.error('Printer helper is not running on this computer. Start the installed TOVAPOS Printer Helper, then try again.');
-    } finally { setStartingPrinter(false); }
-  };
 
   useEffect(() => {
     setForm(settings);
@@ -168,7 +151,7 @@ function SettingsPageContent() {
       <div id="account-security">
         <AccountSecurityCard />
       </div>
-      <SalesDataResetCard />
+      <WorkstationPrinterCard />
       <PermissionGate permission="settings">
         <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
           <nav className="sticky top-0 z-10 flex gap-2 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 shadow-card backdrop-blur scrollbar-thin">
@@ -575,30 +558,6 @@ function SettingsPageContent() {
             </div>
           </div>
 
-          {true && (
-            <div className="scroll-mt-16 overflow-hidden rounded-xl border border-border bg-card shadow-card mb-6">
-              <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-                <Printer size={16} className="shrink-0 text-primary" />
-                <span className="text-sm font-semibold">Receipt Printer</span>
-              </div>
-              <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-foreground">Direct thermal printing</p>
-                  <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Install the helper once on this cashier computer. It runs locally and remains available across TOVAPOS website updates.</p>
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:justify-end">
-                  <a href="/api/print-helper/windows" download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90">
-                    <Printer size={14} /> Install printer helper
-                  </a>
-                  <button type="button" onClick={startPrinter} disabled={startingPrinter} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground transition hover:bg-muted disabled:opacity-60">
-                    {startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-                    {startingPrinter ? 'Checking...' : printerReady ? 'Printer Ready' : 'Check Printer'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           <div
             id="tax-types"
             className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
@@ -977,100 +936,49 @@ function SettingsPageContent() {
 }
 
 
-function SalesDataResetCard() {
-  const { currentUser, isOnline } = usePosStore();
-  const [open, setOpen] = useState(false);
-  const [confirmation, setConfirmation] = useState('');
-  const [clearing, setClearing] = useState(false);
+function WorkstationPrinterCard() {
+  const [printerReady, setPrinterReady] = useState(false);
+  const [startingPrinter, setStartingPrinter] = useState(false);
 
-  if (!currentUser || !['owner', 'super-admin'].includes(currentUser.role)) return null;
-
-  const clearSales = async () => {
-    const normalizedConfirmation = confirmation.trim();
-    if (normalizedConfirmation !== 'CLEAR SALES DATA') {
-      toast.error('Type CLEAR SALES DATA exactly to continue.');
-      return;
-    }
-    if (!isOnline) {
-      toast.error('Connect to the internet before clearing sales data.');
-      return;
-    }
-    setClearing(true);
+  const checkPrinter = async () => {
+    setStartingPrinter(true);
     try {
-      const response = await fetch('/api/commands/clear-sales', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmation: normalizedConfirmation }),
-      });
-      const payload = (await response.json().catch(() => null)) as {
-        error?: string;
-        removed?: { sales?: number };
-      } | null;
-      if (!response.ok) throw new Error(payload?.error || 'Unable to clear sales data.');
-      const discardedPendingSales = await clearPendingSalesLocally();
-      clearAllSalesShiftsLocally();
-      toast.success(
-        String(payload?.removed?.sales ?? 0) + ' sales record(s) cleared. ' +
-          (discardedPendingSales > 0 ? `${discardedPendingSales} pending test sale(s) discarded. ` : '') +
-          'Products and stock were not changed.'
-      );
-      setOpen(false);
-      setConfirmation('');
-      window.location.reload();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unable to clear sales data.');
+      const response = await fetch('http://127.0.0.1:4318/health');
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) throw new Error(result?.error || 'Printer helper is not installed or running.');
+      setPrinterReady(true);
+      toast.success('Receipt printer is ready.');
+    } catch {
+      toast.error('Printer helper is not running on this computer. Install it, then try again.');
     } finally {
-      setClearing(false);
+      setStartingPrinter(false);
     }
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-6 pt-4">
-      <div className="rounded-xl border border-danger/30 bg-danger/5 shadow-card">
-        <div className="flex items-center justify-between gap-3 px-4 py-3">
+    <div className="mx-auto max-w-6xl px-3 pt-4 sm:px-6">
+      <div id="workstation" className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+          <Printer size={16} className="shrink-0 text-primary" />
           <div>
-            <p className="text-sm font-semibold text-danger">Test sales data</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Removes sales records used by reports and the dashboard. Products, quantities, stock movements, customers, and expenses are not changed.
-            </p>
+            <span className="text-sm font-semibold">This computer</span>
+            <p className="text-xs text-muted-foreground">Printer setup for this user and workstation.</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setOpen((value) => !value)}
-            className="inline-flex shrink-0 items-center gap-2 rounded-md border border-danger/40 px-3 py-2 text-xs font-semibold text-danger hover:bg-danger/10"
-          >
-            <Trash2 size={14} />
-            Clear sales
-          </button>
         </div>
-        {open && (
-          <div className="border-t border-danger/20 px-4 py-4">
-            <p className="text-xs leading-5 text-danger">
-              This resets sales, report, dashboard, and sales-shift data only. Pending test sales are discarded so they cannot return after the reset. Products, stock, and unrelated sync operations are preserved.
-            </p>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-              <label className="min-w-0 flex-1 space-y-1">
-                <span className="text-xs text-muted-foreground">Type CLEAR SALES DATA</span>
-                <input
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={clearSales}
-                disabled={clearing || !isOnline || confirmation.trim() !== 'CLEAR SALES DATA'}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-danger px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {clearing && <Loader2 size={15} className="animate-spin" />}
-                {clearing ? 'Clearing…' : 'Confirm clear'}
-              </button>
-            </div>
+        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
+            Install the helper once on this computer. It stays available across TOVAPOS website updates.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
+            <a href="/api/print-helper/windows" download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90">
+              <Printer size={14} /> Install helper
+            </a>
+            <button type="button" onClick={checkPrinter} disabled={startingPrinter} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground transition hover:bg-muted disabled:opacity-60">
+              {startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+              {startingPrinter ? 'Testing...' : printerReady ? 'Printer ready' : 'Test printer'}
+            </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

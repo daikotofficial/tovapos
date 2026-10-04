@@ -50,14 +50,3 @@ export function clearSalesShift(userId: string, date = businessDate()): void {
   window.localStorage.removeItem(shiftKey(userId, date));
   window.dispatchEvent(new CustomEvent('tovapos:sales-shift'));
 }
-
-
-export function clearAllSalesShiftsLocally(): void {
-  if (typeof window === 'undefined') return;
-  const prefix = 'tovapos.sales-shift.';
-  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
-    const key = window.localStorage.key(index);
-    if (key?.startsWith(prefix)) window.localStorage.removeItem(key);
-  }
-  window.dispatchEvent(new CustomEvent('tovapos:sales-shift'));
-}

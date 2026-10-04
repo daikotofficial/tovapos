@@ -4,12 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
-  BarChart3,
-  BedDouble,
-  CalendarCheck,
-  CircleDollarSign,
   Search,
-  Users,
 } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
@@ -27,29 +22,6 @@ import { toast } from 'sonner';
 
 type SortField =
   'createdAt' | 'guestName' | 'serviceName' | 'checkInAt' | 'checkOutAt' | 'total' | 'amountPaid';
-
-function Stat({
-  label,
-  value,
-  helper,
-  icon: Icon,
-}: {
-  label: string;
-  value: string;
-  helper: string;
-  icon: typeof BedDouble;
-}) {
-  return (
-    <article className="rounded-xl border border-border bg-card p-4 shadow-card">
-      <div className="flex items-center gap-2 text-sm font-semibold">
-        <Icon size={17} className="text-primary" />
-        {label}
-      </div>
-      <p className="mt-3 font-tabular text-2xl font-bold">{value}</p>
-      <p className="mt-1 text-xs text-muted-foreground">{helper}</p>
-    </article>
-  );
-}
 
 const dateOnly = (value: string) => new Date(`${value}T00:00:00`).getTime();
 const displayDate = (value: string) =>
@@ -200,52 +172,6 @@ export default function HospitalityReportsPage() {
                 <option value="unpaid">Unpaid</option>
               </select>
             </div>
-          </section>
-          <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Stat
-              label="Reservation revenue"
-              value={formatMoney(data.booked, settings.currency)}
-              helper={`${data.active.length} active reservations`}
-              icon={CircleDollarSign}
-            />
-            <Stat
-              label="Payments collected"
-              value={formatMoney(data.collected, settings.currency)}
-              helper="Recorded guest payments"
-              icon={CircleDollarSign}
-            />
-            <Stat
-              label="Outstanding balances"
-              value={formatMoney(data.outstanding, settings.currency)}
-              helper="Balance due from guests"
-              icon={BarChart3}
-            />
-            <Stat
-              label="Current occupancy"
-              value={`${data.occupied} / ${data.rooms}`}
-              helper={`${data.rooms ? Math.round((data.occupied / data.rooms) * 100) : 0}% of rooms occupied`}
-              icon={BedDouble}
-            />
-          </section>
-          <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Stat
-              label="Arrivals"
-              value={String(data.arrivals)}
-              helper={`Expected on ${displayDate(`${to}T00:00:00`)}`}
-              icon={CalendarCheck}
-            />
-            <Stat
-              label="Departures"
-              value={String(data.departures)}
-              helper={`Expected on ${displayDate(`${to}T00:00:00`)}`}
-              icon={CalendarCheck}
-            />
-            <Stat
-              label="Guest profiles"
-              value={String(guests.length)}
-              helper="Guests recorded for this business"
-              icon={Users}
-            />
           </section>
           <section className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
