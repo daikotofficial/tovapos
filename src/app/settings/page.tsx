@@ -19,6 +19,7 @@ import {
   Eye,
   EyeOff,
   Plus,
+  Trash2,
 } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';

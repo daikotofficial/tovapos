@@ -8,7 +8,6 @@ import {
   BedDouble,
   Boxes,
   CalendarCheck,
-  CircleDollarSign,
   PackageCheck,
   Receipt,
   ShieldCheck,
@@ -30,6 +29,18 @@ import {
 } from '@/lib/pos/local-store';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { isReservationLive, isRoom } from '@/lib/pos/hospitality';
+
+function NairaIcon({ size = 18 }: { size?: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="font-bold leading-none"
+      style={{ fontSize: size * 0.95 }}
+    >
+      ₦
+    </span>
+  );
+}
 
 function dayKey(value: string): string {
   return value.slice(0, 10);
@@ -154,7 +165,7 @@ function HospitalityDashboard({
       'Booking Revenue Paid',
       formatMoney(stats.paid, currency),
       'Deposits and payments received',
-      CircleDollarSign,
+      NairaIcon,
     ],
     [
       'Outstanding Bookings',
@@ -456,12 +467,12 @@ export default function DashboardPage() {
       bg: 'bg-primary/10',
     },
     {
-      label: 'Net Profit',
-      value: formatMoney(data.netProfit, settings.currency),
-      helper: `${formatMoney(data.monthNetProfit, settings.currency)} this month`,
-      icon: CircleDollarSign,
-      tone: data.netProfit >= 0 ? 'text-success' : 'text-danger',
-      bg: data.netProfit >= 0 ? 'bg-success/10' : 'bg-danger/10',
+      label: 'Gross Profit',
+      value: formatMoney(data.grossProfit, settings.currency),
+      helper: `${formatMoney(data.monthProfit, settings.currency)} this month`,
+      icon: NairaIcon,
+      tone: data.grossProfit >= 0 ? 'text-success' : 'text-danger',
+      bg: data.grossProfit >= 0 ? 'bg-success/10' : 'bg-danger/10',
     },
     {
       label: 'Expenses',

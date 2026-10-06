@@ -696,15 +696,43 @@ export async function loadReportRows<T = unknown>(input: {
   offset?: number;
 }): Promise<ReportRowsResult<T>> {
   if (shouldUsePostgresStore()) {
-    return apiRequest<ReportRowsResult<T>>('sales', undefined, {
-      report: input.report,
-      from: input.from,
-      to: input.to,
-      cashierId: input.cashierId,
-      cashierName: input.cashierName,
-      limit: input.limit ?? 100,
-      offset: input.offset ?? 0,
-    });
+    try {
+      return await apiRequest<ReportRowsResult<T>>('sales', undefined, {
+        report: input.report,
+        from: input.from,
+        to: input.to,
+        cashierId: input.cashierId,
+        cashierName: input.cashierName,
+        limit: input.limit ?? 100,
+        offset: input.offset ?? 0,
+      });
+    } catch (error) {
+      if (!isNetworkFailure(error)) throw error;
+    }
+  }
+
+  if (input.report === 'sales-by-cashier-detail') {
+    const sales = await getAllFromBrowser<SaleTransaction>('sales');
+    const from = input.from ?? '';
+    const to = input.to ?? '';
+    const selectedName = input.cashierName?.trim().toLowerCase();
+    const filtered = sales
+      .filter((sale) => {
+        const date = sale.timestamp.slice(0, 10);
+        const sameCashier =
+          !input.cashierId ||
+          sale.cashierId === input.cashierId ||
+          (selectedName !== undefined && sale.cashier.trim().toLowerCase() === selectedName);
+        return sameCashier && (!from || date >= from) && (!to || date <= to) && sale.status === 'completed';
+      })
+      .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+    const offset = input.offset ?? 0;
+    const limit = input.limit ?? 100;
+    return {
+      rows: filtered.slice(offset, offset + limit) as T[],
+      limit,
+      offset,
+    };
   }
 
   return {

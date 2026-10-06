@@ -491,6 +491,7 @@ function ReportsContent() {
     users,
     settings,
     activeBusinessMode,
+    isOnline,
     hasPermission,
     hasViewPermission,
   } = usePosStore();
@@ -510,6 +511,10 @@ function ReportsContent() {
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
   const [serverReportRows, setServerReportRows] = useState<Record<string, unknown[]>>({});
+  const [serverReportsLoading, setServerReportsLoading] = useState(false);
+  const [cashierDetailPage, setCashierDetailPage] = useState(1);
+  const [cashierDetailHasMore, setCashierDetailHasMore] = useState(false);
+  const [cashierDetailLoading, setCashierDetailLoading] = useState(false);
   const [reportRefreshToken, setReportRefreshToken] = useState(0);
 
   useEffect(() => {
@@ -562,12 +567,12 @@ function ReportsContent() {
     async function loadRows() {
       const from = range.preset === 'all' ? undefined : range.from;
       const to = range.preset === 'all' ? undefined : range.to;
+      setServerReportsLoading(true);
       try {
-        const rowReports = [
+        const serverReportViews = [
           'sales',
           'vat',
           'sales-by-cashier',
-          'sales-by-cashier-detail',
           'credit-sales',
           'expenses',
           'sales-by-product',
@@ -578,6 +583,12 @@ function ReportsContent() {
           'audit',
           'input-vat',
         ];
+        const rowReports =
+          activeView === 'overview'
+            ? ['sales']
+            : serverReportViews.includes(activeView) && activeView !== 'sales-by-cashier-detail'
+              ? [activeView]
+              : [];
         const results = await Promise.all(
           rowReports.map(async (report) => [
             report,
@@ -587,22 +598,62 @@ function ReportsContent() {
                   report,
                   from,
                   to,
-                  cashierId: (report === 'sales-by-cashier' || report === 'sales-by-cashier-detail') && cashierId !== 'all' ? cashierId : undefined,
-                  cashierName: (report === 'sales-by-cashier' || report === 'sales-by-cashier-detail') && cashierId !== 'all' ? cashierName : undefined,
-                  limit: report === 'sales-by-cashier-detail' || report === 'vat' || report === 'input-vat' ? 500 : 100,
+                  cashierId: report === 'sales-by-cashier' && cashierId !== 'all' ? cashierId : undefined,
+                  cashierName: report === 'sales-by-cashier' && cashierId !== 'all' ? cashierName : undefined,
+                  limit: report === 'vat' || report === 'input-vat' ? 500 : 100,
                 })).rows,
           ])
         );
         if (!cancelled) setServerReportRows(Object.fromEntries(results));
       } catch (error) {
         if (!cancelled) console.error('Failed to load server report rows', error);
+      } finally {
+        if (!cancelled) setServerReportsLoading(false);
       }
     }
     void loadRows();
     return () => {
       cancelled = true;
     };
-  }, [cashierId, cashierName, range.from, range.preset, range.to, reportRefreshToken, users]);
+  }, [activeView, cashierId, cashierName, range.from, range.preset, range.to, reportRefreshToken, users]);
+
+  useEffect(() => {
+    if (activeView !== 'sales-by-cashier' || cashierId === 'all') {
+      setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': [] }));
+      setCashierDetailHasMore(false);
+      return;
+    }
+    let cancelled = false;
+    async function loadCashierDetail() {
+      setCashierDetailLoading(true);
+      try {
+        const result = await loadReportRows<SaleTransaction>({
+          report: 'sales-by-cashier-detail',
+          from: range.preset === 'all' ? undefined : range.from,
+          to: range.preset === 'all' ? undefined : range.to,
+          cashierId,
+          cashierName,
+          limit: 50,
+          offset: (cashierDetailPage - 1) * 50,
+        });
+        if (cancelled) return;
+        setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': result.rows }));
+        setCashierDetailHasMore(result.rows.length === 50);
+      } catch (error) {
+        if (!cancelled) console.error('Failed to load cashier detail report', error);
+      } finally {
+        if (!cancelled) setCashierDetailLoading(false);
+      }
+    }
+    void loadCashierDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, cashierDetailPage, cashierId, cashierName, range.from, range.preset, range.to, reportRefreshToken]);
+
+  useEffect(() => {
+    setCashierDetailPage(1);
+  }, [cashierId, cashierName, range.from, range.preset, range.to]);
 
   const data = useMemo(() => {
     const completedSales = sales.filter(
@@ -804,22 +855,36 @@ function ReportsContent() {
     }
   });
   const hasServerCashierRows = Object.prototype.hasOwnProperty.call(serverReportRows, 'sales-by-cashier');
-  const displayCashierRows = hasServerCashierRows
+  const localCashierRows = Object.entries(
+    data.completedSales
+      .filter((sale) =>
+        cashierId === 'all' ||
+        sale.cashierId === cashierId ||
+        (!sale.cashierId && sale.cashier === users.find((user) => user.id === cashierId)?.name)
+      )
+      .reduce((map, sale) => {
+        const key = sale.cashierId ?? `name:${sale.cashier}`;
+        const current = map[key] ?? { cashierId: key, cashier: sale.cashier, transactions: 0, revenue: 0, profit: 0 };
+        current.transactions += 1;
+        current.revenue += sale.grandTotal;
+        current.profit += profitForSale(sale);
+        map[key] = current;
+        return map;
+      }, {} as Record<string, { cashierId: string; cashier: string; transactions: number; revenue: number; profit: number }>)
+  ).map(([, row]) => row);
+  const displayCashierRows = hasServerCashierRows && !serverReportsLoading && (isOnline || serverCashierRows.length > 0)
     ? serverCashierRows
-    : Object.entries(
-        data.completedSales
-          .filter((sale) => cashierId === 'all' || sale.cashierId === cashierId || (!sale.cashierId && sale.cashier === users.find((user) => user.id === cashierId)?.name))
-          .reduce((map, sale) => {
-            const key = sale.cashierId ?? `name:${sale.cashier}`;
-            const current = map[key] ?? { cashierId: key, cashier: sale.cashier, transactions: 0, revenue: 0, profit: 0 };
-            current.transactions += 1;
-            current.revenue += sale.grandTotal;
-            current.profit += profitForSale(sale);
-            map[key] = current;
-            return map;
-          }, {} as Record<string, { cashierId: string; cashier: string; transactions: number; revenue: number; profit: number }>)
-      ).map(([, row]) => row);
-  const cashierDetailItemRows = serverCashierDetailRows.flatMap((sale) =>
+    : localCashierRows;
+  const localCashierDetailRows = data.completedSales.filter((sale) =>
+    cashierId !== 'all' &&
+    (sale.cashierId === cashierId || sale.cashier.trim().toLowerCase() === (selectedCashierName ?? '').trim().toLowerCase())
+  );
+  const cashierDetailSales = serverReportsLoading || cashierDetailLoading
+    ? localCashierDetailRows
+    : serverCashierDetailRows.length > 0 || isOnline
+    ? serverCashierDetailRows
+    : localCashierDetailRows;
+  const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
   );
 
@@ -1736,6 +1801,13 @@ function ReportsContent() {
                 subtitle="Every item sold in the selected period; returned/refunded sales are excluded from completed sales."
                 headers={['Date', 'Receipt', 'Item', 'Qty', 'Unit Price', 'Line Total', 'Payment']}
                 empty="No completed sales for this cashier in the selected period."
+                serverPagination={{
+                  page: cashierDetailPage,
+                  hasMore: cashierDetailHasMore,
+                  loading: cashierDetailLoading,
+                  onPrevious: () => setCashierDetailPage((current) => Math.max(1, current - 1)),
+                  onNext: () => setCashierDetailPage((current) => current + 1),
+                }}
                 rows={cashierDetailItemRows.map(({ sale, item }) => [
                   new Date(sale.timestamp).toLocaleString(),
                   sale.transactionId,
@@ -2034,12 +2106,20 @@ function ReportTable({
   headers,
   rows,
   empty,
+  serverPagination,
 }: {
   title: string;
   subtitle: string;
   headers: string[];
   rows: string[][];
   empty: string;
+  serverPagination?: {
+    page: number;
+    hasMore: boolean;
+    loading: boolean;
+    onPrevious: () => void;
+    onNext: () => void;
+  };
 }) {
   const [rowsPerPage] = useRowsPerPage();
   const [page, setPage] = useState(1);
@@ -2099,7 +2179,29 @@ function ReportTable({
             {Math.min(page * rowsPerPage, rows.length)} of {rows.length}
           </span>
         </div>
-        {totalPages > 1 && (
+        {serverPagination ? (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={serverPagination.onPrevious}
+              disabled={serverPagination.loading || serverPagination.page === 1}
+              className="rounded px-2 py-1 text-xs disabled:opacity-40"
+            >
+              Previous
+            </button>
+            <span className="px-2 text-xs text-muted-foreground">
+              Page {serverPagination.page}
+            </span>
+            <button
+              type="button"
+              onClick={serverPagination.onNext}
+              disabled={serverPagination.loading || !serverPagination.hasMore}
+              className="rounded px-2 py-1 text-xs disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        ) : totalPages > 1 && (
           <div className="flex items-center gap-1">
             <button
               type="button"
