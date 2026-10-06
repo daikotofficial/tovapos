@@ -884,8 +884,10 @@ function ReportsContent() {
         return map;
       }, {} as Record<string, { cashierId: string; cashier: string; transactions: number; revenue: number; profit: number; cash: number; card: number; transfer: number }>)
   ).map(([, row]) => row);
-  const displayCashierRows = hasServerCashierRows && !serverReportsLoading && (isOnline || serverCashierRows.length > 0)
-    ? serverCashierRows
+  const displayCashierRows = isOnline
+    ? hasServerCashierRows && !serverReportsLoading
+      ? serverCashierRows
+      : []
     : localCashierRows;
   const selectedCashierKey = selectedCashierName?.trim().toLowerCase();
   const matchesSelectedCashier = (sale: SaleTransaction) =>
@@ -895,12 +897,12 @@ function ReportsContent() {
   const localCashierDetailRows = data.completedSales.filter((sale) =>
     matchesSelectedCashier(sale)
   );
-  const cashierDetailSales = serverReportsLoading || cashierDetailLoading
-    ? localCashierDetailRows
-    : serverCashierDetailRows.length > 0 || isOnline
-    ? serverCashierDetailRows.filter(
-        (sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range)
-      )
+  const cashierDetailSales = isOnline
+    ? cashierDetailLoading
+      ? []
+      : serverCashierDetailRows.filter(
+          (sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range)
+        )
     : localCashierDetailRows;
   const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
@@ -925,6 +927,14 @@ function ReportsContent() {
         transfer: selectedCashierSummary.transfer ?? 0,
       }
     : localCashierTenderSummary;
+  const cashierOtherTender = Math.max(
+    0,
+    cashierTenderSummary.total -
+      cashierTenderSummary.cash -
+      cashierTenderSummary.card -
+      cashierTenderSummary.transfer
+  );
+  const cashierSummaryLoading = isOnline && serverReportsLoading;
 
   const displayCreditSalesRows =
     serverCreditSalesRows.length > 0 ? serverCreditSalesRows : data.creditSales;
@@ -1841,11 +1851,14 @@ function ReportsContent() {
                   ['Cash', cashierTenderSummary.cash],
                   ['Card', cashierTenderSummary.card],
                   ['Bank Transfer', cashierTenderSummary.transfer],
+                  ['Other / Credit / Mobile', cashierOtherTender],
                 ].map(([label, amount]) => (
                   <article key={String(label)} className="rounded-xl border border-border bg-white p-4 shadow-card">
                     <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
                     <p className="mt-2 text-2xl font-bold font-tabular">
-                      {formatMoney(Number(amount), settings.currency)}
+                      {cashierSummaryLoading
+                        ? 'Loading…'
+                        : formatMoney(Number(amount), settings.currency)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       Selected cashier and period
