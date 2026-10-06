@@ -854,6 +854,10 @@ function ReportsContent() {
       vatOutputRows.push({ sale, item: null, vat: Number(sale.taxAmount || 0) });
     }
   });
+  const selectedCashierName =
+    cashierName ||
+    users.find((user) => user.id === cashierId)?.name ||
+    serverCashierRows.find((row) => row.cashierId === cashierId)?.cashier;
   const hasServerCashierRows = Object.prototype.hasOwnProperty.call(serverReportRows, 'sales-by-cashier');
   const localCashierRows = Object.entries(
     data.completedSales
@@ -959,11 +963,6 @@ function ReportsContent() {
       .sort(([, left], [, right]) => left.localeCompare(right))
       .map(([value, label]) => ({ value, label })),
   ];
-  const selectedCashierName =
-    cashierName ||
-    users.find((user) => user.id === cashierId)?.name ||
-    serverCashierRows.find((row) => row.cashierId === cashierId)?.cashier;
-
   const exportTable = useMemo(() => {
     if (activeView === 'sales-by-cashier') {
       if (cashierId !== 'all') {
