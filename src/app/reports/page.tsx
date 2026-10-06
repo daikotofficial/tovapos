@@ -12,6 +12,7 @@ import {
   History,
   Package,
   Receipt,
+  RefreshCw,
   TrendingDown,
   TrendingUp,
   Users,
@@ -514,18 +515,6 @@ function ReportsContent() {
   const [serverReportsLoading, setServerReportsLoading] = useState(false);
   const [cashierDetailLoading, setCashierDetailLoading] = useState(false);
   const [reportRefreshToken, setReportRefreshToken] = useState(0);
-
-  useEffect(() => {
-    const refresh = () => setReportRefreshToken((token) => token + 1);
-    const interval = window.setInterval(refresh, 30_000);
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-    };
-  }, []);
 
   useEffect(() => {
     setDraftRange(range);
@@ -1399,9 +1388,20 @@ function ReportsContent() {
                   </p>
                 </div>
                 <div className="w-full lg:w-[360px]">
-                  <label className="text-[10px] font-bold uppercase text-muted-foreground">
-                    Select report
-                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-[10px] font-bold uppercase text-muted-foreground">
+                      Select report
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setReportRefreshToken((token) => token + 1)}
+                      disabled={serverReportsLoading || cashierDetailLoading}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <RefreshCw size={13} className={serverReportsLoading || cashierDetailLoading ? 'animate-spin' : ''} />
+                      {serverReportsLoading || cashierDetailLoading ? 'Refreshing' : 'Refresh'}
+                    </button>
+                  </div>
                   <NiceSelect
                     value={activeView}
                     onChange={(value) => router.push(`/reports?view=${value}`)}
