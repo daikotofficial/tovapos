@@ -890,7 +890,9 @@ function ReportsContent() {
   const cashierDetailSales = serverReportsLoading || cashierDetailLoading
     ? localCashierDetailRows
     : serverCashierDetailRows.length > 0 || isOnline
-    ? serverCashierDetailRows.filter(matchesSelectedCashier)
+    ? serverCashierDetailRows.filter(
+        (sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range)
+      )
     : localCashierDetailRows;
   const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
