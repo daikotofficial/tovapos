@@ -957,6 +957,13 @@ function ReportsContent() {
     setCashierName(draftCashierName);
     toast.success(`Date range applied: ${draftRange.from} to ${draftRange.to}`);
   };
+  const updateDraftDate = (field: 'from' | 'to', value: string) => {
+    const nextRange = { ...draftRange, [field]: value, preset: 'custom' as const };
+    setDraftRange(nextRange);
+    if (nextRange.from && nextRange.to && nextRange.from <= nextRange.to) {
+      setRange(nextRange);
+    }
+  };
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
   const cashierOptions = [
     { value: 'all', label: 'All cashiers' },
@@ -1427,7 +1434,10 @@ function ReportsContent() {
                         value={draftCashierId}
                         onChange={(value) => {
                           setDraftCashierId(value);
-                          setDraftCashierName(cashierOptions.find((option) => option.value === value)?.label ?? '');
+                          const nextCashierName = cashierOptions.find((option) => option.value === value)?.label ?? '';
+                          setDraftCashierName(nextCashierName);
+                          setCashierId(value);
+                          setCashierName(nextCashierName);
                         }}
                         options={cashierOptions}
                       />
@@ -1435,20 +1445,16 @@ function ReportsContent() {
                   )}
                   <label className="space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">From</span>
-                    <DatePicker
+                      <DatePicker
                       value={draftRange.from}
-                      onChange={(from) =>
-                        setDraftRange((current) => ({ ...current, from, preset: 'custom' }))
-                      }
+                      onChange={(from) => updateDraftDate('from', from)}
                     />
                   </label>
                   <label className="space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">To</span>
-                    <DatePicker
+                      <DatePicker
                       value={draftRange.to}
-                      onChange={(to) =>
-                        setDraftRange((current) => ({ ...current, to, preset: 'custom' }))
-                      }
+                      onChange={(to) => updateDraftDate('to', to)}
                     />
                   </label>
                   <button
