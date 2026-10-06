@@ -1266,6 +1266,7 @@ function ReportsContent() {
     };
   }, [
     activeView,
+    cashierDetailItemRows,
     data,
     displayCreditSalesRows,
     displayExpenseRows,
@@ -1274,9 +1275,53 @@ function ReportsContent() {
     displaySalesRows,
     displayCashierRows,
     inventory,
+    settings.currency,
   ]);
 
-  const exportReport = (format: 'csv' | 'json' | 'excel' | 'pdf') => {
+  const exportReport = async (format: 'csv' | 'json' | 'excel' | 'pdf') => {
+    let exportRows = exportTable.rows;
+    if (activeView === 'sales-by-cashier' && cashierId !== 'all' && isOnline) {
+      const pageSize = 500;
+      const allCashierSales: SaleTransaction[] = [];
+      let offset = 0;
+
+      try {
+        while (true) {
+          const result = await loadReportRows<SaleTransaction>({
+            report: 'sales-by-cashier-detail',
+            from: range.preset === 'all' ? undefined : range.from,
+            to: range.preset === 'all' ? undefined : range.to,
+            cashierId,
+            cashierName,
+            limit: pageSize,
+            offset,
+          });
+          allCashierSales.push(
+            ...result.rows.filter(
+              (sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range)
+            )
+          );
+          if (result.rows.length < pageSize) break;
+          offset += pageSize;
+        }
+        exportRows = allCashierSales.flatMap((sale) =>
+          sale.items.map((item) => [
+            new Date(sale.timestamp).toLocaleString(),
+            sale.transactionId,
+            item.name,
+            item.quantity.toString(),
+            item.unitPrice.toFixed(2),
+            item.lineTotal.toFixed(2),
+            paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
+          ])
+        );
+      } catch (error) {
+        console.error('Failed to load all cashier rows for export', error);
+        toast.error('Could not load the complete cashier report for export. Try again.');
+        return;
+      }
+    }
+
     const activeReport = reports.find((report) => report.id === activeView);
     const reportLabel = activeReport?.label ?? activeView;
     const reportTitle = `${reportLabel} Report`;
@@ -1289,7 +1334,7 @@ function ReportsContent() {
       ...(activeView === 'sales-by-cashier' ? [['Cashier', selectedCashierName ?? 'All cashiers']] : []),
       ['Generated', generatedAt],
     ];
-    const fullRows = [...metadataRows, [], exportTable.headers, ...exportTable.rows];
+    const fullRows = [...metadataRows, [], exportTable.headers, ...exportRows];
 
     if (format === 'json') {
       downloadTextFile(
@@ -1302,7 +1347,7 @@ function ReportsContent() {
             currency: settings.currency,
             generatedAt: new Date().toISOString(),
             headers: exportTable.headers,
-            rows: exportTable.rows,
+            rows: exportRows,
           },
           null,
           2
@@ -1328,7 +1373,7 @@ function ReportsContent() {
         <p class="meta">Range: ${htmlEscape(rangeLabel)} &nbsp; | &nbsp; Generated: ${htmlEscape(generatedAt)}</p>
         <table><thead><tr>${exportTable.headers
           .map((header) => `<th>${htmlEscape(String(header))}</th>`)
-          .join('')}</tr></thead><tbody>${exportTable.rows
+          .join('')}</tr></thead><tbody>${exportRows
           .map(
             (row) =>
               `<tr>${exportTable.headers
@@ -1349,7 +1394,7 @@ function ReportsContent() {
         rangeLabel,
         generatedAt,
         headers: exportTable.headers,
-        rows: exportTable.rows,
+        rows: exportRows,
       });
       return;
     }
