@@ -879,14 +879,18 @@ function ReportsContent() {
   const displayCashierRows = hasServerCashierRows && !serverReportsLoading && (isOnline || serverCashierRows.length > 0)
     ? serverCashierRows
     : localCashierRows;
-  const localCashierDetailRows = data.completedSales.filter((sale) =>
+  const selectedCashierKey = selectedCashierName?.trim().toLowerCase();
+  const matchesSelectedCashier = (sale: SaleTransaction) =>
     cashierId !== 'all' &&
-    (sale.cashierId === cashierId || sale.cashier.trim().toLowerCase() === (selectedCashierName ?? '').trim().toLowerCase())
+    (sale.cashierId === cashierId ||
+      (Boolean(selectedCashierKey) && sale.cashier.trim().toLowerCase() === selectedCashierKey));
+  const localCashierDetailRows = data.completedSales.filter((sale) =>
+    matchesSelectedCashier(sale)
   );
   const cashierDetailSales = serverReportsLoading || cashierDetailLoading
     ? localCashierDetailRows
     : serverCashierDetailRows.length > 0 || isOnline
-    ? serverCashierDetailRows
+    ? serverCashierDetailRows.filter(matchesSelectedCashier)
     : localCashierDetailRows;
   const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
