@@ -939,7 +939,7 @@ function ReportsContent() {
       cashierTenderSummary.card -
       cashierTenderSummary.transfer
   );
-  const cashierSummaryLoading = isOnline && serverReportsLoading;
+  const cashierSummaryLoading = isOnline && serverReportsLoading && !selectedCashierSummary;
 
   const displayCreditSalesRows =
     serverCreditSalesRows.length > 0 ? serverCreditSalesRows : data.creditSales;
