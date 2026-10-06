@@ -338,7 +338,22 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         cashier,
         count(*)::bigint AS transactions,
         coalesce(sum(gross_profit), 0)::float8 AS profit,
-        coalesce(sum(grand_total), 0)::float8 AS revenue
+        coalesce(sum(grand_total), 0)::float8 AS revenue,
+        coalesce(sum(CASE
+          WHEN payment_method = 'cash' THEN grand_total
+          WHEN payment_method = 'split' THEN coalesce((data->'paymentBreakdown'->>'cash')::float8, 0)
+          ELSE 0
+        END), 0)::float8 AS cash,
+        coalesce(sum(CASE
+          WHEN payment_method = 'card' THEN grand_total
+          WHEN payment_method = 'split' THEN coalesce((data->'paymentBreakdown'->>'card')::float8, 0)
+          ELSE 0
+        END), 0)::float8 AS card,
+        coalesce(sum(CASE
+          WHEN payment_method = 'bank-transfer' THEN grand_total
+          WHEN payment_method = 'split' THEN coalesce((data->'paymentBreakdown'->>'bank-transfer')::float8, 0)
+          ELSE 0
+        END), 0)::float8 AS transfer
       FROM sale_rows
       WHERE ${where.join(' AND ')}
       GROUP BY COALESCE(NULLIF(data->>'cashierId', ''), 'name:' || cashier), cashier
@@ -352,6 +367,9 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         ...row,
         transactions: Number(row.transactions ?? 0),
         revenue: Number(row.revenue ?? 0),
+        cash: Number(row.cash ?? 0),
+        card: Number(row.card ?? 0),
+        transfer: Number(row.transfer ?? 0),
         profit: authAllows(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
       })),
       limit,
