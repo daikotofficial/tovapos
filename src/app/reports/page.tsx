@@ -602,7 +602,9 @@ function ReportsContent() {
                 })).rows,
           ])
         );
-        if (!cancelled) setServerReportRows(Object.fromEntries(results));
+        if (!cancelled) {
+          setServerReportRows((current) => ({ ...current, ...Object.fromEntries(results) }));
+        }
       } catch (error) {
         if (!cancelled) console.error('Failed to load server report rows', error);
       } finally {
@@ -646,6 +648,11 @@ function ReportsContent() {
       cancelled = true;
     };
   }, [activeView, cashierId, cashierName, range.from, range.preset, range.to, reportRefreshToken]);
+
+  useEffect(() => {
+    if (activeView !== 'sales-by-cashier' || cashierId === 'all') return;
+    setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': [] }));
+  }, [activeView, cashierId, cashierName, range.from, range.preset, range.to]);
 
   const data = useMemo(() => {
     const completedSales = sales.filter(
@@ -885,7 +892,7 @@ function ReportsContent() {
       }, {} as Record<string, { cashierId: string; cashier: string; transactions: number; revenue: number; profit: number; cash: number; card: number; transfer: number }>)
   ).map(([, row]) => row);
   const displayCashierRows = isOnline
-    ? hasServerCashierRows && !serverReportsLoading
+    ? hasServerCashierRows
       ? serverCashierRows
       : []
     : localCashierRows;
@@ -898,11 +905,9 @@ function ReportsContent() {
     matchesSelectedCashier(sale)
   );
   const cashierDetailSales = isOnline
-    ? cashierDetailLoading
-      ? []
-      : serverCashierDetailRows.filter(
-          (sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range)
-        )
+    ? serverCashierDetailRows.filter(
+        (sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range)
+      )
     : localCashierDetailRows;
   const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
