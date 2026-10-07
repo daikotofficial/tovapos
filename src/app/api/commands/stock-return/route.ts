@@ -113,7 +113,17 @@ export async function POST(request: NextRequest) {
 
       let remaining = quantity;
       const updatedSales: SaleTransaction[] = [];
-      const returnedItems: { saleId: string; quantity: number; stockQuantity: number; amount: number }[] = [];
+      const returnedItems: {
+        saleId: string;
+        quantity: number;
+        stockQuantity: number;
+        amount: number;
+        sku: string;
+        barcode?: string;
+        unitCost: number;
+        sellingPrice: number;
+        expiryDate: string;
+      }[] = [];
       let restoredStockQuantity = 0;
       stage = 'calculating return';
       for (const row of salesResult.rows) {
@@ -149,7 +159,17 @@ export async function POST(request: NextRequest) {
           saleReturnedDiscount += lineReturnDiscount;
           saleReturnedTax += lineReturnTax;
           restoredStockQuantity += returnedStockQuantity;
-          returnedItems.push({ saleId: sale.id, quantity: returnedQuantity, stockQuantity: returnedStockQuantity, amount: lineReturnTotal + (line.taxMode === 'exclusive' ? lineReturnTax : 0) });
+          returnedItems.push({
+            saleId: sale.id,
+            quantity: returnedQuantity,
+            stockQuantity: returnedStockQuantity,
+            amount: lineReturnTotal + (line.taxMode === 'exclusive' ? lineReturnTax : 0),
+            sku: line.sku,
+            barcode: line.barcode,
+            unitCost: Number(line.unitCost) / unitsPerSale,
+            sellingPrice: Number(line.unitPrice),
+            expiryDate: line.expiryDate,
+          });
           return {
             ...line,
             quantity: nextQuantity,
@@ -228,6 +248,67 @@ export async function POST(request: NextRequest) {
         [auth.tenantId, productId, JSON.stringify(updated)]
       );
       await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
+      stage = 'restoring stock batches';
+      const batchResult = await client.query(
+        `SELECT record_id, data
+         FROM pos_tenant_records
+         WHERE tenant_id = $1 AND store_name = 'stockBatches' AND data->>'productId' = $2
+         ORDER BY data->>'receivedAt' ASC, record_id ASC
+         FOR UPDATE`,
+        [auth.tenantId, productId]
+      );
+      const batchRows = batchResult.rows.map((row) => ({
+        recordId: String(row.record_id),
+        data: row.data as Record<string, unknown>,
+      }));
+      for (const returnedItem of returnedItems) {
+        const matchingBatch = batchRows.find(
+          (batch) =>
+            ['active', 'exhausted'].includes(String(batch.data.status)) &&
+            String(batch.data.sku ?? '').toLowerCase() === returnedItem.sku.toLowerCase()
+        );
+        if (matchingBatch) {
+          const nextRemaining = money(
+            Number(matchingBatch.data.quantityRemaining ?? 0) + returnedItem.stockQuantity
+          );
+          matchingBatch.data = {
+            ...matchingBatch.data,
+            quantityRemaining: nextRemaining,
+            status: 'active',
+          };
+          await client.query(
+            `UPDATE pos_tenant_records SET data = $3::jsonb, version = version + 1, updated_at = now()
+             WHERE tenant_id = $1 AND store_name = 'stockBatches' AND record_id = $2`,
+            [auth.tenantId, matchingBatch.recordId, JSON.stringify(matchingBatch.data)]
+          );
+          continue;
+        }
+
+        const batchId = `batch-return-${randomUUID()}`;
+        const returnedBatch = {
+          id: batchId,
+          productId,
+          productName: current.name,
+          sku: returnedItem.sku || current.sku,
+          barcode: returnedItem.barcode || current.barcode,
+          quantityReceived: returnedItem.stockQuantity,
+          quantityRemaining: returnedItem.stockQuantity,
+          unitCost: money(returnedItem.unitCost || current.unitCost),
+          sellingPrice: money(returnedItem.sellingPrice || current.sellingPrice),
+          expiryDate: returnedItem.expiryDate || current.expiryDate,
+          supplier: current.supplier,
+          supplierPhone: current.supplierPhone,
+          invoiceNumber: '',
+          receivedAt: now,
+          status: 'active',
+        };
+        await client.query(
+          `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+           VALUES ($1, 'stockBatches', $2, $3::jsonb)`,
+          [auth.tenantId, batchId, JSON.stringify(returnedBatch)]
+        );
+        batchRows.push({ recordId: batchId, data: returnedBatch });
+      }
       const movement: StockMovement = {
         id: `move-${operationId}`,
         operationId,
