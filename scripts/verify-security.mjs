@@ -524,6 +524,28 @@ try {
     true
   );
   assert.equal(new Set(offlineSales.map((result) => result.body.sale.transactionId)).size, 20);
+  const [companyASalesReport, companyBSalesReport, companyBProductReport, companyBMetrics] =
+    await Promise.all([
+      authenticated('/api/pos-store?store=sales&report=sales&limit=100', companyA.cookie),
+      authenticated('/api/pos-store?store=sales&report=sales&limit=100', companyB.cookie),
+      authenticated(
+        '/api/pos-store?store=sales&report=sales-by-product&limit=100',
+        companyB.cookie
+      ),
+      authenticated('/api/pos-store?store=sales&metrics=true', companyB.cookie),
+    ]);
+  const replayTransactionIds = new Set(
+    offlineSales.map((result) => result.body.sale.transactionId)
+  );
+  assert.equal(
+    companyASalesReport.body.rows.filter((sale) => replayTransactionIds.has(sale.transactionId))
+      .length,
+    20
+  );
+  assert.deepEqual(companyBSalesReport.body.rows, []);
+  assert.deepEqual(companyBProductReport.body.rows, []);
+  assert.equal(companyBMetrics.body.completedCount, 0);
+  assert.equal(companyBMetrics.body.revenue, 0);
   const replayFinalStock = await authenticated(
     `/api/pos-store?store=inventory&ids=${replayProductId}`,
     companyA.cookie

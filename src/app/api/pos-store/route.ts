@@ -24,6 +24,8 @@ import {
 } from '@/lib/server/tenant-indexes';
 import type { AuthContext } from '@/lib/server/security';
 
+export const dynamic = 'force-dynamic';
+
 const STORE_NAMES = new Set([
   'inventory',
   'stockMovements',
@@ -84,11 +86,20 @@ WITH sale_rows AS (
 )`;
 
 const READ_PERMISSIONS: Partial<Record<string, Permission[]>> = {
-  inventory: ['view-only', 'inventory', 'add-product', 'edit-product', 'adjust-stock', 'delete-product', 'checkout', 'reports'],
+  inventory: [
+    'view-only',
+    'inventory',
+    'add-product',
+    'edit-product',
+    'adjust-stock',
+    'delete-product',
+    'checkout',
+    'reports',
+  ],
   stockMovements: ['view-only', 'inventory', 'reports'],
   users: ['users'],
-  customers: ['view-only', 'customers', 'checkout'],
-  vendors: ['view-only', 'vendors', 'inventory'],
+  customers: ['view-only', 'customers', 'checkout', 'reports'],
+  vendors: ['view-only', 'vendors', 'inventory', 'reports'],
   expenses: ['view-only', 'expenses', 'reports'],
   inputVat: ['view-only', 'manage-tax', 'reports'],
   hospitalityServices: ['view-only', 'checkout', 'customers'],
@@ -202,7 +213,12 @@ function protectInventoryFinancials(data: Record<string, unknown>, auth: AuthCon
   const packPrice = Number(String(data.packPrice ?? '').replace(/,/g, ''));
   const packQuantity = Number(String(data.packQuantity ?? '').replace(/,/g, ''));
   const hasPackPricing = packPrice > 0 && Number.isInteger(packQuantity) && packQuantity >= 1;
-  const normalized: Record<string, unknown> = { ...data, packPricingEnabled: hasPackPricing, packPrice: hasPackPricing ? packPrice : undefined, packQuantity: hasPackPricing ? packQuantity : undefined };
+  const normalized: Record<string, unknown> = {
+    ...data,
+    packPricingEnabled: hasPackPricing,
+    packPrice: hasPackPricing ? packPrice : undefined,
+    packQuantity: hasPackPricing ? packQuantity : undefined,
+  };
   if (authAllows(auth, 'view-cost-price')) return normalized;
   const { unitCost: _unitCost, profitMargin: _profitMargin, ...safe } = normalized;
   return { ...safe, unitCost: 0, profitMargin: 0 };
@@ -309,6 +325,9 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   const offset = clampOffset(params.get('offset'));
   const cashierId = params.get('cashierId')?.trim();
   const cashierName = params.get('cashierName')?.trim();
+  if ((cashierId?.length ?? 0) > 200 || (cashierName?.length ?? 0) > 200) {
+    throw new HttpError(400, 'Cashier filter is invalid', 'VALIDATION_ERROR');
+  }
   const values: unknown[] = [auth.tenantId];
   const where: string[] = ['tenant_id = $1'];
 
@@ -354,7 +373,24 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
       const cashierIdParam = `$${values.length}`;
       if (cashierName) {
         values.push(cashierName);
-        where.push(`(data->>'cashierId' = ${cashierIdParam} OR lower(trim(cashier)) = lower(trim($${values.length})) OR lower(trim(data->>'cashier')) = lower(trim($${values.length})))`);
+        const cashierNameParam = `$${values.length}`;
+        where.push(`(
+          data->>'cashierId' = ${cashierIdParam}
+          OR (
+            coalesce(data->>'cashierId', '') = ''
+            AND 1 = (
+              SELECT count(*)
+              FROM pos_app_users report_user
+              WHERE report_user.tenant_id = $1
+                AND report_user.status = 'active'
+                AND lower(regexp_replace(trim(report_user.name), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${cashierNameParam}), '\\s+', ' ', 'g'))
+            )
+            AND (
+              lower(regexp_replace(trim(cashier), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${cashierNameParam}), '\\s+', ' ', 'g'))
+              OR lower(regexp_replace(trim(data->>'cashier'), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${cashierNameParam}), '\\s+', ' ', 'g'))
+            )
+          )
+        )`);
       } else {
         where.push(`data->>'cashierId' = ${cashierIdParam}`);
       }
@@ -387,7 +423,8 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
       FROM sale_rows
       WHERE ${where.join(' AND ')}
       GROUP BY COALESCE(NULLIF(data->>'cashierId', ''), 'name:' || cashier), cashier
-      ORDER BY revenue DESC, cashier ASC
+      ORDER BY revenue DESC, cashier ASC,
+               COALESCE(NULLIF(data->>'cashierId', ''), 'name:' || cashier) ASC
       LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
@@ -409,10 +446,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
 
   if (report === 'sales-by-cashier-detail') {
     const detailValues: unknown[] = [auth.tenantId];
-    const detailWhere: string[] = [
-      'tenant_id = $1',
-      "status = 'completed'",
-    ];
+    const detailWhere: string[] = ['tenant_id = $1', "status = 'completed'"];
     // Use the same indexed sales source as the cashier summary. Older sales may
     // have cashier identity in the indexed column even when their JSON payload
     // predates cashierId, so matching only data->>'cashierId' silently hides them.
@@ -425,8 +459,20 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         const detailCashierNameParam = `$${detailValues.length}`;
         detailWhere.push(`(
           data->>'cashierId' = ${detailCashierIdParam}
-          OR lower(regexp_replace(trim(cashier), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
-          OR lower(regexp_replace(trim(data->>'cashier'), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
+          OR (
+            coalesce(data->>'cashierId', '') = ''
+            AND 1 = (
+              SELECT count(*)
+              FROM pos_app_users report_user
+              WHERE report_user.tenant_id = $1
+                AND report_user.status = 'active'
+                AND lower(regexp_replace(trim(report_user.name), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
+            )
+            AND (
+              lower(regexp_replace(trim(cashier), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
+              OR lower(regexp_replace(trim(data->>'cashier'), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
+            )
+          )
         )`);
       } else {
         detailWhere.push(`(
@@ -527,7 +573,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     const result = await getPosPool().query(
       `
       SELECT id, action, entity_type AS "entityType", entity_id AS "entityId",
-             operation_id AS "operationId", user_id AS "userId", metadata,
+             operation_id AS "operationId", user_id AS "userId",
              created_at AS "createdAt"
       FROM pos_audit_log
       WHERE ${where.join(' AND ')}
@@ -557,21 +603,77 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     return NextResponse.json({ rows: result.rows.map((row) => row.data), limit, offset });
   }
 
+  if (report === 'stock-ledger') {
+    appendDateRange(params, "(data->>'createdAt')::timestamptz", values, where);
+    where.push("store_name = 'stockMovements'");
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `
+      SELECT data
+      FROM pos_tenant_records
+      WHERE ${where.join(' AND ')}
+      ORDER BY (data->>'createdAt')::timestamptz DESC, record_id DESC
+      LIMIT $${values.length - 1} OFFSET $${values.length}
+      `,
+      values
+    );
+    return NextResponse.json({ rows: result.rows.map((row) => row.data), limit, offset });
+  }
+
+  if (report === 'customers') {
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `
+      ${SALES_SOURCE_CTE},
+      customer_totals AS (
+        SELECT lower(regexp_replace(trim(customer_name), '\\s+', ' ', 'g')) AS customer_key,
+               coalesce(sum(grand_total) FILTER (WHERE status = 'completed'), 0)::float8 AS total_spend,
+               coalesce(sum(amount_due) FILTER (WHERE status = 'completed'), 0)::float8 AS credit_due
+        FROM sale_rows
+        WHERE tenant_id = $1 AND nullif(trim(customer_name), '') IS NOT NULL
+        GROUP BY lower(regexp_replace(trim(customer_name), '\\s+', ' ', 'g'))
+      )
+      SELECT customers.data,
+             coalesce(customer_totals.total_spend, 0)::float8 AS total_spend,
+             coalesce(customer_totals.credit_due, 0)::float8 AS credit_due
+      FROM pos_tenant_records customers
+      LEFT JOIN customer_totals
+        ON customer_totals.customer_key = lower(regexp_replace(trim(customers.data->>'name'), '\\s+', ' ', 'g'))
+      WHERE customers.tenant_id = $1 AND customers.store_name = 'customers'
+      ORDER BY lower(customers.data->>'name') ASC, customers.record_id ASC
+      LIMIT $${values.length - 1} OFFSET $${values.length}
+      `,
+      values
+    );
+    return NextResponse.json({
+      rows: result.rows.map((row) => ({
+        ...row.data,
+        totalSpend: Number(row.total_spend ?? 0),
+        creditDue: Number(row.credit_due ?? 0),
+      })),
+      limit,
+      offset,
+    });
+  }
+
   if (report === 'sales-by-product') {
-    appendDateRange(params, 'sold_at', values, where);
+    const itemWhere = ['items.tenant_id = $1', "sales.status = 'completed'"];
+    appendDateRange(params, 'items.sold_at', values, itemWhere);
     values.push(limit, offset);
     const result = await getPosPool().query(
       `
       SELECT
-        inventory_item_id AS "inventoryItemId",
-        product_name AS name,
-        coalesce(sum(quantity), 0)::float8 AS qty,
-        coalesce(sum(line_total), 0)::float8 AS revenue,
-        coalesce(sum(gross_profit), 0)::float8 AS profit
-      FROM pos_tenant_sale_items
-      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      GROUP BY inventory_item_id, product_name
-      ORDER BY revenue DESC
+        items.inventory_item_id AS "inventoryItemId",
+        items.product_name AS name,
+        coalesce(sum(items.quantity), 0)::float8 AS qty,
+        coalesce(sum(items.line_total), 0)::float8 AS revenue,
+        coalesce(sum(items.gross_profit), 0)::float8 AS profit
+      FROM pos_tenant_sale_items items
+      JOIN pos_tenant_sales sales
+        ON sales.tenant_id = items.tenant_id AND sales.id = items.sale_id
+      WHERE ${itemWhere.join(' AND ')}
+      GROUP BY items.inventory_item_id, items.product_name
+      ORDER BY revenue DESC, items.product_name ASC, items.inventory_item_id ASC
       LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
@@ -587,19 +689,22 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   }
 
   if (report === 'sales-by-category') {
-    appendDateRange(params, 'sold_at', values, where);
+    const itemWhere = ['items.tenant_id = $1', "sales.status = 'completed'"];
+    appendDateRange(params, 'items.sold_at', values, itemWhere);
     values.push(limit, offset);
     const result = await getPosPool().query(
       `
       SELECT
-        category,
-        coalesce(sum(quantity), 0)::float8 AS qty,
-        coalesce(sum(line_total), 0)::float8 AS revenue,
-        coalesce(sum(gross_profit), 0)::float8 AS profit
-      FROM pos_tenant_sale_items
-      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      GROUP BY category
-      ORDER BY revenue DESC
+        items.category,
+        coalesce(sum(items.quantity), 0)::float8 AS qty,
+        coalesce(sum(items.line_total), 0)::float8 AS revenue,
+        coalesce(sum(items.gross_profit), 0)::float8 AS profit
+      FROM pos_tenant_sale_items items
+      JOIN pos_tenant_sales sales
+        ON sales.tenant_id = items.tenant_id AND sales.id = items.sale_id
+      WHERE ${itemWhere.join(' AND ')}
+      GROUP BY items.category
+      ORDER BY revenue DESC, items.category ASC
       LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
@@ -616,6 +721,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
 
   if (report === 'payment-methods') {
     appendDateRange(params, 'timestamp', values, where);
+    where.push("status = 'completed'");
     values.push(limit, offset);
     const result = await getPosPool().query(
       `
@@ -629,12 +735,22 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
       FROM sale_rows
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       GROUP BY payment_method
-      ORDER BY total DESC
+      ORDER BY total DESC, payment_method ASC
       LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
     );
-    return NextResponse.json({ rows: result.rows, limit, offset });
+    return NextResponse.json({
+      rows: result.rows.map((row) => ({
+        ...row,
+        count: Number(row.count ?? 0),
+        collected: Number(row.collected ?? 0),
+        receivable: Number(row.receivable ?? 0),
+        total: Number(row.total ?? 0),
+      })),
+      limit,
+      offset,
+    });
   }
 
   return NextResponse.json({ rows: [], limit, offset });
@@ -656,7 +772,7 @@ async function getSalesMetrics(request: NextRequest, auth: AuthContext) {
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed'), 0)::float8 AS revenue,
       coalesce(sum(gross_profit) FILTER (WHERE status = 'completed'), 0)::float8 AS gross_profit,
       coalesce(sum(amount_due) FILTER (WHERE status = 'completed'), 0)::float8 AS receivables,
-      coalesce(sum(tax_amount) FILTER (WHERE status = 'completed' AND payment_method <> 'credit'), 0)::float8 AS vat_collected,
+      coalesce(sum(tax_amount) FILTER (WHERE status = 'completed'), 0)::float8 AS vat_collected,
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed' AND payment_method = 'cash'), 0)::float8 AS cash_sales,
       coalesce(sum(grand_total) FILTER (WHERE status = 'completed' AND payment_method <> 'cash'), 0)::float8 AS non_cash_sales
     FROM sale_rows
@@ -695,20 +811,22 @@ async function getSalesMetrics(request: NextRequest, auth: AuthContext) {
   );
 
   const topProductValues: unknown[] = [auth.tenantId];
-  const topProductWhere: string[] = ['tenant_id = $1'];
-  appendDateRange(params, 'sold_at', topProductValues, topProductWhere);
+  const topProductWhere: string[] = ['items.tenant_id = $1', "sales.status = 'completed'"];
+  appendDateRange(params, 'items.sold_at', topProductValues, topProductWhere);
   const topProductRangeSql = `WHERE ${topProductWhere.join(' AND ')}`;
   const topProductsResult = await getPosPool().query(
     `
     SELECT
-      inventory_item_id AS "inventoryItemId",
-      product_name AS name,
-      coalesce(sum(quantity), 0)::float8 AS qty,
-      coalesce(sum(line_total), 0)::float8 AS revenue,
-      coalesce(sum(gross_profit), 0)::float8 AS profit
-    FROM pos_tenant_sale_items
+      items.inventory_item_id AS "inventoryItemId",
+      items.product_name AS name,
+      coalesce(sum(items.quantity), 0)::float8 AS qty,
+      coalesce(sum(items.line_total), 0)::float8 AS revenue,
+      coalesce(sum(items.gross_profit), 0)::float8 AS profit
+    FROM pos_tenant_sale_items items
+    JOIN pos_tenant_sales sales
+      ON sales.tenant_id = items.tenant_id AND sales.id = items.sale_id
     ${topProductRangeSql}
-    GROUP BY inventory_item_id, product_name
+    GROUP BY items.inventory_item_id, items.product_name
     ORDER BY revenue DESC
     LIMIT 10
     `,
@@ -842,7 +960,7 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
   const offset = clampOffset(params.get('offset'));
   const cursor = decodeCursor(params.get('cursor'));
   const values: unknown[] = [auth.tenantId];
-  const where: string[] = ["tenant_id = $1", "product_status = 'active'"];
+  const where: string[] = ['tenant_id = $1', "product_status = 'active'"];
 
   const q = params.get('q')?.trim();
   if (q) {
@@ -964,6 +1082,7 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    assertTenantActive(auth);
     const storeName = getStoreName(request);
     await assertRetailOnlyFeature(auth, storeName);
     if (
@@ -980,9 +1099,7 @@ export async function GET(request: NextRequest) {
         auth.user.role === 'super-admin' ||
         auth.user.permissions.includes('users');
       const canViewCashierDirectory =
-        isUserAdministrator ||
-        auth.user.permissions.includes('reports') ||
-        isViewOnlyUser(auth);
+        isUserAdministrator || auth.user.permissions.includes('reports') || isViewOnlyUser(auth);
       if (!canViewCashierDirectory) {
         return NextResponse.json([auth.user]);
       }
@@ -1182,7 +1299,11 @@ export async function PUT(request: NextRequest) {
         const name = typeof record.name === 'string' ? record.name.trim() : '';
         if (!name) throw new HttpError(400, 'User name is required', 'VALIDATION_ERROR');
         if (!email && !phone) {
-          throw new HttpError(400, 'Provide an email address or phone number for this user to sign in', 'LOGIN_IDENTIFIER_REQUIRED');
+          throw new HttpError(
+            400,
+            'Provide an email address or phone number for this user to sign in',
+            'LOGIN_IDENTIFIER_REQUIRED'
+          );
         }
         const existing = await getPosPool().query(
           `SELECT * FROM pos_app_users WHERE tenant_id = $1 AND id = $2`,
@@ -1214,7 +1335,11 @@ export async function PUT(request: NextRequest) {
             [record.id, phone]
           );
           if (phoneConflict.rowCount) {
-            throw new HttpError(409, `This phone number already belongs to ${phoneConflict.rows[0]?.name ?? 'another user'}`, 'DUPLICATE_PHONE');
+            throw new HttpError(
+              409,
+              `This phone number already belongs to ${phoneConflict.rows[0]?.name ?? 'another user'}`,
+              'DUPLICATE_PHONE'
+            );
           }
         }
         const allowedRoles = new Set([
@@ -1245,23 +1370,47 @@ export async function PUT(request: NextRequest) {
         const protectedRoles = ['owner', 'super-admin', 'manager'];
         const isSelf = current?.id === auth.user.id;
         if (isSelf && current && requestedRole !== current.role) {
-          throw new HttpError(403, 'You cannot change your own role.', 'SELF_ROLE_CHANGE_FORBIDDEN');
+          throw new HttpError(
+            403,
+            'You cannot change your own role.',
+            'SELF_ROLE_CHANGE_FORBIDDEN'
+          );
         }
         if (isSelf && current && requestedStatus !== current.status) {
-          throw new HttpError(403, 'You cannot suspend or reactivate your own account.', 'SELF_STATUS_CHANGE_FORBIDDEN');
+          throw new HttpError(
+            403,
+            'You cannot suspend or reactivate your own account.',
+            'SELF_STATUS_CHANGE_FORBIDDEN'
+          );
         }
         if (isSelf && current && Array.isArray(record.permissions)) {
-          const currentPermissions = [...(Array.isArray(current.permissions) ? current.permissions : [])].sort();
-          const requestedPermissionsForSelf = [...record.permissions.filter((permission) => typeof permission === 'string')].sort();
+          const currentPermissions = [
+            ...(Array.isArray(current.permissions) ? current.permissions : []),
+          ].sort();
+          const requestedPermissionsForSelf = [
+            ...record.permissions.filter((permission) => typeof permission === 'string'),
+          ].sort();
           if (JSON.stringify(currentPermissions) !== JSON.stringify(requestedPermissionsForSelf)) {
-            throw new HttpError(403, 'You cannot change your own permissions.', 'SELF_PERMISSION_CHANGE_FORBIDDEN');
+            throw new HttpError(
+              403,
+              'You cannot change your own permissions.',
+              'SELF_PERMISSION_CHANGE_FORBIDDEN'
+            );
           }
         }
         if (requestedRole === 'super-admin' && auth.user.role !== 'super-admin') {
-          throw new HttpError(403, 'Only a super admin can grant the super-admin role.', 'SUPER_ADMIN_ROLE_REQUIRED');
+          throw new HttpError(
+            403,
+            'Only a super admin can grant the super-admin role.',
+            'SUPER_ADMIN_ROLE_REQUIRED'
+          );
         }
         if (current?.role === 'super-admin' && auth.user.role !== 'super-admin') {
-          throw new HttpError(403, 'Only a super admin can modify a super-admin account.', 'SUPER_ADMIN_ROLE_REQUIRED');
+          throw new HttpError(
+            403,
+            'Only a super admin can modify a super-admin account.',
+            'SUPER_ADMIN_ROLE_REQUIRED'
+          );
         }
         if (
           !actingUserIsAdmin &&
@@ -1281,7 +1430,9 @@ export async function PUT(request: NextRequest) {
                 getSubscriptionPlan('delux').permissions.includes(permission as Permission)
             )
           : Array.isArray(current?.permissions)
-            ? (current.permissions as unknown[]).filter((permission): permission is Permission => typeof permission === 'string')
+            ? (current.permissions as unknown[]).filter(
+                (permission): permission is Permission => typeof permission === 'string'
+              )
             : [];
         if (
           !actingUserIsAdmin &&
@@ -1346,7 +1497,13 @@ export async function PUT(request: NextRequest) {
         savedUsers.push(safeUser);
         await getPosPool().query(
           "INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, after_data) VALUES ($1, $2, $3, 'user', $4, $5::jsonb)",
-          [auth.tenantId, auth.user.id, current ? 'user.updated' : 'user.created', safeUser.id, JSON.stringify(safeUser)]
+          [
+            auth.tenantId,
+            auth.user.id,
+            current ? 'user.updated' : 'user.created',
+            safeUser.id,
+            JSON.stringify(safeUser),
+          ]
         );
       }
       return NextResponse.json({ ok: true, users: savedUsers });
@@ -1556,7 +1713,12 @@ export async function DELETE(request: NextRequest) {
       ]);
       await getPosPool().query(
         "INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, metadata) VALUES ($1, $2, 'user.deleted', 'user', $3, $4::jsonb)",
-        [auth.tenantId, auth.user.id, id, JSON.stringify({ targetRole: target.rows[0]?.role ?? null })]
+        [
+          auth.tenantId,
+          auth.user.id,
+          id,
+          JSON.stringify({ targetRole: target.rows[0]?.role ?? null }),
+        ]
       );
       return NextResponse.json({ ok: true });
     }

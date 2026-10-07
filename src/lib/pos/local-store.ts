@@ -160,6 +160,7 @@ async function apiRequest<T>(
   });
   const response = await fetch(`/api/pos-store?${query.toString()}`, {
     ...init,
+    cache: 'no-store',
     signal: init?.signal ?? AbortSignal.timeout(10_000),
     headers: {
       'Content-Type': 'application/json',
@@ -535,10 +536,14 @@ export async function loadInventoryPage(
   if (shouldUsePostgresStore()) {
     try {
       const { signal, ...params } = input;
-      const result = await apiRequest<InventoryPageResult>('inventory', { signal }, {
-        ...params,
-        limit: input.limit ?? 100,
-      });
+      const result = await apiRequest<InventoryPageResult>(
+        'inventory',
+        { signal },
+        {
+          ...params,
+          limit: input.limit ?? 100,
+        }
+      );
       void putManyInBrowser('inventory', result.items).catch((error) =>
         console.warn('Unable to cache inventory in this browser', error)
       );
@@ -630,9 +635,10 @@ export async function loadSalesMetrics(
   }
 
   const [sales, expenses] = await Promise.all([loadSales(), loadExpenses()]);
-  const inRange = (value: string) =>
-    (!input.from || value.slice(0, 10) >= input.from) &&
-    (!input.to || value.slice(0, 10) <= input.to);
+  const inRange = (value: string) => {
+    const date = reportDateKey(value);
+    return Boolean(date && (!input.from || date >= input.from) && (!input.to || date <= input.to));
+  };
   const completed = sales.filter((sale) => sale.status === 'completed' && inRange(sale.timestamp));
   const recordedExpenses = expenses.filter(
     (expense) => expense.status === 'recorded' && inRange(expense.incurredAt)
@@ -695,6 +701,7 @@ export async function loadReportRows<T = unknown>(input: {
   cashierName?: string;
   limit?: number;
   offset?: number;
+  requireServer?: boolean;
 }): Promise<ReportRowsResult<T>> {
   if (shouldUsePostgresStore()) {
     try {
@@ -708,7 +715,7 @@ export async function loadReportRows<T = unknown>(input: {
         offset: input.offset ?? 0,
       });
     } catch (error) {
-      if (!isNetworkFailure(error)) throw error;
+      if (!isNetworkFailure(error) || input.requireServer) throw error;
     }
   }
 
@@ -723,7 +730,9 @@ export async function loadReportRows<T = unknown>(input: {
         const sameCashier =
           !input.cashierId ||
           sale.cashierId === input.cashierId ||
-          (selectedName !== undefined && sale.cashier.trim().toLowerCase() === selectedName);
+          (!sale.cashierId &&
+            selectedName !== undefined &&
+            sale.cashier.trim().toLowerCase() === selectedName);
         return Boolean(
           date &&
           sameCashier &&
@@ -945,7 +954,9 @@ export async function saveInventoryItems(items: InventoryItem[]): Promise<void> 
 export async function loadStockMovements(): Promise<StockMovement[]> {
   if (shouldUsePostgresStore()) {
     try {
-      const movements = await apiRequest<StockMovement[]>('stockMovements', undefined, { limit: 1000 });
+      const movements = await apiRequest<StockMovement[]>('stockMovements', undefined, {
+        limit: 1000,
+      });
       void putManyInBrowser('stockMovements', movements).catch(() => undefined);
       return movements.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     } catch (error) {
@@ -1161,7 +1172,10 @@ export async function discardLocalSyncOperation(operationId: string): Promise<vo
     getAllFromBrowser<StockMovement>('stockMovements'),
   ]);
   await Promise.all([
-    replaceBrowserStore('syncQueue', queue.filter((item) => item.operationId !== operationId)),
+    replaceBrowserStore(
+      'syncQueue',
+      queue.filter((item) => item.operationId !== operationId)
+    ),
     replaceBrowserStore(
       'stockMovements',
       movements.filter((movement) => movement.operationId !== operationId)

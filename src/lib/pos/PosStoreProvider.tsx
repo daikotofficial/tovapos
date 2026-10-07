@@ -465,7 +465,13 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         storedSettings,
         storedQueue,
       ] = await Promise.all([
-        canView('inventory') || can('add-product') || can('edit-product') || can('adjust-stock') || can('delete-product') || can('checkout') || canView('reports')
+        canView('inventory') ||
+        can('add-product') ||
+        can('edit-product') ||
+        can('adjust-stock') ||
+        can('delete-product') ||
+        can('checkout') ||
+        canView('reports')
           ? safely('Inventory', loadInventory([]), [])
           : Promise.resolve([]),
         canView('reports') || can('credit-sales') || can('refunds')
@@ -478,10 +484,10 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         canView('expenses') || canView('reports')
           ? safely('Expenses', loadExpenses(), [])
           : Promise.resolve([]),
-        canView('customers') || can('checkout')
+        canView('customers') || can('checkout') || canView('reports')
           ? safely('Customers', loadCustomers(defaultCustomers), [])
           : Promise.resolve([]),
-        canView('vendors') || canView('inventory')
+        canView('vendors') || canView('inventory') || canView('reports')
           ? safely('Suppliers', loadVendors(defaultVendors), [])
           : Promise.resolve([]),
         safely('Business settings', loadSettings(defaultSettings), defaultSettings),
@@ -569,7 +575,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         (item) =>
           item.status === 'pending' ||
           (item.status === 'failed' &&
-            !/changed before|was deleted|would make quantity negative|SKU or barcode/i.test(item.lastError ?? ''))
+            !/changed before|was deleted|would make quantity negative|SKU or barcode/i.test(
+              item.lastError ?? ''
+            ))
       )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (pending.length === 0) return;
@@ -864,10 +872,12 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       setStockMovements((previous) => previous.filter((item) => item.operationId !== operationId));
       if (authoritative[0]) {
         await cacheInventoryLocally(authoritative);
-        setInventory((previous) => sortInventory([
-          ...previous.filter((item) => item.id !== inventoryItem.entityId),
-          authoritative[0],
-        ]));
+        setInventory((previous) =>
+          sortInventory([
+            ...previous.filter((item) => item.id !== inventoryItem.entityId),
+            authoritative[0],
+          ])
+        );
       } else {
         await deleteStoredInventory(inventoryItem.entityId);
         setInventory((previous) => previous.filter((item) => item.id !== inventoryItem.entityId));
@@ -1070,7 +1080,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       hasPermission(permission) ||
       Boolean(
         currentUser?.permissions.includes('view-only') &&
-          ['dashboard', 'reports', 'export-reports'].includes(permission)
+        ['dashboard', 'reports', 'export-reports'].includes(permission)
       ),
     [currentUser?.permissions, hasPermission]
   );
@@ -1089,7 +1099,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       if (existingItem && !hasPermission('edit-product')) {
         throw new Error('Your role is not allowed to edit products.');
       }
-      if (existingItem && item.currentQty !== existingItem.currentQty && !hasPermission('adjust-stock')) {
+      if (
+        existingItem &&
+        item.currentQty !== existingItem.currentQty &&
+        !hasPermission('adjust-stock')
+      ) {
         throw new Error('Your role is not allowed to adjust stock quantity.');
       }
       const planUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
@@ -1239,13 +1253,22 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     [currentUser?.name, hasPermission, inventory, isOnline, settings]
   );
 
-  const applyInventorySnapshot = useCallback(async (item: InventoryItem, movement?: StockMovement) => {
-    const normalized = normalizeInventoryItem(item);
-    await cacheInventoryLocally([normalized]);
-    if (movement) await cacheStockMovementsLocally([movement]);
-    setInventory((prev) => sortInventory([...prev.filter((entry) => entry.id !== normalized.id), normalized]));
-    if (movement) setStockMovements((prev) => [movement, ...prev.filter((entry) => entry.id !== movement.id)]);
-  }, []);
+  const applyInventorySnapshot = useCallback(
+    async (item: InventoryItem, movement?: StockMovement) => {
+      const normalized = normalizeInventoryItem(item);
+      await cacheInventoryLocally([normalized]);
+      if (movement) await cacheStockMovementsLocally([movement]);
+      setInventory((prev) =>
+        sortInventory([...prev.filter((entry) => entry.id !== normalized.id), normalized])
+      );
+      if (movement)
+        setStockMovements((prev) => [
+          movement,
+          ...prev.filter((entry) => entry.id !== movement.id),
+        ]);
+    },
+    []
+  );
 
   const deleteInventoryItem = useCallback(
     async (inventoryId: string) => {
@@ -1261,15 +1284,24 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       const operationId = createOperationId('inventory-delete');
       const queueItem = {
         ...createSyncQueueItem({
-          operationId, entity: 'inventory', entityId: inventoryId, action: 'delete',
-          payload: { id: inventoryId }, conflictStrategy: 'server-wins',
+          operationId,
+          entity: 'inventory',
+          entityId: inventoryId,
+          action: 'delete',
+          payload: { id: inventoryId },
+          conflictStrategy: 'server-wins',
         }),
         idempotencyKey: `inventory-delete:${operationId}`,
       };
       await discardPendingInventoryOperations(inventoryId);
-      if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' && typeof navigator !== 'undefined' && isOnline) {
+      if (
+        process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' &&
+        typeof navigator !== 'undefined' &&
+        isOnline
+      ) {
         const response = await fetch('/api/pos-store?store=inventory', {
-          method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: inventoryId }),
         });
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -1284,38 +1316,41 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     [currentUser, inventory, isOnline, settings]
   );
 
-  const upsertUser = useCallback(async (user: TovaUser) => {
-    const transport = { ...user, updatedAt: new Date().toISOString() };
-    if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
-      if (!isOnline) throw new Error('User management requires an internet connection.');
-      const response = await fetch('/api/pos-store?store=users', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(transport),
-      });
-      const payload = (await response.json().catch(() => null)) as {
-        users?: TovaUser[];
-        error?: string;
-      } | null;
-      if (!response.ok || !payload?.users?.[0]) {
-        throw new Error(payload?.error ?? 'Unable to save user account.');
+  const upsertUser = useCallback(
+    async (user: TovaUser) => {
+      const transport = { ...user, updatedAt: new Date().toISOString() };
+      if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
+        if (!isOnline) throw new Error('User management requires an internet connection.');
+        const response = await fetch('/api/pos-store?store=users', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(transport),
+        });
+        const payload = (await response.json().catch(() => null)) as {
+          users?: TovaUser[];
+          error?: string;
+        } | null;
+        if (!response.ok || !payload?.users?.[0]) {
+          throw new Error(payload?.error ?? 'Unable to save user account.');
+        }
+        const saved = payload.users[0];
+        await saveUser(saved);
+        setUsers((prev) => [...prev.filter((existing) => existing.id !== saved.id), saved]);
+        return saved;
       }
-      const saved = payload.users[0];
-      await saveUser(saved);
-      setUsers((prev) => [...prev.filter((existing) => existing.id !== saved.id), saved]);
-      return saved;
-    }
 
-    const {
-      newPassword: _newPassword,
-      passwordHash: _passwordHash,
-      passwordSalt: _passwordSalt,
-      ...safe
-    } = transport;
-    await saveUser(safe);
-    setUsers((prev) => [...prev.filter((existing) => existing.id !== safe.id), safe]);
-    return safe;
-  }, [isOnline]);
+      const {
+        newPassword: _newPassword,
+        passwordHash: _passwordHash,
+        passwordSalt: _passwordSalt,
+        ...safe
+      } = transport;
+      await saveUser(safe);
+      setUsers((prev) => [...prev.filter((existing) => existing.id !== safe.id), safe]);
+      return safe;
+    },
+    [isOnline]
+  );
 
   const deleteUser = useCallback(
     async (userId: string) => {
@@ -1531,7 +1566,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       if (!hasPermission('checkout')) {
         throw new Error('Your role is not allowed to complete sales.');
       }
-      if (!currentUser || !input.shiftId || input.shiftId !== getOpenSalesShift(currentUser.id)?.id) {
+      if (
+        !currentUser ||
+        !input.shiftId ||
+        input.shiftId !== getOpenSalesShift(currentUser.id)?.id
+      ) {
         throw new Error('An open sales shift is required before completing a sale.');
       }
       if (!hasActiveSubscription(settings)) {
@@ -1634,7 +1673,8 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
             unitPrice: line.unitPrice,
             saleUnit: line.saleUnit ?? 'piece',
           };
-          if (current.saleUnit !== (line.saleUnit ?? 'piece')) throw new Error('A product cannot be sold with mixed units in one sale');
+          if (current.saleUnit !== (line.saleUnit ?? 'piece'))
+            throw new Error('A product cannot be sold with mixed units in one sale');
           current.quantity += line.quantity;
           current.discount = line.discount;
           current.unitPrice = line.unitPrice;
@@ -1665,11 +1705,13 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           if (!item) throw new Error('One of the scanned products no longer exists in inventory');
 
           const saleUnit = line.saleUnit ?? 'piece';
-          if (saleUnit !== 'piece' && !hasPackPricing(item)) throw new Error(`${item.name} has no pack/carton price configured`);
+          if (saleUnit !== 'piece' && !hasPackPricing(item))
+            throw new Error(`${item.name} has no pack/carton price configured`);
           const unitsPerSale = getUnitsPerSale(item, saleUnit);
           const stockQuantity = line.quantity * unitsPerSale;
           const canonicalPrice = getSaleUnitPrice(item, saleUnit);
-          if (Math.abs(line.unitPrice - canonicalPrice) > 0.001) throw new Error(`${item.name} price changed; please refresh and try again`);
+          if (Math.abs(line.unitPrice - canonicalPrice) > 0.001)
+            throw new Error(`${item.name} price changed; please refresh and try again`);
           assertSellable(item, stockQuantity);
 
           const updated = normalizeInventoryItem({

@@ -223,7 +223,9 @@ function paymentMethodLabel(
   if (method === 'split' && breakdown) {
     const parts = Object.entries(breakdown)
       .filter(([, amount]) => Number(amount) > 0)
-      .map(([name, amount]) => `${name.replace('-', ' ')} ${formatMoney(Number(amount), currency)}`);
+      .map(
+        ([name, amount]) => `${name.replace('-', ' ')} ${formatMoney(Number(amount), currency)}`
+      );
     return parts.length ? `Split: ${parts.join(' + ')}` : 'Split payment';
   }
   return method.replace('-', ' ');
@@ -267,6 +269,36 @@ function isWithinRange(value: string, range: ReportRange): boolean {
   const dateKey = reportDateKey(value);
   if (!dateKey) return false;
   return (!range.from || dateKey >= range.from) && (!range.to || dateKey <= range.to);
+}
+
+const REPORT_PAGE_SIZE = 500;
+const MAX_COMPLETE_REPORT_ROWS = 100_000;
+
+async function loadCompleteReportRows<T = unknown>(input: {
+  report: string;
+  from?: string;
+  to?: string;
+  cashierId?: string;
+  cashierName?: string;
+}): Promise<T[]> {
+  const rows: T[] = [];
+  let offset = 0;
+  while (true) {
+    const result = await loadReportRows<T>({
+      ...input,
+      limit: REPORT_PAGE_SIZE,
+      offset,
+      requireServer: true,
+    });
+    if (rows.length + result.rows.length > MAX_COMPLETE_REPORT_ROWS) {
+      throw new Error(
+        `This report exceeds ${MAX_COMPLETE_REPORT_ROWS.toLocaleString()} rows. Narrow the reporting period and try again.`
+      );
+    }
+    rows.push(...result.rows);
+    if (result.rows.length < REPORT_PAGE_SIZE) return rows;
+    offset += REPORT_PAGE_SIZE;
+  }
 }
 
 function csvEscape(value: string): string {
@@ -484,6 +516,7 @@ function ReportsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const {
+    tenant,
     sales,
     expenses,
     inventory,
@@ -501,8 +534,7 @@ function ReportsContent() {
   const hospitalityOnly = activeBusinessMode === 'hospitality';
   const requestedView = searchParams.get('view') as ReportView | null;
   const activeView: ReportView =
-    reports.some((report) => report.id === requestedView) &&
-    hasViewPermission('reports')
+    reports.some((report) => report.id === requestedView) && hasViewPermission('reports')
       ? requestedView!
       : 'overview';
   const [range, setRange] = useState<ReportRange>(() => createRange('1m'));
@@ -528,8 +560,20 @@ function ReportsContent() {
   }, [cashierId, cashierName]);
 
   useEffect(() => {
+    setSalesMetrics(null);
+    setInventoryMetrics(null);
+    setServerReportRows({});
+    setCashierId('all');
+    setCashierName('');
+    setDraftCashierId('all');
+    setDraftCashierName('');
+  }, [tenant?.id]);
+
+  useEffect(() => {
     let cancelled = false;
     async function loadServerMetrics() {
+      setSalesMetrics(null);
+      setInventoryMetrics(null);
       try {
         const [nextSalesMetrics, nextInventoryMetrics] = await Promise.all([
           loadSalesMetrics({
@@ -549,11 +593,23 @@ function ReportsContent() {
     return () => {
       cancelled = true;
     };
-  }, [range.from, range.preset, range.to, settings.expiryAlertDays, reportRefreshToken]);
+  }, [
+    range.from,
+    range.preset,
+    range.to,
+    settings.expiryAlertDays,
+    reportRefreshToken,
+    tenant?.id,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
     async function loadRows() {
+      if (!isOnline) {
+        setServerReportRows({});
+        setServerReportsLoading(false);
+        return;
+      }
       const from = range.preset === 'all' ? undefined : range.from;
       const to = range.preset === 'all' ? undefined : range.to;
       setServerReportsLoading(true);
@@ -571,33 +627,56 @@ function ReportsContent() {
           'voided',
           'audit',
           'input-vat',
+          'stock-ledger',
+          'customers',
         ];
         const rowReports =
           activeView === 'overview'
             ? ['sales']
-            : serverReportViews.includes(activeView) && activeView !== 'sales-by-cashier-detail'
-              ? [activeView]
-              : [];
+            : activeView === 'vat'
+              ? ['vat', 'input-vat']
+              : activeView === 'discounts'
+                ? ['sales']
+                : activeView === 'profit'
+                  ? ['sales-by-product']
+                  : serverReportViews.includes(activeView) &&
+                      activeView !== 'sales-by-cashier-detail'
+                    ? [activeView]
+                    : [];
+        if (!cancelled && rowReports.length > 0) {
+          setServerReportRows((current) => ({
+            ...current,
+            ...Object.fromEntries(rowReports.map((report) => [report, []])),
+          }));
+        }
         const results = await Promise.all(
           rowReports.map(async (report) => [
             report,
             report === 'sales-by-cashier-detail' && cashierId === 'all'
               ? []
-              : (await loadReportRows({
+              : await loadCompleteReportRows({
                   report,
                   from,
                   to,
-                  cashierId: report === 'sales-by-cashier' && cashierId !== 'all' ? cashierId : undefined,
-                  cashierName: report === 'sales-by-cashier' && cashierId !== 'all' ? cashierName : undefined,
-                  limit: report === 'vat' || report === 'input-vat' ? 500 : 100,
-                })).rows,
+                  cashierId:
+                    report === 'sales-by-cashier' && cashierId !== 'all' ? cashierId : undefined,
+                  cashierName:
+                    report === 'sales-by-cashier' && cashierId !== 'all' ? cashierName : undefined,
+                }),
           ])
         );
         if (!cancelled) {
           setServerReportRows((current) => ({ ...current, ...Object.fromEntries(results) }));
         }
       } catch (error) {
-        if (!cancelled) console.error('Failed to load server report rows', error);
+        if (!cancelled) {
+          console.error('Failed to load server report rows', error);
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : 'The complete report could not be loaded. No partial result is being shown.'
+          );
+        }
       } finally {
         if (!cancelled) setServerReportsLoading(false);
       }
@@ -606,10 +685,21 @@ function ReportsContent() {
     return () => {
       cancelled = true;
     };
-  }, [activeView, cashierId, cashierName, range.from, range.preset, range.to, reportRefreshToken, users]);
+  }, [
+    activeView,
+    cashierId,
+    cashierName,
+    range.from,
+    range.preset,
+    range.to,
+    reportRefreshToken,
+    isOnline,
+    tenant?.id,
+    users,
+  ]);
 
   useEffect(() => {
-    if (activeView !== 'sales-by-cashier' || cashierId === 'all') {
+    if (!isOnline || activeView !== 'sales-by-cashier' || cashierId === 'all') {
       setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': [] }));
       return;
     }
@@ -617,19 +707,24 @@ function ReportsContent() {
     async function loadCashierDetail() {
       setCashierDetailLoading(true);
       try {
-        const result = await loadReportRows<SaleTransaction>({
+        const rows = await loadCompleteReportRows<SaleTransaction>({
           report: 'sales-by-cashier-detail',
           from: range.preset === 'all' ? undefined : range.from,
           to: range.preset === 'all' ? undefined : range.to,
           cashierId,
           cashierName,
-          limit: 500,
-          offset: 0,
         });
         if (cancelled) return;
-        setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': result.rows }));
+        setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': rows }));
       } catch (error) {
-        if (!cancelled) console.error('Failed to load cashier detail report', error);
+        if (!cancelled) {
+          console.error('Failed to load cashier detail report', error);
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : 'The complete cashier report could not be loaded.'
+          );
+        }
       } finally {
         if (!cancelled) setCashierDetailLoading(false);
       }
@@ -638,7 +733,17 @@ function ReportsContent() {
     return () => {
       cancelled = true;
     };
-  }, [activeView, cashierId, cashierName, range.from, range.preset, range.to, reportRefreshToken]);
+  }, [
+    activeView,
+    cashierId,
+    cashierName,
+    range.from,
+    range.preset,
+    range.to,
+    reportRefreshToken,
+    isOnline,
+    tenant?.id,
+  ]);
 
   useEffect(() => {
     if (activeView !== 'sales-by-cashier' || cashierId === 'all') return;
@@ -649,7 +754,6 @@ function ReportsContent() {
     const completedSales = sales.filter(
       (sale) => sale.status === 'completed' && isWithinRange(sale.timestamp, range)
     );
-    const paidSales = completedSales.filter((sale) => !isCreditSale(sale));
     const creditSales = completedSales.filter(isCreditSale);
     const creditPaymentRows = sales
       .filter((sale) => sale.status === 'completed' && isCreditSale(sale))
@@ -657,8 +761,6 @@ function ReportsContent() {
         (sale.creditPayments ?? []).map((payment) => ({
           sale,
           payment,
-          profit:
-            sale.grandTotal > 0 ? profitForSale(sale) * (payment.amount / sale.grandTotal) : 0,
         }))
       )
       .filter((row) => isWithinRange(row.payment.recordedAt, range));
@@ -668,15 +770,12 @@ function ReportsContent() {
     const periodStockMovements = stockMovements.filter((movement) =>
       isWithinRange(movement.createdAt, range)
     );
-    const creditCollections = creditPaymentRows.reduce((sum, row) => sum + row.payment.amount, 0);
-    const revenue = paidSales.reduce((sum, sale) => sum + sale.grandTotal, 0) + creditCollections;
+    const revenue = completedSales.reduce((sum, sale) => sum + sale.grandTotal, 0);
     const receivables = creditSales.reduce(
       (sum, sale) => sum + Number(sale.amountDue ?? sale.grandTotal),
       0
     );
-    const grossProfit =
-      paidSales.reduce((sum, sale) => sum + profitForSale(sale), 0) +
-      creditPaymentRows.reduce((sum, row) => sum + row.profit, 0);
+    const grossProfit = completedSales.reduce((sum, sale) => sum + profitForSale(sale), 0);
     const expenseTotal = recordedExpenses.reduce((sum, expense) => sum + expense.amount, 0);
     const stockCostValue = inventory.reduce(
       (sum, item) => sum + item.currentQty * item.unitCost,
@@ -732,7 +831,7 @@ function ReportsContent() {
           (creditDueByCustomer.get(key) ?? 0) + Number(sale.amountDue ?? sale.grandTotal)
         );
       });
-    paidSales.forEach((sale) => {
+    completedSales.forEach((sale) => {
       sale.items.forEach((item) => {
         const current = productRows.get(item.inventoryItemId) ?? {
           name: item.name,
@@ -749,22 +848,23 @@ function ReportsContent() {
       });
     });
 
-    const metricRevenue = salesMetrics?.revenue ?? revenue;
-    const metricReceivables = salesMetrics?.receivables ?? receivables;
-    const metricGrossProfit = salesMetrics?.grossProfit ?? grossProfit;
-    const metricExpenseTotal = salesMetrics?.expenses ?? expenseTotal;
-    const metricProductRows =
-      salesMetrics?.topProducts ?? [...productRows.values()].sort((a, b) => b.revenue - a.revenue);
-    const metricExpenseCategories =
-      salesMetrics?.expenseCategories ??
-      [...expensesByCategory.entries()].sort((a, b) => b[1] - a[1]);
-    const metricStockCostValue = inventoryMetrics?.totalValue ?? stockCostValue;
-    const metricStockMargin =
-      inventoryMetrics?.potentialProfit ?? stockRetailValue - stockCostValue;
+    const metricRevenue = isOnline ? (salesMetrics?.revenue ?? 0) : revenue;
+    const metricReceivables = isOnline ? (salesMetrics?.receivables ?? 0) : receivables;
+    const metricGrossProfit = isOnline ? (salesMetrics?.grossProfit ?? 0) : grossProfit;
+    const metricExpenseTotal = isOnline ? (salesMetrics?.expenses ?? 0) : expenseTotal;
+    const metricProductRows = isOnline
+      ? (salesMetrics?.topProducts ?? [])
+      : [...productRows.values()].sort((a, b) => b.revenue - a.revenue);
+    const metricExpenseCategories = isOnline
+      ? (salesMetrics?.expenseCategories ?? [])
+      : [...expensesByCategory.entries()].sort((a, b) => b[1] - a[1]);
+    const metricStockCostValue = isOnline ? (inventoryMetrics?.totalValue ?? 0) : stockCostValue;
+    const metricStockMargin = isOnline
+      ? (inventoryMetrics?.potentialProfit ?? 0)
+      : stockRetailValue - stockCostValue;
 
     return {
       completedSales,
-      paidSales,
       creditSales,
       creditPaymentRows,
       recordedExpenses,
@@ -791,6 +891,7 @@ function ReportsContent() {
     expenses,
     inventory,
     inventoryMetrics,
+    isOnline,
     range,
     sales,
     salesMetrics,
@@ -801,7 +902,8 @@ function ReportsContent() {
 
   const serverSalesRows = (serverReportRows.sales ?? []) as SaleTransaction[];
   const serverVatRows = (serverReportRows.vat ?? []) as SaleTransaction[];
-  const serverCashierDetailRows = (serverReportRows['sales-by-cashier-detail'] ?? []) as SaleTransaction[];
+  const serverCashierDetailRows = (serverReportRows['sales-by-cashier-detail'] ??
+    []) as SaleTransaction[];
   const serverCashierRows = (serverReportRows['sales-by-cashier'] ?? []) as {
     cashierId: string;
     cashier: string;
@@ -835,14 +937,26 @@ function ReportsContent() {
   const serverRefundRows = (serverReportRows.refunds ?? []) as SaleTransaction[];
   const serverVoidedRows = (serverReportRows.voided ?? []) as SaleTransaction[];
   const serverInputVatRows = (serverReportRows['input-vat'] ?? []) as InputVatRecord[];
+  const serverStockMovementRows = (serverReportRows['stock-ledger'] ?? []) as typeof stockMovements;
+  const serverCustomerRows = (serverReportRows.customers ?? []) as Array<
+    (typeof customers)[number] & { creditDue: number }
+  >;
 
-  const displaySalesRows = serverSalesRows.length > 0 ? serverSalesRows : data.completedSales;
-  const vatSalesRows = serverVatRows.length > 0 ? serverVatRows : displaySalesRows;
+  const hasServerRows = (report: string) =>
+    Object.prototype.hasOwnProperty.call(serverReportRows, report);
+  const displaySalesRows = isOnline
+    ? hasServerRows('sales')
+      ? serverSalesRows
+      : []
+    : data.completedSales;
+  const vatSalesRows = isOnline ? (hasServerRows('vat') ? serverVatRows : []) : displaySalesRows;
   const vatOutputRows: { sale: SaleTransaction; item: SaleLineItem | null; vat: number }[] = [];
   vatSalesRows.forEach((sale) => {
     const taxableItems = sale.items.filter((item) => Number(item.taxAmount || 0) > 0);
     if (taxableItems.length > 0) {
-      taxableItems.forEach((item) => vatOutputRows.push({ sale, item, vat: Number(item.taxAmount || 0) }));
+      taxableItems.forEach((item) =>
+        vatOutputRows.push({ sale, item, vat: Number(item.taxAmount || 0) })
+      );
     } else if (Number(sale.taxAmount || 0) > 0) {
       vatOutputRows.push({ sale, item: null, vat: Number(sale.taxAmount || 0) });
     }
@@ -851,50 +965,76 @@ function ReportsContent() {
     cashierName ||
     users.find((user) => user.id === cashierId)?.name ||
     serverCashierRows.find((row) => row.cashierId === cashierId)?.cashier;
-  const hasServerCashierRows = Object.prototype.hasOwnProperty.call(serverReportRows, 'sales-by-cashier');
+  const selectedCashierKey = selectedCashierName?.trim().toLowerCase();
+  const selectedCashierNameIsUnique = Boolean(
+    selectedCashierKey &&
+    users.filter((user) => user.name.trim().toLowerCase() === selectedCashierKey).length === 1
+  );
+  const hasServerCashierRows = Object.prototype.hasOwnProperty.call(
+    serverReportRows,
+    'sales-by-cashier'
+  );
   const localCashierRows = Object.entries(
     data.completedSales
-      .filter((sale) =>
-        cashierId === 'all' ||
-        sale.cashierId === cashierId ||
-        (!sale.cashierId && sale.cashier === users.find((user) => user.id === cashierId)?.name)
+      .filter(
+        (sale) =>
+          cashierId === 'all' ||
+          sale.cashierId === cashierId ||
+          (!sale.cashierId &&
+            selectedCashierNameIsUnique &&
+            sale.cashier.trim().toLowerCase() === selectedCashierKey)
       )
-      .reduce((map, sale) => {
-        const key = sale.cashierId ?? `name:${sale.cashier}`;
-        const paymentAmounts = paymentAmountsForSale(sale);
-        const current = map[key] ?? {
-          cashierId: key,
-          cashier: sale.cashier,
-          transactions: 0,
-          revenue: 0,
-          profit: 0,
-          cash: 0,
-          card: 0,
-          transfer: 0,
-        };
-        current.transactions += 1;
-        current.revenue += sale.grandTotal;
-        current.profit += profitForSale(sale);
-        current.cash += paymentAmounts.cash ?? 0;
-        current.card += paymentAmounts.card ?? 0;
-        current.transfer += paymentAmounts['bank-transfer'] ?? 0;
-        map[key] = current;
-        return map;
-      }, {} as Record<string, { cashierId: string; cashier: string; transactions: number; revenue: number; profit: number; cash: number; card: number; transfer: number }>)
+      .reduce(
+        (map, sale) => {
+          const key = sale.cashierId ?? `name:${sale.cashier}`;
+          const paymentAmounts = paymentAmountsForSale(sale);
+          const current = map[key] ?? {
+            cashierId: key,
+            cashier: sale.cashier,
+            transactions: 0,
+            revenue: 0,
+            profit: 0,
+            cash: 0,
+            card: 0,
+            transfer: 0,
+          };
+          current.transactions += 1;
+          current.revenue += sale.grandTotal;
+          current.profit += profitForSale(sale);
+          current.cash += paymentAmounts.cash ?? 0;
+          current.card += paymentAmounts.card ?? 0;
+          current.transfer += paymentAmounts['bank-transfer'] ?? 0;
+          map[key] = current;
+          return map;
+        },
+        {} as Record<
+          string,
+          {
+            cashierId: string;
+            cashier: string;
+            transactions: number;
+            revenue: number;
+            profit: number;
+            cash: number;
+            card: number;
+            transfer: number;
+          }
+        >
+      )
   ).map(([, row]) => row);
   const displayCashierRows = isOnline
     ? hasServerCashierRows
       ? serverCashierRows
       : []
     : localCashierRows;
-  const selectedCashierKey = selectedCashierName?.trim().toLowerCase();
   const matchesSelectedCashier = (sale: SaleTransaction) =>
     cashierId !== 'all' &&
     (sale.cashierId === cashierId ||
-      (Boolean(selectedCashierKey) && sale.cashier.trim().toLowerCase() === selectedCashierKey));
-  const localCashierDetailRows = data.completedSales.filter((sale) =>
-    matchesSelectedCashier(sale)
-  );
+      (!sale.cashierId &&
+        selectedCashierNameIsUnique &&
+        Boolean(selectedCashierKey) &&
+        sale.cashier.trim().toLowerCase() === selectedCashierKey));
+  const localCashierDetailRows = data.completedSales.filter((sale) => matchesSelectedCashier(sale));
   const cashierDetailSales = isOnline
     ? serverCashierDetailRows.filter(
         (sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range)
@@ -903,7 +1043,31 @@ function ReportsContent() {
   const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
   );
-  const selectedCashierSummary = displayCashierRows.find((row) => row.cashierId === cashierId);
+  const selectedCashierSummary =
+    cashierId !== 'all' && displayCashierRows.length > 0
+      ? displayCashierRows.reduce(
+          (summary, row) => ({
+            cashierId,
+            cashier: selectedCashierName ?? row.cashier,
+            transactions: summary.transactions + row.transactions,
+            revenue: summary.revenue + row.revenue,
+            profit: summary.profit + row.profit,
+            cash: (summary.cash ?? 0) + (row.cash ?? 0),
+            card: (summary.card ?? 0) + (row.card ?? 0),
+            transfer: (summary.transfer ?? 0) + (row.transfer ?? 0),
+          }),
+          {
+            cashierId,
+            cashier: selectedCashierName ?? '',
+            transactions: 0,
+            revenue: 0,
+            profit: 0,
+            cash: 0,
+            card: 0,
+            transfer: 0,
+          }
+        )
+      : undefined;
   const localCashierTenderSummary = cashierDetailSales.reduce(
     (summary, sale) => {
       const amounts = paymentAmountsForSale(sale);
@@ -932,40 +1096,72 @@ function ReportsContent() {
   );
   const cashierSummaryLoading = isOnline && serverReportsLoading && !selectedCashierSummary;
 
-  const displayCreditSalesRows =
-    serverCreditSalesRows.length > 0 ? serverCreditSalesRows : data.creditSales;
-  const displayExpenseRows =
-    serverExpenseRows.length > 0 ? serverExpenseRows : data.recordedExpenses;
-  const displayProductRows = serverProductRows.length > 0 ? serverProductRows : data.productRows;
-  const displayCategoryRows =
-    serverCategoryRows.length > 0
+  const displayCreditSalesRows = isOnline
+    ? hasServerRows('credit-sales')
+      ? serverCreditSalesRows
+      : []
+    : data.creditSales;
+  const displayExpenseRows = isOnline
+    ? hasServerRows('expenses')
+      ? serverExpenseRows
+      : []
+    : data.recordedExpenses;
+  const displayProductRows = isOnline
+    ? hasServerRows('sales-by-product')
+      ? serverProductRows
+      : []
+    : data.productRows;
+  const displayCategoryRows = isOnline
+    ? hasServerRows('sales-by-category')
       ? serverCategoryRows
-      : Object.entries(
-          data.paidSales.reduce(
-            (map, sale) => {
-              sale.items.forEach((item) => {
-                const current = map[item.category] ?? { qty: 0, revenue: 0 };
-                current.qty += item.quantity;
-                current.revenue += item.lineTotal;
-                map[item.category] = current;
-              });
-              return map;
-            },
-            {} as Record<string, { qty: number; revenue: number }>
-          )
-        ).map(([category, row]) => ({ category, ...row }));
-  const displayPaymentRows = serverPaymentRows.length > 0 ? serverPaymentRows : data.paymentTotals;
-  const displayRefundRows =
-    serverRefundRows.length > 0
+      : []
+    : Object.entries(
+        data.completedSales.reduce(
+          (map, sale) => {
+            sale.items.forEach((item) => {
+              const current = map[item.category] ?? { qty: 0, revenue: 0 };
+              current.qty += item.quantity;
+              current.revenue += item.lineTotal;
+              map[item.category] = current;
+            });
+            return map;
+          },
+          {} as Record<string, { qty: number; revenue: number }>
+        )
+      ).map(([category, row]) => ({ category, ...row }));
+  const displayPaymentRows = isOnline
+    ? hasServerRows('payment-methods')
+      ? serverPaymentRows
+      : []
+    : data.paymentTotals;
+  const displayRefundRows = isOnline
+    ? hasServerRows('refunds')
       ? serverRefundRows
-      : sales.filter((sale) => sale.status === 'refunded' && isWithinRange(sale.timestamp, range));
-  const displayVoidedRows =
-    serverVoidedRows.length > 0
+      : []
+    : sales.filter((sale) => sale.status === 'refunded' && isWithinRange(sale.timestamp, range));
+  const displayVoidedRows = isOnline
+    ? hasServerRows('voided')
       ? serverVoidedRows
-      : sales.filter((sale) => sale.status === 'voided' && isWithinRange(sale.timestamp, range));
+      : []
+    : sales.filter((sale) => sale.status === 'voided' && isWithinRange(sale.timestamp, range));
+  const displayStockMovementRows = isOnline
+    ? hasServerRows('stock-ledger')
+      ? serverStockMovementRows
+      : []
+    : data.stockMovements;
+  const displayCustomerRows = isOnline
+    ? hasServerRows('customers')
+      ? serverCustomerRows
+      : []
+    : data.customerValue.map((customer) => ({
+        ...customer,
+        creditDue: data.creditDueByCustomer.get(customer.name.trim().toLowerCase()) ?? 0,
+      }));
 
   const maxPayment = Math.max(
-    ...data.paymentTotals.map((item) => item.total + item.creditCollected),
+    ...displayPaymentRows.map(
+      (item) => item.total + ('creditCollected' in item ? Number(item.creditCollected) : 0)
+    ),
     1
   );
   const maxExpense = Math.max(...data.expensesByCategory.map((item) => item[1]), 1);
@@ -1111,9 +1307,9 @@ function ReportsContent() {
       };
     }
 
-    if (activeView === 'profit') {
+    if (activeView === 'profit' || activeView === 'sales-by-product') {
       return {
-        filename: 'profit-report',
+        filename: activeView === 'profit' ? 'profit-report' : 'sales-by-product-report',
         headers: ['Product', 'Units', 'Revenue', 'Profit', 'Margin'],
         rows: displayProductRows.map((product) => [
           product.name,
@@ -1151,7 +1347,7 @@ function ReportsContent() {
             2
           ),
           item.receivable.toFixed(2),
-          (item.total + ('creditCollected' in item ? Number(item.creditCollected) : 0)).toFixed(2),
+          item.total.toFixed(2),
         ]),
       };
     }
@@ -1215,7 +1411,7 @@ function ReportsContent() {
           'By',
           'Sync',
         ],
-        rows: data.stockMovements.map((movement) => [
+        rows: displayStockMovementRows.map((movement) => [
           new Date(movement.createdAt).toLocaleString(),
           movement.productName,
           movement.sku,
@@ -1245,16 +1441,181 @@ function ReportsContent() {
           'Credit Due',
           'Total Spend',
         ],
-        rows: data.customerValue.map((customer) => [
+        rows: displayCustomerRows.map((customer) => [
           customer.name,
           customer.phone || '-',
           customer.email || '-',
           customer.address || '-',
           customer.loyaltyPoints.toString(),
           customer.creditLimit.toFixed(2),
-          (data.creditDueByCustomer.get(customer.name.trim().toLowerCase()) ?? 0).toFixed(2),
+          customer.creditDue.toFixed(2),
           customer.totalSpend.toFixed(2),
         ]),
+      };
+    }
+
+    if (activeView === 'sales-by-category') {
+      return {
+        filename: 'sales-by-category-report',
+        headers: ['Category', 'Units', 'Revenue'],
+        rows: displayCategoryRows.map((row) => [
+          row.category,
+          row.qty.toString(),
+          row.revenue.toFixed(2),
+        ]),
+      };
+    }
+
+    if (activeView === 'low-stock') {
+      return {
+        filename: 'low-stock-report',
+        headers: ['Product', 'SKU', 'Qty', 'Reorder', 'Status'],
+        rows: inventory
+          .filter((item) => item.currentQty <= item.reorderLevel)
+          .map((item) => [
+            item.name,
+            item.sku,
+            item.currentQty.toString(),
+            item.reorderLevel.toString(),
+            item.stockStatus,
+          ]),
+      };
+    }
+
+    if (activeView === 'expiring' || activeView === 'expired') {
+      const wantedStatus = activeView === 'expiring' ? 'expiring-soon' : 'expired';
+      return {
+        filename: `${activeView}-products-report`,
+        headers: ['Product', 'SKU', 'Batch', 'Expiry', 'Qty'],
+        rows: inventory
+          .filter((item) => item.stockStatus === wantedStatus)
+          .map((item) => [
+            item.name,
+            item.sku,
+            item.batchLot,
+            item.expiryDate,
+            item.currentQty.toString(),
+          ]),
+      };
+    }
+
+    if (activeView === 'suppliers') {
+      return {
+        filename: 'supplier-report',
+        headers: ['Supplier', 'Contact', 'Phone', 'Terms', 'Balance'],
+        rows: vendors.map((vendor) => [
+          vendor.name,
+          vendor.contactName,
+          vendor.phone,
+          vendor.paymentTerms,
+          vendor.outstandingBalance.toFixed(2),
+        ]),
+      };
+    }
+
+    if (activeView === 'vat') {
+      return {
+        filename: 'vat-report',
+        headers: ['Type', 'Reference', 'Date', 'Item / Vendor', 'VAT Amount', 'Tax Base'],
+        rows: [
+          ...vatOutputRows.map(({ sale, item, vat }) => [
+            'VAT collected',
+            sale.transactionId,
+            new Date(sale.timestamp).toLocaleString(),
+            item?.name ?? 'Sale VAT',
+            vat.toFixed(2),
+            Number(item?.lineTotal ?? sale.grandTotal).toFixed(2),
+          ]),
+          ...serverInputVatRows
+            .filter((record) => record.status === 'recorded')
+            .map((record) => [
+              'VAT paid',
+              record.invoiceNumber ?? record.recordNumber,
+              record.date,
+              record.vendorName,
+              record.inputVatAmount.toFixed(2),
+              record.goodsAmount.toFixed(2),
+            ]),
+        ],
+      };
+    }
+
+    if (activeView === 'discounts') {
+      return {
+        filename: 'discount-report',
+        headers: ['Receipt', 'Customer', 'Discount', 'Total'],
+        rows: displaySalesRows
+          .filter((sale) => sale.discountTotal > 0)
+          .map((sale) => [
+            sale.transactionId,
+            sale.customerName ?? 'Walk-in Customer',
+            sale.discountTotal.toFixed(2),
+            sale.grandTotal.toFixed(2),
+          ]),
+      };
+    }
+
+    if (activeView === 'refunds' || activeView === 'voided') {
+      const reportRows = activeView === 'refunds' ? displayRefundRows : displayVoidedRows;
+      return {
+        filename: `${activeView}-sales-report`,
+        headers: ['Receipt', 'Customer', 'Date', 'Total'],
+        rows: reportRows.map((sale) => [
+          sale.transactionId,
+          sale.customerName ?? 'Walk-in Customer',
+          new Date(sale.timestamp).toLocaleString(),
+          sale.grandTotal.toFixed(2),
+        ]),
+      };
+    }
+
+    if (activeView === 'audit') {
+      const auditRows =
+        isOnline && hasServerRows('audit')
+          ? serverReportRows.audit
+          : !isOnline
+            ? syncQueue.map((item) => ({
+                createdAt: item.createdAt,
+                entityType: item.entity,
+                action: item.action,
+                userId: '-',
+                operationId: item.operationId,
+              }))
+            : [];
+      return {
+        filename: 'audit-report',
+        headers: ['Created', 'Entity', 'Action', 'User', 'Operation'],
+        rows: auditRows.map((item) => {
+          const row = item as {
+            createdAt?: string;
+            entityType?: string;
+            action?: string;
+            userId?: string;
+            operationId?: string;
+          };
+          return [
+            row.createdAt ? new Date(row.createdAt).toLocaleString() : '-',
+            row.entityType ?? '-',
+            row.action ?? '-',
+            row.userId ?? '-',
+            row.operationId ?? '-',
+          ];
+        }),
+      };
+    }
+
+    if (activeView === 'cashier-closing' || activeView === 'end-of-day') {
+      return {
+        filename: `${activeView}-report`,
+        headers: ['Metric', 'Value'],
+        rows: [
+          ['Sales Revenue', data.revenue.toFixed(2)],
+          ['Credit Due', data.receivables.toFixed(2)],
+          ['Gross Profit', data.grossProfit.toFixed(2)],
+          ['Expenses', data.expenseTotal.toFixed(2)],
+          ['Net Profit', data.netProfit.toFixed(2)],
+          ['Pending Sync', data.pendingSync.toString()],
+        ],
       };
     }
 
@@ -1262,7 +1623,7 @@ function ReportsContent() {
       filename: 'overview-report',
       headers: ['Metric', 'Value'],
       rows: [
-        ['Sales Collected', data.revenue.toFixed(2)],
+        ['Sales Revenue', data.revenue.toFixed(2)],
         ['Credit Due', data.receivables.toFixed(2)],
         ['Gross Profit', data.grossProfit.toFixed(2)],
         ['Expenses', data.expenseTotal.toFixed(2)],
@@ -1275,41 +1636,43 @@ function ReportsContent() {
     cashierDetailItemRows,
     data,
     displayCreditSalesRows,
+    displayCustomerRows,
     displayExpenseRows,
     displayPaymentRows,
     displayProductRows,
     displaySalesRows,
     displayCashierRows,
+    displayCategoryRows,
+    displayRefundRows,
+    displayStockMovementRows,
+    displayVoidedRows,
     inventory,
+    isOnline,
+    serverInputVatRows,
+    serverReportRows,
     settings.currency,
+    syncQueue,
+    vatOutputRows,
+    vendors,
   ]);
 
   const exportReport = async (format: 'csv' | 'json' | 'excel' | 'pdf') => {
+    if (!isOnline) {
+      toast.error('Reconnect before exporting so the report can be verified against the server.');
+      return;
+    }
     let exportRows = exportTable.rows;
     if (activeView === 'sales-by-cashier' && cashierId !== 'all' && isOnline) {
-      const pageSize = 500;
-      const allCashierSales: SaleTransaction[] = [];
-      let offset = 0;
-
       try {
-        while (true) {
-          const result = await loadReportRows<SaleTransaction>({
+        const allCashierSales = (
+          await loadCompleteReportRows<SaleTransaction>({
             report: 'sales-by-cashier-detail',
             from: range.preset === 'all' ? undefined : range.from,
             to: range.preset === 'all' ? undefined : range.to,
             cashierId,
             cashierName,
-            limit: pageSize,
-            offset,
-          });
-          allCashierSales.push(
-            ...result.rows.filter(
-              (sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range)
-            )
-          );
-          if (result.rows.length < pageSize) break;
-          offset += pageSize;
-        }
+          })
+        ).filter((sale) => matchesSelectedCashier(sale) && isWithinRange(sale.timestamp, range));
         exportRows = allCashierSales.flatMap((sale) =>
           sale.items.map((item) => [
             new Date(sale.timestamp).toLocaleString(),
@@ -1337,7 +1700,9 @@ function ReportsContent() {
       ['Organization', settings.businessName || 'TOVAPOS'],
       ['Report', reportTitle],
       ['Range', rangeLabel],
-      ...(activeView === 'sales-by-cashier' ? [['Cashier', selectedCashierName ?? 'All cashiers']] : []),
+      ...(activeView === 'sales-by-cashier'
+        ? [['Cashier', selectedCashierName ?? 'All cashiers']]
+        : []),
       ['Generated', generatedAt],
     ];
     const fullRows = [...metadataRows, [], exportTable.headers, ...exportRows];
@@ -1449,7 +1814,12 @@ function ReportsContent() {
                       disabled={serverReportsLoading || cashierDetailLoading}
                       className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <RefreshCw size={13} className={serverReportsLoading || cashierDetailLoading ? 'animate-spin' : ''} />
+                      <RefreshCw
+                        size={13}
+                        className={
+                          serverReportsLoading || cashierDetailLoading ? 'animate-spin' : ''
+                        }
+                      />
                       {serverReportsLoading || cashierDetailLoading ? 'Refreshing' : 'Refresh'}
                     </button>
                   </div>
@@ -1458,9 +1828,9 @@ function ReportsContent() {
                     onChange={(value) => router.push(`/reports?view=${value}`)}
                     className="mt-1"
                     options={reports.map((report) => ({
-                        value: report.id,
-                        label: report.label,
-                      }))}
+                      value: report.id,
+                      label: report.label,
+                    }))}
                   />
                 </div>
               </div>
@@ -1522,12 +1892,15 @@ function ReportsContent() {
                 <div className="grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-[minmax(210px,1fr)_minmax(160px,180px)_minmax(160px,180px)_auto] lg:items-end">
                   {activeView === 'sales-by-cashier' && (
                     <label className="space-y-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Cashier</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Cashier
+                      </span>
                       <NiceSelect
                         value={draftCashierId}
                         onChange={(value) => {
                           setDraftCashierId(value);
-                          const nextCashierName = cashierOptions.find((option) => option.value === value)?.label ?? '';
+                          const nextCashierName =
+                            cashierOptions.find((option) => option.value === value)?.label ?? '';
                           setDraftCashierName(nextCashierName);
                         }}
                         options={cashierOptions}
@@ -1535,15 +1908,19 @@ function ReportsContent() {
                     </label>
                   )}
                   <label className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">From</span>
-                      <DatePicker
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                      From
+                    </span>
+                    <DatePicker
                       value={draftRange.from}
                       onChange={(from) => updateDraftDate('from', from)}
                     />
                   </label>
                   <label className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">To</span>
-                      <DatePicker
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                      To
+                    </span>
+                    <DatePicker
                       value={draftRange.to}
                       onChange={(to) => updateDraftDate('to', to)}
                     />
@@ -1567,6 +1944,16 @@ function ReportsContent() {
               </p>
             </section>
 
+            {!isOnline && (
+              <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                <p className="font-semibold">Offline report preview</p>
+                <p className="mt-1">
+                  These rows come from this device’s tenant-isolated cache and may not contain the
+                  complete history. Reconnect for authoritative totals and exports.
+                </p>
+              </section>
+            )}
+
             {activeView === 'overview' && (
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_380px]">
                 <ReportTable
@@ -1579,7 +1966,11 @@ function ReportsContent() {
                     .map((sale) => [
                       sale.transactionId,
                       sale.customerName ?? 'Walk-in Customer',
-                      paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
+                      paymentMethodLabel(
+                        sale.paymentMethod,
+                        sale.paymentBreakdown,
+                        settings.currency
+                      ),
                       salePaymentStatus(sale),
                       isCreditSale(sale)
                         ? formatMoney(0, settings.currency)
@@ -1689,7 +2080,7 @@ function ReportsContent() {
                 <ReportPanel title="Profit bridge">
                   <div className="space-y-3">
                     <SummaryLine
-                      label="Sales collected"
+                      label="Sales revenue"
                       value={formatMoney(data.revenue, settings.currency)}
                     />
                     <SummaryLine
@@ -1833,7 +2224,7 @@ function ReportsContent() {
                   'Sync',
                 ]}
                 empty="No stock movement records yet."
-                rows={data.stockMovements.map((movement) => [
+                rows={displayStockMovementRows.map((movement) => [
                   new Date(movement.createdAt).toLocaleString(),
                   movement.productName,
                   movement.sku,
@@ -1843,8 +2234,12 @@ function ReportsContent() {
                   movement.quantityBefore.toString(),
                   movement.quantityDelta.toString(),
                   movement.quantityAfter.toString(),
-                  movement.valueBefore === undefined ? '—' : formatMoney(movement.valueBefore, settings.currency),
-                  movement.valueAfter === undefined ? '—' : formatMoney(movement.valueAfter, settings.currency),
+                  movement.valueBefore === undefined
+                    ? '—'
+                    : formatMoney(movement.valueBefore, settings.currency),
+                  movement.valueAfter === undefined
+                    ? '—'
+                    : formatMoney(movement.valueAfter, settings.currency),
                   movement.reason,
                   movement.createdBy,
                   movement.syncStatus,
@@ -1867,17 +2262,14 @@ function ReportsContent() {
                   'Total Spend',
                 ]}
                 empty="No customer records."
-                rows={data.customerValue.map((customer) => [
+                rows={displayCustomerRows.map((customer) => [
                   customer.name,
                   customer.phone || '-',
                   customer.email || '-',
                   customer.address || '-',
                   customer.loyaltyPoints.toString(),
                   formatMoney(customer.creditLimit, settings.currency),
-                  formatMoney(
-                    data.creditDueByCustomer.get(customer.name.trim().toLowerCase()) ?? 0,
-                    settings.currency
-                  ),
+                  formatMoney(customer.creditDue, settings.currency),
                   formatMoney(customer.totalSpend, settings.currency),
                 ])}
               />
@@ -1889,12 +2281,15 @@ function ReportsContent() {
                 subtitle="Select a cashier above to inspect the itemized statement."
                 headers={['Cashier', 'Transactions', 'Revenue', 'Profit']}
                 empty="No cashier sales recorded in this period."
-                rows={displayCashierRows.slice().sort((left, right) => right.revenue - left.revenue).map((row) => [
-                  row.cashier,
-                  row.transactions.toString(),
-                  formatMoney(row.revenue, settings.currency),
-                  formatMoney(row.profit, settings.currency),
-                ])}
+                rows={displayCashierRows
+                  .slice()
+                  .sort((left, right) => right.revenue - left.revenue)
+                  .map((row) => [
+                    row.cashier,
+                    row.transactions.toString(),
+                    formatMoney(row.revenue, settings.currency),
+                    formatMoney(row.profit, settings.currency),
+                  ])}
               />
             )}
             {activeView === 'sales-by-cashier' && cashierId !== 'all' && (
@@ -1906,7 +2301,10 @@ function ReportsContent() {
                   ['Bank Transfer', cashierTenderSummary.transfer],
                   ['Other / Credit / Mobile', cashierOtherTender],
                 ].map(([label, amount]) => (
-                  <article key={String(label)} className="rounded-xl border border-border bg-white p-4 shadow-card">
+                  <article
+                    key={String(label)}
+                    className="rounded-xl border border-border bg-white p-4 shadow-card"
+                  >
                     <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
                     <p className="mt-2 text-2xl font-bold font-tabular">
                       {cashierSummaryLoading
@@ -2095,7 +2493,7 @@ function ReportsContent() {
                 subtitle="Discounts applied to completed sales"
                 headers={['Receipt', 'Customer', 'Discount', 'Total']}
                 empty="No discounts recorded yet."
-                rows={data.completedSales
+                rows={displaySalesRows
                   .filter((sale) => sale.discountTotal > 0)
                   .map((sale) => [
                     sale.transactionId,
@@ -2145,7 +2543,7 @@ function ReportsContent() {
                 headers={['Metric', 'Value']}
                 empty="No report data yet."
                 rows={[
-                  ['Sales', formatMoney(data.revenue, settings.currency)],
+                  ['Sales Revenue', formatMoney(data.revenue, settings.currency)],
                   ['Credit Due', formatMoney(data.receivables, settings.currency)],
                   ['Gross Profit', formatMoney(data.grossProfit, settings.currency)],
                   ['Expenses', formatMoney(data.expenseTotal, settings.currency)],
@@ -2161,15 +2559,17 @@ function ReportsContent() {
                 subtitle="Authoritative server audit events and local sync status"
                 headers={['Created', 'Entity', 'Action', 'User', 'Operation']}
                 empty="No audit events yet."
-                rows={(serverReportRows.audit?.length
+                rows={(isOnline && hasServerRows('audit')
                   ? serverReportRows.audit
-                  : syncQueue.map((item) => ({
-                      createdAt: item.createdAt,
-                      entityType: item.entity,
-                      action: item.action,
-                      userId: '-',
-                      operationId: item.operationId,
-                    })))!.map((item) => {
+                  : !isOnline
+                    ? syncQueue.map((item) => ({
+                        createdAt: item.createdAt,
+                        entityType: item.entity,
+                        action: item.action,
+                        userId: '-',
+                        operationId: item.operationId,
+                      }))
+                    : [])!.map((item) => {
                   const row = item as {
                     createdAt?: string;
                     entityType?: string;
@@ -2311,9 +2711,7 @@ function ReportTable({
             >
               Previous
             </button>
-            <span className="px-2 text-xs text-muted-foreground">
-              Page {serverPagination.page}
-            </span>
+            <span className="px-2 text-xs text-muted-foreground">Page {serverPagination.page}</span>
             <button
               type="button"
               onClick={serverPagination.onNext}
@@ -2323,28 +2721,30 @@ function ReportTable({
               Next
             </button>
           </div>
-        ) : totalPages > 1 && (
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              disabled={page === 1}
-              className="rounded px-2 py-1 text-xs disabled:opacity-40"
-            >
-              Previous
-            </button>
-            <span className="px-2 text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-              disabled={page === totalPages}
-              className="rounded px-2 py-1 text-xs disabled:opacity-40"
-            >
-              Next
-            </button>
-          </div>
+        ) : (
+          totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                disabled={page === 1}
+                className="rounded px-2 py-1 text-xs disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="px-2 text-xs text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                disabled={page === totalPages}
+                className="rounded px-2 py-1 text-xs disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          )
         )}
       </div>
     </section>
