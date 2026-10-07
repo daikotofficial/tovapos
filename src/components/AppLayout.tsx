@@ -34,7 +34,12 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const { isHydrated, isAuthenticated, hasViewPermission } = usePosStore();
+  const { isHydrated, isAuthenticated, hasViewPermission, currentUser } = usePosStore();
+  const isViewOnly = Boolean(
+    currentUser?.permissions.includes('view-only') &&
+      currentUser.role !== 'owner' &&
+      currentUser.role !== 'super-admin'
+  );
 
   React.useEffect(() => {
     if (isHydrated && !isAuthenticated) {
@@ -119,7 +124,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden">
         <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
           {mobileNavItems
-            .filter((item) => (Array.isArray(item.permission)
+            .filter((item) => (!isViewOnly || ['/dashboard', '/reports'].includes(item.href)) && (Array.isArray(item.permission)
               ? item.permission.some((permission) => hasViewPermission(permission))
               : hasViewPermission(item.permission)))
             .map((item) => {

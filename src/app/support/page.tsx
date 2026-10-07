@@ -7,8 +7,13 @@ import type { SupportTicket } from '@/lib/pos/types';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 
 export default function SupportPage() {
-  const { activeBusinessMode } = usePosStore();
+  const { activeBusinessMode, currentUser } = usePosStore();
   const businessLabel = activeBusinessMode === 'hospitality' ? 'Hospitality' : 'Retail';
+  const isViewOnly = Boolean(
+    currentUser?.permissions.includes('view-only') &&
+      currentUser.role !== 'owner' &&
+      currentUser.role !== 'super-admin'
+  );
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -41,8 +46,12 @@ export default function SupportPage() {
   };
 
   useEffect(() => {
+    if (isViewOnly) {
+      setLoading(false);
+      return;
+    }
     void loadTickets();
-  }, []);
+  }, [isViewOnly]);
 
   const submitTicket = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -71,6 +80,21 @@ export default function SupportPage() {
       setSubmitting(false);
     }
   };
+
+  if (isViewOnly) {
+    return (
+      <AppLayout title="Support" subtitle="Support access is restricted">
+        <div className="mx-auto max-w-xl p-4 sm:p-6">
+          <div className="rounded-xl border border-border bg-card p-6 text-center shadow-card">
+            <p className="font-semibold">This account is view-only</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              View-only accounts can access the Dashboard, Reports, and My Account only.
+            </p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout

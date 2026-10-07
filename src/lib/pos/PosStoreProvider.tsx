@@ -443,7 +443,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         session.user.role === 'super-admin' ||
         session.user.permissions.includes(permission);
       const canView = (permission: Permission) =>
-        can(permission) || (session.user.permissions.includes('view-only') && permission !== 'settings' && permission !== 'users');
+        can(permission) ||
+        (session.user.permissions.includes('view-only') &&
+          ['dashboard', 'reports', 'export-reports'].includes(permission));
       const safely = async <T,>(label: string, task: Promise<T>, fallback: T): Promise<T> => {
         try {
           return await task;
@@ -1047,6 +1049,13 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   const hasPermission = useCallback(
     (permission: Permission) => {
       if (!isAuthenticated || !currentUser) return false;
+      if (
+        currentUser.permissions.includes('view-only') &&
+        currentUser.role !== 'owner' &&
+        currentUser.role !== 'super-admin'
+      ) {
+        return false;
+      }
       const roleAllows =
         currentUser.role === 'super-admin' ||
         currentUser.role === 'owner' ||
@@ -1059,7 +1068,10 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   const hasViewPermission = useCallback(
     (permission: Permission) =>
       hasPermission(permission) ||
-      Boolean(currentUser?.permissions.includes('view-only') && permission !== 'settings' && permission !== 'users'),
+      Boolean(
+        currentUser?.permissions.includes('view-only') &&
+          ['dashboard', 'reports', 'export-reports'].includes(permission)
+      ),
     [currentUser?.permissions, hasPermission]
   );
 

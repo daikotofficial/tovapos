@@ -168,7 +168,7 @@ export function isViewOnlyUser(auth: AuthContext): boolean {
 }
 
 function isViewablePermission(permission: Permission): boolean {
-  return permission !== 'settings' && permission !== 'users';
+  return permission === 'dashboard' || permission === 'reports' || permission === 'export-reports';
 }
 
 export function assertPermission(auth: AuthContext, permission: Permission): void {
@@ -184,6 +184,9 @@ export function assertAnyPermission(auth: AuthContext, permissions: Permission[]
 }
 
 export function assertWritePermission(auth: AuthContext, permission: Permission): void {
+  if (isViewOnlyUser(auth)) {
+    throw new HttpError(403, 'View-only accounts cannot perform operational actions', 'FORBIDDEN');
+  }
   if (isPrivilegedUser(auth) || auth.user.permissions.includes(permission)) return;
   throw new HttpError(403, 'You do not have permission for this action', 'FORBIDDEN');
 }

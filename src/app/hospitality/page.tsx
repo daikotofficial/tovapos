@@ -404,7 +404,7 @@ export default function HospitalityPage() {
 
   return (
     <AppLayout title="Hospitality" subtitle="Rooms, services, reservations, and guest stays">
-      <PermissionGate permission="dashboard">
+      <PermissionGate permission={['hospitality-reservations', 'hospitality-rooms']}>
         <div className="mx-auto max-w-7xl space-y-4 p-4 sm:p-6">
           {activeBusinessMode !== 'hospitality' && (
             <div className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">

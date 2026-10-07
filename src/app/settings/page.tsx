@@ -152,7 +152,9 @@ function SettingsPageContent() {
       <div id="account-security">
         <AccountSecurityCard />
       </div>
-      <WorkstationPrinterCard />
+      <PermissionGate permission="settings">
+        <WorkstationPrinterCard />
+      </PermissionGate>
       <PermissionGate permission="settings">
         <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
           <nav className="sticky top-0 z-10 flex gap-2 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 shadow-card backdrop-blur scrollbar-thin">

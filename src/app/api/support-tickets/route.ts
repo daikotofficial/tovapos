@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import type { SupportTicket } from '@/lib/pos/types';
 import { getPosPool } from '@/lib/server/pos-db';
-import { assertSameOrigin, errorResponse, HttpError, requireAuth } from '@/lib/server/security';
+import { assertSameOrigin, errorResponse, HttpError, isViewOnlyUser, requireAuth } from '@/lib/server/security';
 
 function ticketFromRow(row: Record<string, unknown>): SupportTicket {
   return {
@@ -27,6 +27,9 @@ function ticketFromRow(row: Record<string, unknown>): SupportTicket {
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
+    if (isViewOnlyUser(auth)) {
+      throw new HttpError(403, 'View-only accounts cannot access support operations', 'FORBIDDEN');
+    }
     const result = await getPosPool().query(
       `
       SELECT st.*, t.name AS tenant_name,
@@ -53,6 +56,9 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
+    if (isViewOnlyUser(auth)) {
+      throw new HttpError(403, 'View-only accounts cannot access support operations', 'FORBIDDEN');
+    }
     const body = (await request.json()) as Record<string, unknown>;
     const subject = typeof body.subject === 'string' ? body.subject.trim() : '';
     const message = typeof body.message === 'string' ? body.message.trim() : '';

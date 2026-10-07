@@ -282,6 +282,11 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
   const router = useRouter();
   const { inventory, hasViewPermission, currentUser, signOut, settings, activeBusinessMode } =
     usePosStore();
+  const isViewOnly = Boolean(
+    currentUser?.permissions.includes('view-only') &&
+      currentUser.role !== 'owner' &&
+      currentUser.role !== 'super-admin'
+  );
   const canUseHospitality = activeBusinessMode === 'hospitality';
   const visibleNavItems = navItems.filter((item) => {
     if (['nav-reservations', 'nav-rooms-services'].includes(item.id)) {
@@ -348,6 +353,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
             .filter(
               (n) =>
                 n.group === group &&
+                (!isViewOnly || ['nav-dashboard', 'nav-account'].includes(n.id)) &&
                 (!n.permission ||
                   (Array.isArray(n.permission)
                     ? n.permission.some((permission) => hasViewPermission(permission))
