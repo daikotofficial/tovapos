@@ -254,6 +254,18 @@ function toDateInputValue(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function formatReportTimestamp(value: string): string {
+  return new Intl.DateTimeFormat('en-NG', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(value));
+}
+
 function createRange(preset: ReportPreset): ReportRange {
   const today = new Date();
   const to = toDateInputValue(today);
@@ -1060,7 +1072,7 @@ function ReportsContent() {
           filename: 'cashier-sales-detail-report',
           headers: ['Date', 'Receipt', 'Item', 'Qty', 'Unit Price', 'Line Total', 'Payment'],
           rows: cashierDetailItemRows.map(({ sale, item }) => [
-            new Date(sale.timestamp).toLocaleString(),
+            formatReportTimestamp(sale.timestamp),
             sale.transactionId,
             item.name,
             item.quantity.toString(),
@@ -1716,20 +1728,22 @@ function ReportsContent() {
                   )}
                   <label className="space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                      From
+                      From (YYYY-MM-DD)
                     </span>
                     <DatePicker
                       value={draftRange.from}
                       onChange={(from) => updateDraftDate('from', from)}
+                      displayFormat="iso"
                     />
                   </label>
                   <label className="space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                      To
+                      To (YYYY-MM-DD)
                     </span>
                     <DatePicker
                       value={draftRange.to}
                       onChange={(to) => updateDraftDate('to', to)}
+                      displayFormat="iso"
                     />
                   </label>
                   <button
@@ -1849,7 +1863,7 @@ function ReportsContent() {
                 empty="No sales recorded yet."
                 rows={displaySalesRows.map((sale) => [
                   sale.transactionId,
-                  new Date(sale.timestamp).toLocaleString(),
+                  formatReportTimestamp(sale.timestamp),
                   sale.customerName ?? 'Walk-in Customer',
                   sale.cashier,
                   sale.items.reduce((sum, item) => sum + item.quantity, 0).toString(),
@@ -2164,7 +2178,7 @@ function ReportsContent() {
                       : 'No completed sales for this cashier in the selected period.'
                 }
                 rows={cashierDetailItemRows.map(({ sale, item }) => [
-                  new Date(sale.timestamp).toLocaleString(),
+                  formatReportTimestamp(sale.timestamp),
                   sale.transactionId,
                   item.name,
                   item.quantity.toString(),

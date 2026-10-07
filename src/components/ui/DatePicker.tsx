@@ -8,6 +8,7 @@ interface DatePickerProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  displayFormat?: 'day-first' | 'iso';
 }
 
 const days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -24,7 +25,8 @@ function parseIsoDate(value: string): Date {
   const [year, month, day] = value.split('-').map(Number);
   return new Date(year, (month || 1) - 1, day || 1);
 }
-function formatInputDate(value: string): string {
+function formatInputDate(value: string, displayFormat: 'day-first' | 'iso'): string {
+  if (displayFormat === 'iso') return value;
   const [year, month, day] = value.split('-');
   return year?.length === 4 && month && day ? `${day}/${month}/${year}` : value;
 }
@@ -51,26 +53,27 @@ export default function DatePicker({
   onChange,
   placeholder = 'Select date',
   className = '',
+  displayFormat = 'day-first',
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const [dropUp, setDropUp] = useState(false);
   const [cursor, setCursor] = useState(() => parseIsoDate(value));
   const ref = useRef<HTMLDivElement | null>(null);
   const selectedDate = value ? parseIsoDate(value) : null;
-  const [inputValue, setInputValue] = useState(formatInputDate(value));
+  const [inputValue, setInputValue] = useState(formatInputDate(value, displayFormat));
 
   useEffect(() => {
-    setInputValue(formatInputDate(value));
+    setInputValue(formatInputDate(value, displayFormat));
     if (value) setCursor(parseIsoDate(value));
-  }, [value]);
+  }, [displayFormat, value]);
 
   const commitInput = () => {
     const next = normalizeTypedDate(inputValue);
     if (!next) {
-      setInputValue(formatInputDate(value));
+      setInputValue(formatInputDate(value, displayFormat));
       return;
     }
-    setInputValue(formatInputDate(next));
+    setInputValue(formatInputDate(next, displayFormat));
     setCursor(parseIsoDate(next));
     onChange(next);
   };
@@ -123,7 +126,7 @@ export default function DatePicker({
           }}
           inputMode="numeric"
           autoComplete="off"
-          placeholder="DD/MM/YYYY"
+          placeholder={displayFormat === 'iso' ? 'YYYY-MM-DD' : 'DD/MM/YYYY'}
           aria-label={placeholder}
           className="min-w-0 flex-1 select-text touch-manipulation bg-transparent text-base sm:text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground"
         />
@@ -198,7 +201,7 @@ export default function DatePicker({
                   type="button"
                   onClick={() => {
                     onChange(iso);
-                    setInputValue(formatInputDate(iso));
+                    setInputValue(formatInputDate(iso, displayFormat));
                     setOpen(false);
                   }}
                   className={`flex h-9 items-center justify-center rounded-md text-sm font-semibold transition-colors ${
