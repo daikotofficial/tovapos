@@ -44,7 +44,7 @@ export default function SettingsPage() {
 }
 
 function SettingsPageContent() {
-  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated } = usePosStore();
+  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated, currentUser } = usePosStore();
   const [form, setForm] = useState<BusinessSettings>(settings);
   const [saved, setSaved] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
@@ -54,6 +54,11 @@ function SettingsPageContent() {
   const isOnPremise = isOnPremiseDeployment();
   const productUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
   const planOptions = Object.values(subscriptionPlans);
+  const isViewOnly = Boolean(
+    currentUser?.permissions.includes('view-only') &&
+      currentUser.role !== 'owner' &&
+      currentUser.role !== 'super-admin'
+  );
 
   useEffect(() => {
     setForm(settings);
@@ -152,11 +157,10 @@ function SettingsPageContent() {
       <div id="account-security">
         <AccountSecurityCard />
       </div>
-      <PermissionGate permission="settings">
-        <WorkstationPrinterCard />
-      </PermissionGate>
-      <PermissionGate permission="settings">
-        <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
+      {!isViewOnly && (
+        <PermissionGate permission="settings">
+          <WorkstationPrinterCard />
+          <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
           <nav className="sticky top-0 z-10 flex gap-2 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 shadow-card backdrop-blur scrollbar-thin">
             {[
               ...(!isOnPremise ? [['subscription', 'Plan']] : []),
@@ -932,8 +936,9 @@ function SettingsPageContent() {
               {saved ? 'Saved' : 'Save Settings'}
             </button>
           </div>
-        </div>
-      </PermissionGate>
+          </div>
+        </PermissionGate>
+      )}
     </AppLayout>
   );
 }

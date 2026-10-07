@@ -992,9 +992,6 @@ function ReportsContent() {
   const updateDraftDate = (field: 'from' | 'to', value: string) => {
     const nextRange = { ...draftRange, [field]: value, preset: 'custom' as const };
     setDraftRange(nextRange);
-    if (nextRange.from && nextRange.to && nextRange.from <= nextRange.to) {
-      setRange(nextRange);
-    }
   };
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
   const cashierOptions = [
@@ -1476,7 +1473,6 @@ function ReportsContent() {
                           onClick={() => {
                             const nextRange = createRange(preset.id);
                             setDraftRange(nextRange);
-                            setRange(nextRange);
                           }}
                           className={`h-9 rounded-md border px-3 text-sm font-semibold transition-colors ${
                             range.preset === preset.id
@@ -1524,8 +1520,6 @@ function ReportsContent() {
                           setDraftCashierId(value);
                           const nextCashierName = cashierOptions.find((option) => option.value === value)?.label ?? '';
                           setDraftCashierName(nextCashierName);
-                          setCashierId(value);
-                          setCashierName(nextCashierName);
                         }}
                         options={cashierOptions}
                       />
