@@ -38,6 +38,36 @@ export function computeSellingPriceFromMargin(unitCost: number, profitMargin: nu
   return Number((unitCost * (1 + margin)).toFixed(2));
 }
 
+/**
+ * Moving weighted-average cost after receiving an existing product batch.
+ * Keep full precision here; currency formatting can round for display without
+ * losing inventory valuation precision on later receipts.
+ */
+export function computeWeightedAverageUnitCost(
+  currentQuantity: number,
+  currentUnitCost: number,
+  receivedQuantity: number,
+  receivedUnitCost: number
+): number {
+  const totalQuantity = currentQuantity + receivedQuantity;
+  if (
+    !Number.isFinite(currentQuantity) ||
+    currentQuantity < 0 ||
+    !Number.isFinite(currentUnitCost) ||
+    currentUnitCost < 0 ||
+    !Number.isFinite(receivedQuantity) ||
+    receivedQuantity <= 0 ||
+    !Number.isFinite(receivedUnitCost) ||
+    receivedUnitCost <= 0 ||
+    totalQuantity <= 0
+  ) {
+    return 0;
+  }
+  return (
+    (currentQuantity * currentUnitCost + receivedQuantity * receivedUnitCost) / totalQuantity
+  );
+}
+
 export function getDiscountedSellingPrice(item: InventoryItem): number {
   const sellingPrice = Number(item.sellingPrice) || 0;
   const discountValue = Math.max(0, Number(item.discountValue) || 0);

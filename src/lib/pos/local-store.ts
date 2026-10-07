@@ -15,6 +15,7 @@ import {
 } from './types';
 import { normalizeInventoryItem } from './stock';
 import { defaultSettings } from './seeds';
+import { reportDateKey } from './report-date';
 
 const DB_NAME = 'tovapos-local-first';
 // Increment whenever a new object store is added so existing browsers create it.
@@ -718,12 +719,18 @@ export async function loadReportRows<T = unknown>(input: {
     const selectedName = input.cashierName?.trim().toLowerCase();
     const filtered = sales
       .filter((sale) => {
-        const date = sale.timestamp.slice(0, 10);
+        const date = reportDateKey(sale.timestamp);
         const sameCashier =
           !input.cashierId ||
           sale.cashierId === input.cashierId ||
           (selectedName !== undefined && sale.cashier.trim().toLowerCase() === selectedName);
-        return sameCashier && (!from || date >= from) && (!to || date <= to) && sale.status === 'completed';
+        return Boolean(
+          date &&
+          sameCashier &&
+          (!from || date >= from) &&
+          (!to || date <= to) &&
+          sale.status === 'completed'
+        );
       })
       .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
     const offset = input.offset ?? 0;

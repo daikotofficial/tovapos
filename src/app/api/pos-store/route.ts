@@ -256,18 +256,48 @@ function appendDateRange(
   dateCast = false
 ): void {
   const from = params.get('from');
+  const to = params.get('to');
+  const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const isValidDate = (value: string | null): value is string => {
+    if (!value || !isoDatePattern.test(value)) return false;
+    const [year, month, day] = value.split('-').map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    );
+  };
+
+  if ((from && !isValidDate(from)) || (to && !isValidDate(to)) || (from && to && from > to)) {
+    throw new HttpError(400, 'Invalid report date range', 'VALIDATION_ERROR');
+  }
+
+  // Report days are business-calendar days, not UTC days. Convert the selected
+  // boundaries to instants in the POS timezone while keeping the timestamp
+  // column bare so PostgreSQL can still use its indexes.
+  const reportTimezone = process.env.POS_TIMEZONE ?? 'Africa/Lagos';
   if (from) {
     values.push(from);
-    where.push(`${column} >= $${values.length}::date`);
+    const dateParam = `$${values.length}`;
+    if (dateCast) {
+      where.push(`${column} >= ${dateParam}::date`);
+    } else {
+      values.push(reportTimezone);
+      where.push(`${column} >= (${dateParam}::date::timestamp AT TIME ZONE $${values.length})`);
+    }
   }
-  const to = params.get('to');
   if (to) {
     values.push(to);
-    where.push(
-      dateCast
-        ? `${column} <= $${values.length}::date`
-        : `${column} < ($${values.length}::date + interval '1 day')`
-    );
+    const dateParam = `$${values.length}`;
+    if (dateCast) {
+      where.push(`${column} <= ${dateParam}::date`);
+    } else {
+      values.push(reportTimezone);
+      where.push(
+        `${column} < ((${dateParam}::date + 1)::timestamp AT TIME ZONE $${values.length})`
+      );
+    }
   }
 }
 
@@ -510,7 +540,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   }
 
   if (report === 'input-vat') {
-    appendDateRange(params, "data->>'date'", values, where, true);
+    appendDateRange(params, "(data->>'date')::date", values, where, true);
     where.push("store_name = 'inputVat'");
     where.push("coalesce(data->>'status', 'recorded') = 'recorded'");
     values.push(limit, offset);

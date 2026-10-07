@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import type { InventoryCodeAlias, InventoryItem, StockBatch, StockMovement } from '@/lib/pos/types';
-import { computeStockStatus } from '@/lib/pos/stock';
+import { computeStockStatus, computeWeightedAverageUnitCost } from '@/lib/pos/stock';
 import { getPosPool } from '@/lib/server/pos-db';
 import { upsertTenantInventoryIndex } from '@/lib/server/tenant-indexes';
 import {
@@ -163,6 +163,7 @@ export async function POST(request: NextRequest) {
       let batch: StockBatch;
       let quantityDelta: number;
       let reason: string;
+      let costing: Record<string, number | string> | undefined;
       const notes = text(body.notes);
 
       if (action === 'receive') {
@@ -187,7 +188,28 @@ export async function POST(request: NextRequest) {
         }
         const batchId = `batch-${randomUUID()}`;
         batch = { id: batchId, productId, productName: current.name, sku, barcode, quantityReceived: quantity, quantityRemaining: quantity, unitCost, sellingPrice, expiryDate, supplier: text(body.supplier) || current.supplier, supplierPhone: text(body.supplierPhone) || current.supplierPhone, invoiceNumber: text(body.invoiceNumber), receivedAt: now, status: 'active' };
-        const weightedCost = (beforeValue + quantity * unitCost) / (beforeQty + quantity);
+        const weightedCost = computeWeightedAverageUnitCost(
+          beforeQty,
+          beforeCost,
+          quantity,
+          unitCost
+        );
+        if (weightedCost <= 0) {
+          throw new HttpError(
+            409,
+            'Existing inventory cost data is invalid; the receipt was not posted',
+            'INVALID_INVENTORY_COST'
+          );
+        }
+        costing = {
+          method: 'moving-weighted-average',
+          previousQuantity: beforeQty,
+          previousUnitCost: beforeCost,
+          receivedQuantity: quantity,
+          receivedUnitCost: unitCost,
+          resultingQuantity: beforeQty + quantity,
+          resultingUnitCost: weightedCost,
+        };
         const skuAliases = [...currentSkuAliases.filter((alias) => alias.code.toLowerCase() !== sku.toLowerCase()), ...(sku === current.sku ? [] : [{ code: sku, kind: 'sku' as const, batchId, active: true, addedAt: now }])];
         const barcodeAliases = [...currentBarcodeAliases.filter((alias) => alias.code.toLowerCase() !== String(barcode || '').toLowerCase()), ...(barcode && barcode !== current.barcode ? [{ code: barcode, kind: 'barcode' as const, batchId, active: true, addedAt: now }] : [])];
         updated = { ...current, currentQty: beforeQty + quantity, unitCost: weightedCost, sellingPrice, expiryDate, skuAliases, barcodeAliases, lastRestocked: now.slice(0, 10), stockStatus: computeStockStatus(beforeQty + quantity, current.reorderLevel, expiryDate), updatedAt: now };
@@ -214,7 +236,7 @@ export async function POST(request: NextRequest) {
       await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
       const movement: StockMovement = { id: `move-${randomUUID()}`, operationId, inventoryItemId: productId, productName: current.name, sku: batch.sku, barcode: batch.barcode, batchLot: current.batchLot, type: action === 'receive' ? 'receive' : 'return', quantityDelta, quantityBefore: beforeQty, quantityAfter: updated.currentQty, unitCost: batch.unitCost, unitPrice: batch.sellingPrice, referenceId: batch.id, referenceLabel: action === 'receive' ? 'Stock receipt' : 'Supplier return', reason: notes ? `${reason} — ${notes}` : reason, batchId: batch.id, supplier: batch.supplier, supplierPhone: batch.supplierPhone, invoiceNumber: batch.invoiceNumber, valueBefore: beforeValue, valueAfter: updated.currentQty * updated.unitCost, createdAt: now, createdBy: auth.user.name, syncStatus: 'synced' };
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockMovements', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, movement.id, JSON.stringify(movement)]);
-      await client.query(`INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, operation_id, metadata) VALUES ($1, $2, $3, 'inventory', $4, $5, $6::jsonb)`, [auth.tenantId, auth.user.id, action === 'receive' ? 'stock.received' : 'stock.returned', productId, operationId, JSON.stringify({ beforeQty, afterQty: updated.currentQty, beforeValue, afterValue: updated.currentQty * updated.unitCost, batch, movement, notes: text(body.notes), sku: batch.sku, barcode: batch.barcode })]);
+      await client.query(`INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, operation_id, metadata) VALUES ($1, $2, $3, 'inventory', $4, $5, $6::jsonb)`, [auth.tenantId, auth.user.id, action === 'receive' ? 'stock.received' : 'stock.returned', productId, operationId, JSON.stringify({ beforeQty, beforeCost, afterQty: updated.currentQty, afterCost: updated.unitCost, beforeValue, afterValue: updated.currentQty * updated.unitCost, costing, batch, movement, notes: text(body.notes), sku: batch.sku, barcode: batch.barcode })]);
       const responseBody = { inventory: updated, batch, movement };
       await client.query(
         `UPDATE pos_idempotency_keys

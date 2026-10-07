@@ -11,6 +11,7 @@ import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { InventoryItem, StockBatch, StockMovement } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
 import { loadInventoryPage, lookupInventoryItem } from '@/lib/pos/local-store';
+import { computeWeightedAverageUnitCost } from '@/lib/pos/stock';
 
 const inputClass = 'w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/25';
 const labelClass = 'mb-1.5 block text-xs font-semibold text-muted-foreground';
@@ -62,6 +63,25 @@ export default function StockManagementScreen() {
   const [reason, setReason] = useState('Damaged');
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  const projectedRestock = useMemo(() => {
+    if (!selectedProduct || action !== 'receive') return null;
+    const receivedQuantity = Number(quantity);
+    const receivedUnitCost = Number(unitCost);
+    if (receivedQuantity <= 0 || receivedUnitCost <= 0) return null;
+    const resultingQuantity = selectedProduct.currentQty + receivedQuantity;
+    const resultingUnitCost = computeWeightedAverageUnitCost(
+      selectedProduct.currentQty,
+      selectedProduct.unitCost,
+      receivedQuantity,
+      receivedUnitCost
+    );
+    return {
+      resultingQuantity,
+      resultingUnitCost,
+      resultingValue: resultingQuantity * resultingUnitCost,
+    };
+  }, [action, quantity, selectedProduct, unitCost]);
 
   const localSuggestions = useMemo(() => {
     const value = query.trim().toLowerCase();
@@ -219,6 +239,7 @@ export default function StockManagementScreen() {
       <Modal open={showActionModal} onClose={() => setShowActionModal(false)} title={action === 'receive' ? 'Receive Products' : 'Return Stock'} subtitle={selectedProduct ? `${selectedProduct.name} · Current stock ${selectedProduct.currentQty}` : ''} size="lg" footer={<><button type="button" onClick={() => setShowActionModal(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted">Cancel</button><button type="submit" form="stock-action-form" disabled={isSaving} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{isSaving ? 'Saving...' : action === 'receive' ? 'Receive Stock' : 'Return Stock'}</button></>}>
         <form id="stock-action-form" onSubmit={submitAction} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div><label className={labelClass}>Quantity {action === 'receive' ? 'Received' : 'Returned'} *</label><input required type="text" inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0" /></div>{action === 'receive' ? <><div><label className={labelClass}>Purchase / Cost Price *</label><input required type="text" inputMode="decimal" value={unitCost} onChange={(event) => setUnitCost(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0.00" /></div><div><label className={labelClass}>Selling Price</label><input type="text" inputMode="decimal" value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="Keep existing price" /></div><div><label className={labelClass}>Expiry Date *</label><DatePicker value={expiryDate} onChange={setExpiryDate} placeholder="Expiry date" /></div><div><label className={labelClass}>New SKU</label><input value={sku} onChange={(event) => setSku(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Existing SKU if unchanged" /></div><div><label className={labelClass}>New Barcode</label><input value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Scan or type barcode" /></div><div><label className={labelClass}>Vendor Name <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplier} onChange={(event) => setSupplier(event.target.value)} className={inputClass} placeholder="Vendor or supplier name" /></div><div><label className={labelClass}>Vendor Phone <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplierPhone} onChange={(event) => setSupplierPhone(event.target.value)} className={inputClass} placeholder="Vendor or supplier phone" inputMode="tel" /></div><div><label className={labelClass}>Invoice Number <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} className={`${inputClass} font-mono`} placeholder="Invoice/reference number" /></div></> : <><div><label className={labelClass}>Original sale receipt *</label><NiceSelect value={selectedSaleId} onChange={setSelectedSaleId} options={returnableSales.map((sale) => ({ value: sale.saleId, label: `${sale.transactionId} · ${new Date(sale.timestamp).toLocaleString()} · ${sale.returnableQuantity} available` }))} /></div><div><label className={labelClass}>Return Reason *</label><NiceSelect value={reason} onChange={setReason} options={[{ value: 'Damaged', label: 'Damaged' }, { value: 'Expired', label: 'Expired' }, { value: 'Defective', label: 'Defective' }, { value: 'Customer return', label: 'Customer return' }, { value: 'Other', label: 'Other' }]} /></div></>}</div>
+          {action === 'receive' && projectedRestock && <div className="rounded-lg border border-primary/25 bg-primary/5 p-3"><p className="text-xs font-semibold text-foreground">Weighted-average result</p><div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3"><div><span className="block text-muted-foreground">New total quantity</span><span className="font-bold tabular-nums text-foreground">{projectedRestock.resultingQuantity}</span></div><div><span className="block text-muted-foreground">New average cost</span><span className="font-bold tabular-nums text-foreground">{formatMoney(projectedRestock.resultingUnitCost, settings.currency)}</span></div><div><span className="block text-muted-foreground">New stock value</span><span className="font-bold tabular-nums text-foreground">{formatMoney(projectedRestock.resultingValue, settings.currency)}</span></div></div><p className="mt-2 text-[11px] text-muted-foreground">Calculated from the value of existing stock plus the value of this received batch, divided by the combined quantity.</p></div>}
           {action === 'return' && <div><label className={labelClass}>Notes / Return Details</label><textarea value={notes} onChange={(event) => setNotes(event.target.value)} className={`${inputClass} min-h-24 resize-y`} placeholder="Add return or supplier reference details" /></div>}
         </form>
       </Modal>

@@ -29,6 +29,7 @@ import {
   type InventoryMetrics,
   type SalesMetrics,
 } from '@/lib/pos/local-store';
+import { reportDateKey } from '@/lib/pos/report-date';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import RowsPerPageSelect from '@/components/ui/RowsPerPageSelect';
@@ -263,7 +264,8 @@ function createRange(preset: ReportPreset): ReportRange {
 
 function isWithinRange(value: string, range: ReportRange): boolean {
   if (range.preset === 'all') return true;
-  const dateKey = value.slice(0, 10);
+  const dateKey = reportDateKey(value);
+  if (!dateKey) return false;
   return (!range.from || dateKey >= range.from) && (!range.to || dateKey <= range.to);
 }
 
@@ -990,7 +992,14 @@ function ReportsContent() {
     toast.success(`Date range applied: ${draftRange.from} to ${draftRange.to}`);
   };
   const updateDraftDate = (field: 'from' | 'to', value: string) => {
-    const nextRange = { ...draftRange, [field]: value, preset: 'custom' as const };
+    // The first manual date picked after a preset means "this day". Keeping the
+    // preset's old opposite boundary is surprising and can silently turn a
+    // one-day request into a month-long report. A second pick can still expand
+    // the custom range normally.
+    const nextRange =
+      draftRange.preset === 'custom'
+        ? { ...draftRange, [field]: value, preset: 'custom' as const }
+        : { from: value, to: value, preset: 'custom' as const };
     setDraftRange(nextRange);
   };
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
@@ -1475,7 +1484,7 @@ function ReportsContent() {
                             setDraftRange(nextRange);
                           }}
                           className={`h-9 rounded-md border px-3 text-sm font-semibold transition-colors ${
-                            range.preset === preset.id
+                            draftRange.preset === preset.id
                               ? 'border-primary bg-primary/10 text-primary'
                               : 'border-border bg-white text-muted-foreground hover:bg-muted hover:text-foreground'
                           }`}
