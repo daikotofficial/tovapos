@@ -348,7 +348,7 @@ try {
       name: 'Read Only Report Viewer',
       email: reportViewerEmail,
       role: 'viewer',
-      permissions: ['view-only', 'reports'],
+      permissions: ['view-only'],
       status: 'active',
       pin: '',
       newPassword: 'Strong!Reporter123',
@@ -548,6 +548,25 @@ try {
   );
   assert.equal(sales.filter((result) => result.response.status === 201).length, 5);
   assert.equal(sales.filter((result) => result.response.status === 409).length, 5);
+  const acceptedIndex = sales.findIndex((result) => result.response.status === 201);
+  const reportCashier = (
+    await cleanupClient.query(
+      `SELECT id, name
+       FROM pos_app_users
+       WHERE tenant_id = $1 AND role = 'owner'
+       LIMIT 1`,
+      [companyA.tenant.id]
+    )
+  ).rows[0];
+  // Older imports can retain an obsolete cashier id even though the cashier
+  // name is still correct. The strict report must safely recover that sale by
+  // a unique tenant-scoped name match instead of returning a false zero.
+  await cleanupClient.query(
+    `UPDATE pos_tenant_sales
+     SET data = jsonb_set(data, '{cashierId}', to_jsonb($3::text), true)
+     WHERE tenant_id = $1 AND id = $2`,
+    [companyA.tenant.id, sales[acceptedIndex].body.sale.id, `legacy-cashier-${stamp}`]
+  );
   const [completeSalesReport, completeCashierReport, completeReportMetrics] = await Promise.all([
     authenticated('/api/pos-store?store=sales&report=sales&limit=10', reportViewerCookie),
     authenticated(
@@ -573,11 +592,11 @@ try {
   assert.equal(typeof reportSale.cashierId, 'string');
   const [strictCashierRange, excludedCashierRange] = await Promise.all([
     authenticated(
-      `/api/pos-store?store=sales&report=sales-by-cashier-detail&cashierId=${encodeURIComponent(reportSale.cashierId)}&cashierName=${encodeURIComponent(reportSale.cashier)}&from=${reportDate}&to=${reportDate}&limit=10`,
+      `/api/pos-store?store=sales&report=sales-by-cashier-detail&cashierId=${encodeURIComponent(reportCashier.id)}&cashierName=${encodeURIComponent(reportCashier.name)}&from=${reportDate}&to=${reportDate}&limit=10`,
       reportViewerCookie
     ),
     authenticated(
-      `/api/pos-store?store=sales&report=sales-by-cashier-detail&cashierId=${encodeURIComponent(reportSale.cashierId)}&cashierName=${encodeURIComponent(reportSale.cashier)}&from=2000-01-01&to=2000-01-01&limit=10`,
+      `/api/pos-store?store=sales&report=sales-by-cashier-detail&cashierId=${encodeURIComponent(reportCashier.id)}&cashierName=${encodeURIComponent(reportCashier.name)}&from=2000-01-01&to=2000-01-01&limit=10`,
       reportViewerCookie
     ),
   ]);
@@ -586,13 +605,12 @@ try {
   assert.equal(
     strictCashierRange.body.rows.every(
       (sale) =>
-        sale.cashierId === reportSale.cashierId && businessDateKey(sale.timestamp) === reportDate
+        sale.cashier === reportCashier.name && businessDateKey(sale.timestamp) === reportDate
     ),
     true
   );
   assert.equal(excludedCashierRange.response.status, 200);
   assert.equal(excludedCashierRange.body.rows.length, 0);
-  const acceptedIndex = sales.findIndex((result) => result.response.status === 201);
   const replay = await authenticated(
     '/api/commands/sale',
     companyA.cookie,

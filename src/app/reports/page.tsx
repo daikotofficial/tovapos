@@ -913,9 +913,8 @@ function ReportsContent() {
   // predicates. Re-filtering here incorrectly discarded legacy sales whose
   // stored payload predates cashierId, even though the server safely matched
   // them by the uniquely identified cashier name.
-  const cashierDetailSales = hasServerRows('sales-by-cashier-detail')
-    ? serverCashierDetailRows
-    : [];
+  const hasServerCashierDetailRows = hasServerRows('sales-by-cashier-detail');
+  const cashierDetailSales = hasServerCashierDetailRows ? serverCashierDetailRows : [];
   const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
   );
@@ -963,14 +962,20 @@ function ReportsContent() {
     },
     { total: 0, cash: 0, card: 0, transfer: 0 }
   );
-  const cashierTenderSummary = selectedCashierSummary
-    ? {
-        total: selectedCashierSummary.revenue,
-        cash: selectedCashierSummary.cash ?? 0,
-        card: selectedCashierSummary.card ?? 0,
-        transfer: selectedCashierSummary.transfer ?? 0,
-      }
-    : itemizedCashierTenderSummary;
+  // Once the strict cashier/date request completes, its exact rows are the
+  // source of truth for the cards as well as the itemized table. This prevents
+  // a legacy cashier id in an older summary row from producing a partial or
+  // contradictory total above a correct detail table.
+  const cashierTenderSummary = hasServerCashierDetailRows
+    ? itemizedCashierTenderSummary
+    : selectedCashierSummary
+      ? {
+          total: selectedCashierSummary.revenue,
+          cash: selectedCashierSummary.cash ?? 0,
+          card: selectedCashierSummary.card ?? 0,
+          transfer: selectedCashierSummary.transfer ?? 0,
+        }
+      : itemizedCashierTenderSummary;
   const cashierOtherTender = Math.max(
     0,
     cashierTenderSummary.total -
@@ -978,7 +983,9 @@ function ReportsContent() {
       cashierTenderSummary.card -
       cashierTenderSummary.transfer
   );
-  const cashierSummaryLoading = serverReportsLoading && !selectedCashierSummary;
+  const cashierSummaryLoading =
+    cashierDetailLoading || (!selectedCashierSummary && serverReportsLoading);
+  const cashierSummaryError = cashierDetailError ?? serverReportError;
 
   const displayCreditSalesRows = hasServerRows('credit-sales') ? serverCreditSalesRows : [];
   const displayExpenseRows = hasServerRows('expenses') ? serverExpenseRows : [];
@@ -1016,6 +1023,8 @@ function ReportsContent() {
       toast.error('Start date cannot be after the end date.');
       return;
     }
+    setCashierDetailLoading(draftCashierId !== 'all');
+    setCashierDetailError(null);
     setRange({ ...draftRange, preset: 'custom' });
     setCashierId(draftCashierId);
     setCashierName(draftCashierName);
@@ -2131,7 +2140,7 @@ function ReportsContent() {
                     <p className="mt-2 text-2xl font-bold font-tabular">
                       {cashierSummaryLoading
                         ? 'Loading…'
-                        : serverReportError
+                        : cashierSummaryError
                           ? 'Unavailable'
                           : formatMoney(Number(amount), settings.currency)}
                     </p>

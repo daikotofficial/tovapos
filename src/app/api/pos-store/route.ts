@@ -208,7 +208,11 @@ function authAllows(auth: AuthContext, permission: Permission): boolean {
  * Mutation endpoints continue to use assertWritePermission independently.
  */
 function hasCompleteReportReadAccess(auth: AuthContext): boolean {
-  return authAllows(auth, 'reports');
+  // A view-only account is deliberately allowed into the Reports workspace by
+  // the shared permission boundary. It must therefore receive the complete,
+  // tenant-scoped report data and cashier directory; otherwise the UI can open
+  // Reports but silently degrades to the signed-in cashier and false zeroes.
+  return isViewOnlyUser(auth) || authAllows(auth, 'reports');
 }
 
 function authAllowsReportFinancials(auth: AuthContext, permission: Permission): boolean {
@@ -453,8 +457,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         where.push(`(
           data->>'cashierId' = ${cashierIdParam}
           OR (
-            coalesce(data->>'cashierId', '') = ''
-            AND 1 = (
+            1 = (
               SELECT count(*)
               FROM pos_app_users report_user
               WHERE report_user.tenant_id = $1
@@ -535,8 +538,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         detailWhere.push(`(
           data->>'cashierId' = ${detailCashierIdParam}
           OR (
-            coalesce(data->>'cashierId', '') = ''
-            AND 1 = (
+            1 = (
               SELECT count(*)
               FROM pos_app_users report_user
               WHERE report_user.tenant_id = $1
@@ -1159,13 +1161,6 @@ export async function GET(request: NextRequest) {
     assertTenantActive(auth);
     const storeName = getStoreName(request);
     await assertRetailOnlyFeature(auth, storeName);
-    if (
-      isViewOnlyUser(auth) &&
-      ((storeName === 'settings' && !hasCompleteReportReadAccess(auth)) ||
-        (storeName === 'users' && !auth.user.permissions.includes('reports')))
-    ) {
-      throw new HttpError(403, 'View-only accounts cannot access administration data', 'FORBIDDEN');
-    }
     const permission = READ_PERMISSIONS[storeName];
     if (storeName === 'users') {
       const isUserAdministrator =
