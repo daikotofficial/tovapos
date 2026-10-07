@@ -588,8 +588,11 @@ export async function loadInventoryPage(
   };
 }
 
-export async function loadInventoryMetrics(expiryAlertDays = 30): Promise<InventoryMetrics> {
-  if (shouldUsePostgresStore()) {
+export async function loadInventoryMetrics(
+  expiryAlertDays = 30,
+  options: { requireServer?: boolean } = {}
+): Promise<InventoryMetrics> {
+  if (shouldUsePostgresStore() || options.requireServer) {
     return apiRequest<InventoryMetrics>('inventory', undefined, {
       metrics: true,
       expiryAlertDays,
@@ -624,9 +627,9 @@ export async function loadInventoryMetrics(expiryAlertDays = 30): Promise<Invent
 }
 
 export async function loadSalesMetrics(
-  input: { from?: string; to?: string } = {}
+  input: { from?: string; to?: string; requireServer?: boolean } = {}
 ): Promise<SalesMetrics> {
-  if (shouldUsePostgresStore()) {
+  if (shouldUsePostgresStore() || input.requireServer) {
     return apiRequest<SalesMetrics>('sales', undefined, {
       metrics: true,
       from: input.from,
@@ -703,7 +706,7 @@ export async function loadReportRows<T = unknown>(input: {
   offset?: number;
   requireServer?: boolean;
 }): Promise<ReportRowsResult<T>> {
-  if (shouldUsePostgresStore()) {
+  if (shouldUsePostgresStore() || input.requireServer) {
     try {
       return await apiRequest<ReportRowsResult<T>>('sales', undefined, {
         report: input.report,
@@ -808,14 +811,17 @@ export async function lookupInventoryItem(rawCode: string): Promise<InventoryIte
   return findInventoryItemByScan(allItems, scan) ?? null;
 }
 
-export async function loadUsers(seed: TovaUser[]): Promise<TovaUser[]> {
-  if (shouldUsePostgresStore()) {
+export async function loadUsers(
+  seed: TovaUser[],
+  options: { requireServer?: boolean } = {}
+): Promise<TovaUser[]> {
+  if (shouldUsePostgresStore() || options.requireServer) {
     try {
       const users = await apiRequest<TovaUser[]>('users');
-      await replaceBrowserStore('users', users);
+      if (!options.requireServer) await replaceBrowserStore('users', users);
       return users;
     } catch (error) {
-      if (!isNetworkFailure(error)) throw error;
+      if (!isNetworkFailure(error) || options.requireServer) throw error;
     }
   }
 
@@ -863,7 +869,15 @@ export async function deleteVendor(vendorId: string): Promise<void> {
   await deleteOne('vendors', vendorId);
 }
 
-export async function loadSettings(seed: BusinessSettings): Promise<BusinessSettings> {
+export async function loadSettings(
+  seed: BusinessSettings,
+  options: { requireServer?: boolean } = {}
+): Promise<BusinessSettings> {
+  if (options.requireServer) {
+    const records = await apiRequest<BusinessSettings[]>('settings');
+    if (records.length === 0) return seed;
+    return normalizeSettings(records[0], seed);
+  }
   const existing = await getAll<BusinessSettings>('settings');
   if (existing.length > 0) return normalizeSettings(existing[0], seed);
   await putOne('settings', seed);

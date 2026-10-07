@@ -24,15 +24,27 @@ import {
   loadInventoryMetrics,
   loadReportRows,
   loadSalesMetrics,
+  loadSettings,
   loadUsers,
   type InventoryMetrics,
   type SalesMetrics,
 } from '@/lib/pos/local-store';
-import { reportDateKey } from '@/lib/pos/report-date';
+import { defaultSettings } from '@/lib/pos/seeds';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import RowsPerPageSelect from '@/components/ui/RowsPerPageSelect';
-import type { InputVatRecord, SaleLineItem, SaleTransaction, TovaUser } from '@/lib/pos/types';
+import type {
+  BusinessSettings,
+  Customer,
+  ExpenseRecord,
+  InputVatRecord,
+  InventoryItem,
+  SaleLineItem,
+  SaleTransaction,
+  StockMovement,
+  TovaUser,
+  Vendor,
+} from '@/lib/pos/types';
 import { toast } from 'sonner';
 
 type ReportView = string;
@@ -189,20 +201,10 @@ const reports: { id: ReportView; label: string; description: string; icon: React
   {
     id: 'audit',
     label: 'Audit Trail',
-    description: 'Important local actions and pending sync events',
+    description: 'Authoritative server-side activity history',
     icon: History,
   },
 ];
-
-function profitForSale(sale: {
-  items: { unitPrice: number; unitCost: number; discount: number; quantity: number }[];
-}): number {
-  return sale.items.reduce(
-    (sum, item) =>
-      sum + (item.unitPrice * (1 - item.discount / 100) - item.unitCost) * item.quantity,
-    0
-  );
-}
 
 function isCreditSale(sale: Pick<SaleTransaction, 'paymentMethod' | 'amountDue'>): boolean {
   return sale.paymentMethod === 'credit' || Number(sale.amountDue ?? 0) > 0;
@@ -263,15 +265,19 @@ function createRange(preset: ReportPreset): ReportRange {
   return { from: toDateInputValue(fromDate), to, preset };
 }
 
-function isWithinRange(value: string, range: ReportRange): boolean {
-  if (range.preset === 'all') return true;
-  const dateKey = reportDateKey(value);
-  if (!dateKey) return false;
-  return (!range.from || dateKey >= range.from) && (!range.to || dateKey <= range.to);
-}
-
 const REPORT_PAGE_SIZE = 500;
 const MAX_COMPLETE_REPORT_ROWS = 100_000;
+
+function reportRequestKey(input: {
+  tenantId?: string;
+  report: string;
+  from?: string;
+  to?: string;
+  cashierId?: string;
+  cashierName?: string;
+}): string {
+  return JSON.stringify(input);
+}
 
 async function loadCompleteReportRows<T = unknown>(input: {
   report: string;
@@ -516,20 +522,19 @@ function ReportsContent() {
   const router = useRouter();
   const {
     tenant,
-    sales,
-    expenses,
-    inventory,
-    stockMovements,
-    customers,
-    vendors,
     syncQueue,
     users,
-    settings,
+    settings: storeSettings,
     activeBusinessMode,
     isOnline,
     hasPermission,
     hasViewPermission,
   } = usePosStore();
+  const [reportSettings, setReportSettings] = useState<BusinessSettings | null>(null);
+  const [reportSettingsTenantId, setReportSettingsTenantId] = useState('');
+  const [reportCashierTenantId, setReportCashierTenantId] = useState('');
+  const settings =
+    reportSettingsTenantId === tenant?.id && reportSettings ? reportSettings : storeSettings;
   const hospitalityOnly = activeBusinessMode === 'hospitality';
   const requestedView = searchParams.get('view') as ReportView | null;
   const activeView: ReportView =
@@ -545,8 +550,11 @@ function ReportsContent() {
   const [salesMetrics, setSalesMetrics] = useState<SalesMetrics | null>(null);
   const [inventoryMetrics, setInventoryMetrics] = useState<InventoryMetrics | null>(null);
   const [serverReportRows, setServerReportRows] = useState<Record<string, unknown[]>>({});
+  const [serverReportKeys, setServerReportKeys] = useState<Record<string, string>>({});
   const [serverReportsLoading, setServerReportsLoading] = useState(false);
   const [cashierDetailLoading, setCashierDetailLoading] = useState(false);
+  const [serverReportError, setServerReportError] = useState<string | null>(null);
+  const [cashierDetailError, setCashierDetailError] = useState<string | null>(null);
   const [reportRefreshToken, setReportRefreshToken] = useState(0);
   const [reportCashiers, setReportCashiers] = useState<TovaUser[]>([]);
 
@@ -554,24 +562,48 @@ function ReportsContent() {
     setSalesMetrics(null);
     setInventoryMetrics(null);
     setServerReportRows({});
+    setServerReportKeys({});
+    setServerReportError(null);
+    setCashierDetailError(null);
     setCashierId('all');
     setCashierName('');
     setDraftCashierId('all');
     setDraftCashierName('');
     setReportCashiers([]);
+    setReportSettings(null);
+    setReportCashierTenantId('');
+    setReportSettingsTenantId('');
   }, [tenant?.id]);
 
   useEffect(() => {
     let cancelled = false;
-    async function loadCashierDirectory() {
-      try {
-        const nextCashiers = await loadUsers([]);
-        if (!cancelled) setReportCashiers(nextCashiers);
-      } catch (error) {
-        console.error('Failed to load the report cashier directory', error);
+    async function loadReportReferenceData() {
+      const [cashiersResult, settingsResult] = await Promise.allSettled([
+        loadUsers([], { requireServer: true }),
+        loadSettings(defaultSettings, { requireServer: true }),
+      ]);
+      if (cancelled) return;
+      if (cashiersResult.status === 'fulfilled') {
+        setReportCashiers(cashiersResult.value);
+        setReportCashierTenantId(tenant?.id ?? '');
+      } else {
+        console.error(
+          'Failed to load the cashier directory from the server',
+          cashiersResult.reason
+        );
+        toast.error('The cashier directory could not be verified against the server.');
+      }
+      if (settingsResult.status === 'fulfilled') {
+        setReportSettings(settingsResult.value);
+        setReportSettingsTenantId(tenant?.id ?? '');
+      } else {
+        console.error('Failed to load report settings from the server', settingsResult.reason);
+        if (cashiersResult.status === 'fulfilled') {
+          toast.error('The business report settings could not be verified against the server.');
+        }
       }
     }
-    void loadCashierDirectory();
+    void loadReportReferenceData();
     return () => {
       cancelled = true;
     };
@@ -585,8 +617,9 @@ function ReportsContent() {
           loadSalesMetrics({
             from: range.preset === 'all' ? undefined : range.from,
             to: range.preset === 'all' ? undefined : range.to,
+            requireServer: true,
           }),
-          loadInventoryMetrics(Number(settings.expiryAlertDays) || 30),
+          loadInventoryMetrics(Number(settings.expiryAlertDays) || 30, { requireServer: true }),
         ]);
         if (cancelled) return;
         setSalesMetrics(nextSalesMetrics);
@@ -614,6 +647,7 @@ function ReportsContent() {
       const from = range.preset === 'all' ? undefined : range.from;
       const to = range.preset === 'all' ? undefined : range.to;
       setServerReportsLoading(true);
+      setServerReportError(null);
       try {
         const serverReportViews = [
           'sales',
@@ -630,41 +664,57 @@ function ReportsContent() {
           'input-vat',
           'stock-ledger',
           'customers',
+          'inventory',
+          'suppliers',
         ];
         const rowReports =
           activeView === 'overview'
-            ? ['sales']
+            ? ['sales', 'payment-methods']
             : activeView === 'vat'
               ? ['vat', 'input-vat']
               : activeView === 'discounts'
                 ? ['sales']
                 : activeView === 'profit'
                   ? ['sales-by-product']
-                  : serverReportViews.includes(activeView) &&
-                      activeView !== 'sales-by-cashier-detail'
-                    ? [activeView]
-                    : [];
+                  : ['low-stock', 'expiring', 'expired'].includes(activeView)
+                    ? ['inventory']
+                    : serverReportViews.includes(activeView) &&
+                        activeView !== 'sales-by-cashier-detail'
+                      ? [activeView]
+                      : [];
         const results = await Promise.all(
-          rowReports.map(async (report) => [
-            report,
-            await loadCompleteReportRows({
+          rowReports.map(async (report) => {
+            const requestInput = {
               report,
               from,
               to,
-            }),
-          ])
+            };
+            return {
+              report,
+              key: reportRequestKey({ ...requestInput, tenantId: tenant?.id }),
+              rows: await loadCompleteReportRows(requestInput),
+            };
+          })
         );
         if (!cancelled) {
-          setServerReportRows((current) => ({ ...current, ...Object.fromEntries(results) }));
+          setServerReportRows((current) => ({
+            ...current,
+            ...Object.fromEntries(results.map((result) => [result.report, result.rows])),
+          }));
+          setServerReportKeys((current) => ({
+            ...current,
+            ...Object.fromEntries(results.map((result) => [result.report, result.key])),
+          }));
         }
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load server report rows', error);
-          toast.error(
+          const message =
             error instanceof Error
               ? error.message
-              : 'The complete report could not be loaded. No partial result is being shown.'
-          );
+              : 'The complete report could not be loaded. No partial result is being shown.';
+          setServerReportError(message);
+          toast.error(message);
         }
       } finally {
         if (!cancelled) setServerReportsLoading(false);
@@ -679,29 +729,37 @@ function ReportsContent() {
   useEffect(() => {
     if (activeView !== 'sales-by-cashier' || cashierId === 'all') {
       setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': [] }));
+      setCashierDetailError(null);
       return;
     }
     let cancelled = false;
     async function loadCashierDetail() {
       setCashierDetailLoading(true);
+      setCashierDetailError(null);
       try {
-        const rows = await loadCompleteReportRows<SaleTransaction>({
+        const requestInput = {
           report: 'sales-by-cashier-detail',
           from: range.preset === 'all' ? undefined : range.from,
           to: range.preset === 'all' ? undefined : range.to,
           cashierId,
           cashierName,
-        });
+        };
+        const rows = await loadCompleteReportRows<SaleTransaction>(requestInput);
         if (cancelled) return;
         setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': rows }));
+        setServerReportKeys((current) => ({
+          ...current,
+          'sales-by-cashier-detail': reportRequestKey({ ...requestInput, tenantId: tenant?.id }),
+        }));
       } catch (error) {
         if (!cancelled) {
           console.error('Failed to load cashier detail report', error);
-          toast.error(
+          const message =
             error instanceof Error
               ? error.message
-              : 'The complete cashier report could not be loaded.'
-          );
+              : 'The complete cashier report could not be loaded.';
+          setCashierDetailError(message);
+          toast.error(message);
         }
       } finally {
         if (!cancelled) setCashierDetailLoading(false);
@@ -723,121 +781,17 @@ function ReportsContent() {
   ]);
 
   const data = useMemo(() => {
-    const completedSales = sales.filter(
-      (sale) => sale.status === 'completed' && isWithinRange(sale.timestamp, range)
-    );
-    const creditSales = completedSales.filter(isCreditSale);
-    const creditPaymentRows = sales
-      .filter((sale) => sale.status === 'completed' && isCreditSale(sale))
-      .flatMap((sale) =>
-        (sale.creditPayments ?? []).map((payment) => ({
-          sale,
-          payment,
-        }))
-      )
-      .filter((row) => isWithinRange(row.payment.recordedAt, range));
-    const recordedExpenses = expenses.filter(
-      (expense) => expense.status === 'recorded' && isWithinRange(expense.incurredAt, range)
-    );
-    const periodStockMovements = stockMovements.filter((movement) =>
-      isWithinRange(movement.createdAt, range)
-    );
-    const revenue = completedSales.reduce((sum, sale) => sum + sale.grandTotal, 0);
-    const receivables = creditSales.reduce(
-      (sum, sale) => sum + Number(sale.amountDue ?? sale.grandTotal),
-      0
-    );
-    const grossProfit = completedSales.reduce((sum, sale) => sum + profitForSale(sale), 0);
-    const expenseTotal = recordedExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-    const stockCostValue = inventory.reduce(
-      (sum, item) => sum + item.currentQty * item.unitCost,
-      0
-    );
-    const stockRetailValue = inventory.reduce(
-      (sum, item) => sum + item.currentQty * item.sellingPrice,
-      0
-    );
-    const lowStock = inventory.filter((item) =>
-      ['low', 'critical', 'out', 'expiring-soon', 'expired'].includes(item.stockStatus)
-    );
     const pendingSync = syncQueue.filter((item) => item.status !== 'synced').length;
-
-    const reportPaymentMethods = Array.from(
-      new Set([...(settings.paymentMethods ?? ['cash', 'card', 'mobile']), 'credit'])
-    );
-    const paymentTotals = reportPaymentMethods.map((method) => {
-      const methodSales = completedSales.filter((sale) => sale.paymentMethod === method);
-      return {
-        method,
-        total: methodSales.reduce((sum, sale) => sum + sale.grandTotal, 0),
-        collected: methodSales
-          .filter((sale) => !isCreditSale(sale))
-          .reduce((sum, sale) => sum + sale.grandTotal, 0),
-        creditCollected:
-          method === 'credit'
-            ? creditPaymentRows.reduce((sum, row) => sum + row.payment.amount, 0)
-            : 0,
-        receivable: methodSales
-          .filter(isCreditSale)
-          .reduce((sum, sale) => sum + Number(sale.amountDue ?? sale.grandTotal), 0),
-        count: methodSales.length,
-      };
-    });
-
-    const expensesByCategory = recordedExpenses.reduce((map, expense) => {
-      map.set(expense.category, (map.get(expense.category) ?? 0) + expense.amount);
-      return map;
-    }, new Map<string, number>());
-
-    const productRows = new Map<
-      string,
-      { name: string; qty: number; revenue: number; profit: number }
-    >();
-    const creditDueByCustomer = new Map<string, number>();
-    sales
-      .filter((sale) => sale.status === 'completed' && isCreditSale(sale))
-      .forEach((sale) => {
-        const key = (sale.customerName ?? 'Walk-in Customer').trim().toLowerCase();
-        creditDueByCustomer.set(
-          key,
-          (creditDueByCustomer.get(key) ?? 0) + Number(sale.amountDue ?? sale.grandTotal)
-        );
-      });
-    completedSales.forEach((sale) => {
-      sale.items.forEach((item) => {
-        const current = productRows.get(item.inventoryItemId) ?? {
-          name: item.name,
-          qty: 0,
-          revenue: 0,
-          profit: 0,
-        };
-        const lineRevenue = item.unitPrice * item.quantity * (1 - item.discount / 100);
-        current.qty += item.quantity;
-        current.revenue += lineRevenue;
-        current.profit +=
-          (item.unitPrice * (1 - item.discount / 100) - item.unitCost) * item.quantity;
-        productRows.set(item.inventoryItemId, current);
-      });
-    });
-
-    const metricRevenue = salesMetrics?.revenue ?? revenue;
-    const metricReceivables = salesMetrics?.receivables ?? receivables;
-    const metricGrossProfit = salesMetrics?.grossProfit ?? grossProfit;
-    const metricExpenseTotal = salesMetrics?.expenses ?? expenseTotal;
-    const metricProductRows =
-      salesMetrics?.topProducts ?? [...productRows.values()].sort((a, b) => b.revenue - a.revenue);
-    const metricExpenseCategories =
-      salesMetrics?.expenseCategories ??
-      [...expensesByCategory.entries()].sort((a, b) => b[1] - a[1]);
-    const metricStockCostValue = inventoryMetrics?.totalValue ?? stockCostValue;
-    const metricStockMargin =
-      inventoryMetrics?.potentialProfit ?? stockRetailValue - stockCostValue;
+    const metricRevenue = salesMetrics?.revenue ?? 0;
+    const metricReceivables = salesMetrics?.receivables ?? 0;
+    const metricGrossProfit = salesMetrics?.grossProfit ?? 0;
+    const metricExpenseTotal = salesMetrics?.expenses ?? 0;
+    const metricProductRows = salesMetrics?.topProducts ?? [];
+    const metricExpenseCategories = salesMetrics?.expenseCategories ?? [];
+    const metricStockCostValue = inventoryMetrics?.totalValue ?? 0;
+    const metricStockMargin = inventoryMetrics?.potentialProfit ?? 0;
 
     return {
-      completedSales,
-      creditSales,
-      creditPaymentRows,
-      recordedExpenses,
       revenue: metricRevenue,
       receivables: metricReceivables,
       grossProfit: metricGrossProfit,
@@ -847,27 +801,11 @@ function ReportsContent() {
       stockCostValue: metricStockCostValue,
       stockRetailValue: metricStockCostValue + metricStockMargin,
       stockMargin: metricStockMargin,
-      lowStock,
       pendingSync,
-      paymentTotals,
       expensesByCategory: metricExpenseCategories,
       productRows: metricProductRows,
-      stockMovements: periodStockMovements,
-      customerValue: [...customers].sort((a, b) => b.totalSpend - a.totalSpend),
-      creditDueByCustomer,
     };
-  }, [
-    customers,
-    expenses,
-    inventory,
-    inventoryMetrics,
-    range,
-    sales,
-    salesMetrics,
-    settings.paymentMethods,
-    stockMovements,
-    syncQueue,
-  ]);
+  }, [inventoryMetrics, salesMetrics, syncQueue]);
 
   const serverSalesRows = (serverReportRows.sales ?? []) as SaleTransaction[];
   const serverVatRows = (serverReportRows.vat ?? []) as SaleTransaction[];
@@ -884,7 +822,7 @@ function ReportsContent() {
     transfer?: number;
   }[];
   const serverCreditSalesRows = (serverReportRows['credit-sales'] ?? []) as SaleTransaction[];
-  const serverExpenseRows = (serverReportRows.expenses ?? []) as typeof expenses;
+  const serverExpenseRows = (serverReportRows.expenses ?? []) as ExpenseRecord[];
   const serverProductRows = (serverReportRows['sales-by-product'] ?? []) as {
     name: string;
     qty: number;
@@ -906,20 +844,39 @@ function ReportsContent() {
   const serverRefundRows = (serverReportRows.refunds ?? []) as SaleTransaction[];
   const serverVoidedRows = (serverReportRows.voided ?? []) as SaleTransaction[];
   const serverInputVatRows = (serverReportRows['input-vat'] ?? []) as InputVatRecord[];
-  const serverStockMovementRows = (serverReportRows['stock-ledger'] ?? []) as typeof stockMovements;
+  const serverStockMovementRows = (serverReportRows['stock-ledger'] ?? []) as StockMovement[];
   const serverCustomerRows = (serverReportRows.customers ?? []) as Array<
-    (typeof customers)[number] & { creditDue: number }
+    Customer & { creditDue: number }
   >;
+  const serverInventoryRows = (serverReportRows.inventory ?? []) as InventoryItem[];
+  const serverVendorRows = (serverReportRows.suppliers ?? []) as Vendor[];
 
   const hasServerRows = useCallback(
-    (report: string) => Object.prototype.hasOwnProperty.call(serverReportRows, report),
-    [serverReportRows]
+    (report: string) => {
+      const requestInput = {
+        tenantId: tenant?.id,
+        report,
+        from: range.preset === 'all' ? undefined : range.from,
+        to: range.preset === 'all' ? undefined : range.to,
+        ...(report === 'sales-by-cashier-detail' ? { cashierId, cashierName } : {}),
+      };
+      return (
+        Object.prototype.hasOwnProperty.call(serverReportRows, report) &&
+        serverReportKeys[report] === reportRequestKey(requestInput)
+      );
+    },
+    [
+      cashierId,
+      cashierName,
+      range.from,
+      range.preset,
+      range.to,
+      serverReportKeys,
+      serverReportRows,
+      tenant?.id,
+    ]
   );
-  const displaySalesRows = hasServerRows('sales')
-    ? serverSalesRows
-    : isOnline
-      ? []
-      : data.completedSales;
+  const displaySalesRows = hasServerRows('sales') ? serverSalesRows : [];
   const vatSalesRows = hasServerRows('vat') ? serverVatRows : displaySalesRows;
   const vatOutputRows: { sale: SaleTransaction; item: SaleLineItem | null; vat: number }[] = [];
   vatSalesRows.forEach((sale) => {
@@ -939,85 +896,26 @@ function ReportsContent() {
     serverCashierRows.find((row) => row.cashierId === cashierId)?.cashier;
   const selectedCashierKey = selectedCashierName?.trim().toLowerCase();
   const cashierDirectoryUsers = Array.from(
-    new Map([...reportCashiers, ...users].map((user) => [user.id, user] as const)).values()
+    new Map(
+      [...(reportCashierTenantId === tenant?.id ? reportCashiers : []), ...users].map(
+        (user) => [user.id, user] as const
+      )
+    ).values()
   );
   const selectedCashierNameIsUnique = Boolean(
     selectedCashierKey &&
     cashierDirectoryUsers.filter((user) => user.name.trim().toLowerCase() === selectedCashierKey)
       .length === 1
   );
-  const hasServerCashierRows = Object.prototype.hasOwnProperty.call(
-    serverReportRows,
-    'sales-by-cashier'
-  );
-  const localCashierRows = Object.entries(
-    data.completedSales
-      .filter(
-        (sale) =>
-          cashierId === 'all' ||
-          sale.cashierId === cashierId ||
-          (!sale.cashierId &&
-            selectedCashierNameIsUnique &&
-            sale.cashier.trim().toLowerCase() === selectedCashierKey)
-      )
-      .reduce(
-        (map, sale) => {
-          const key = sale.cashierId ?? `name:${sale.cashier}`;
-          const paymentAmounts = paymentAmountsForSale(sale);
-          const current = map[key] ?? {
-            cashierId: key,
-            cashier: sale.cashier,
-            transactions: 0,
-            revenue: 0,
-            profit: 0,
-            cash: 0,
-            card: 0,
-            transfer: 0,
-          };
-          current.transactions += 1;
-          current.revenue += sale.grandTotal;
-          current.profit += profitForSale(sale);
-          current.cash += paymentAmounts.cash ?? 0;
-          current.card += paymentAmounts.card ?? 0;
-          current.transfer += paymentAmounts['bank-transfer'] ?? 0;
-          map[key] = current;
-          return map;
-        },
-        {} as Record<
-          string,
-          {
-            cashierId: string;
-            cashier: string;
-            transactions: number;
-            revenue: number;
-            profit: number;
-            cash: number;
-            card: number;
-            transfer: number;
-          }
-        >
-      )
-  ).map(([, row]) => row);
-  const displayCashierRows = hasServerCashierRows
-    ? serverCashierRows
-    : isOnline
-      ? []
-      : localCashierRows;
-  const matchesSelectedCashier = (sale: SaleTransaction) =>
-    cashierId !== 'all' &&
-    (sale.cashierId === cashierId ||
-      (!sale.cashierId &&
-        selectedCashierNameIsUnique &&
-        Boolean(selectedCashierKey) &&
-        sale.cashier.trim().toLowerCase() === selectedCashierKey));
-  const localCashierDetailRows = data.completedSales.filter((sale) => matchesSelectedCashier(sale));
+  const hasServerCashierRows = hasServerRows('sales-by-cashier');
+  const displayCashierRows = hasServerCashierRows ? serverCashierRows : [];
   // The server has already applied the tenant, cashier, status, and date
   // predicates. Re-filtering here incorrectly discarded legacy sales whose
   // stored payload predates cashierId, even though the server safely matched
   // them by the uniquely identified cashier name.
   const cashierDetailSales = hasServerRows('sales-by-cashier-detail')
     ? serverCashierDetailRows
-    : localCashierDetailRows;
+    : [];
   const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
     sale.items.map((item) => ({ sale, item }))
   );
@@ -1054,7 +952,7 @@ function ReportsContent() {
           }
         )
       : undefined;
-  const localCashierTenderSummary = cashierDetailSales.reduce(
+  const itemizedCashierTenderSummary = cashierDetailSales.reduce(
     (summary, sale) => {
       const amounts = paymentAmountsForSale(sale);
       summary.total += sale.grandTotal;
@@ -1072,7 +970,7 @@ function ReportsContent() {
         card: selectedCashierSummary.card ?? 0,
         transfer: selectedCashierSummary.transfer ?? 0,
       }
-    : localCashierTenderSummary;
+    : itemizedCashierTenderSummary;
   const cashierOtherTender = Math.max(
     0,
     cashierTenderSummary.total -
@@ -1082,67 +980,17 @@ function ReportsContent() {
   );
   const cashierSummaryLoading = serverReportsLoading && !selectedCashierSummary;
 
-  const displayCreditSalesRows = hasServerRows('credit-sales')
-    ? serverCreditSalesRows
-    : isOnline
-      ? []
-      : data.creditSales;
-  const displayExpenseRows = hasServerRows('expenses')
-    ? serverExpenseRows
-    : isOnline
-      ? []
-      : data.recordedExpenses;
-  const displayProductRows = hasServerRows('sales-by-product')
-    ? serverProductRows
-    : isOnline
-      ? []
-      : data.productRows;
-  const displayCategoryRows = hasServerRows('sales-by-category')
-    ? serverCategoryRows
-    : isOnline
-      ? []
-      : Object.entries(
-          data.completedSales.reduce(
-            (map, sale) => {
-              sale.items.forEach((item) => {
-                const current = map[item.category] ?? { qty: 0, revenue: 0 };
-                current.qty += item.quantity;
-                current.revenue += item.lineTotal;
-                map[item.category] = current;
-              });
-              return map;
-            },
-            {} as Record<string, { qty: number; revenue: number }>
-          )
-        ).map(([category, row]) => ({ category, ...row }));
-  const displayPaymentRows = hasServerRows('payment-methods')
-    ? serverPaymentRows
-    : isOnline
-      ? []
-      : data.paymentTotals;
-  const displayRefundRows = hasServerRows('refunds')
-    ? serverRefundRows
-    : isOnline
-      ? []
-      : sales.filter((sale) => sale.status === 'refunded' && isWithinRange(sale.timestamp, range));
-  const displayVoidedRows = hasServerRows('voided')
-    ? serverVoidedRows
-    : isOnline
-      ? []
-      : sales.filter((sale) => sale.status === 'voided' && isWithinRange(sale.timestamp, range));
-  const displayStockMovementRows = hasServerRows('stock-ledger')
-    ? serverStockMovementRows
-    : isOnline
-      ? []
-      : data.stockMovements;
-  const displayCustomerRows = hasServerRows('customers')
-    ? serverCustomerRows
-    : isOnline
-      ? []
-      : data.customerValue.map((customer) => ({
-          ...customer,
-          creditDue: data.creditDueByCustomer.get(customer.name.trim().toLowerCase()) ?? 0,
-        }));
+  const displayCreditSalesRows = hasServerRows('credit-sales') ? serverCreditSalesRows : [];
+  const displayExpenseRows = hasServerRows('expenses') ? serverExpenseRows : [];
+  const displayProductRows = hasServerRows('sales-by-product') ? serverProductRows : [];
+  const displayCategoryRows = hasServerRows('sales-by-category') ? serverCategoryRows : [];
+  const displayPaymentRows = hasServerRows('payment-methods') ? serverPaymentRows : [];
+  const displayRefundRows = hasServerRows('refunds') ? serverRefundRows : [];
+  const displayVoidedRows = hasServerRows('voided') ? serverVoidedRows : [];
+  const displayStockMovementRows = hasServerRows('stock-ledger') ? serverStockMovementRows : [];
+  const displayCustomerRows = hasServerRows('customers') ? serverCustomerRows : [];
+  const displayInventoryRows = hasServerRows('inventory') ? serverInventoryRows : [];
+  const displayVendorRows = hasServerRows('suppliers') ? serverVendorRows : [];
 
   const maxPayment = Math.max(
     ...displayPaymentRows.map(
@@ -1196,7 +1044,7 @@ function ReportsContent() {
       .sort(([, left], [, right]) => left.localeCompare(right))
       .map(([value, label]) => ({ value, label })),
   ];
-  const exportTable = useMemo(() => {
+  const exportTable = (() => {
     if (activeView === 'sales-by-cashier') {
       if (cashierId !== 'all') {
         return {
@@ -1359,7 +1207,7 @@ function ReportsContent() {
           'Location',
           'Status',
         ],
-        rows: inventory.map((item) => [
+        rows: displayInventoryRows.map((item) => [
           item.name,
           item.genericName,
           item.sku,
@@ -1456,7 +1304,7 @@ function ReportsContent() {
       return {
         filename: 'low-stock-report',
         headers: ['Product', 'SKU', 'Qty', 'Reorder', 'Status'],
-        rows: inventory
+        rows: displayInventoryRows
           .filter((item) => item.currentQty <= item.reorderLevel)
           .map((item) => [
             item.name,
@@ -1473,7 +1321,7 @@ function ReportsContent() {
       return {
         filename: `${activeView}-products-report`,
         headers: ['Product', 'SKU', 'Batch', 'Expiry', 'Qty'],
-        rows: inventory
+        rows: displayInventoryRows
           .filter((item) => item.stockStatus === wantedStatus)
           .map((item) => [
             item.name,
@@ -1489,7 +1337,7 @@ function ReportsContent() {
       return {
         filename: 'supplier-report',
         headers: ['Supplier', 'Contact', 'Phone', 'Terms', 'Balance'],
-        rows: vendors.map((vendor) => [
+        rows: displayVendorRows.map((vendor) => [
           vendor.name,
           vendor.contactName,
           vendor.phone,
@@ -1556,18 +1404,7 @@ function ReportsContent() {
     }
 
     if (activeView === 'audit') {
-      const auditRows =
-        isOnline && hasServerRows('audit')
-          ? serverReportRows.audit
-          : !isOnline
-            ? syncQueue.map((item) => ({
-                createdAt: item.createdAt,
-                entityType: item.entity,
-                action: item.action,
-                userId: '-',
-                operationId: item.operationId,
-              }))
-            : [];
+      const auditRows = hasServerRows('audit') ? serverReportRows.audit : [];
       return {
         filename: 'audit-report',
         headers: ['Created', 'Entity', 'Action', 'User', 'Operation'],
@@ -1617,32 +1454,7 @@ function ReportsContent() {
         ['Pending Sync', data.pendingSync.toString()],
       ],
     };
-  }, [
-    activeView,
-    cashierId,
-    cashierDetailItemRows,
-    data,
-    displayCreditSalesRows,
-    displayCustomerRows,
-    displayExpenseRows,
-    displayPaymentRows,
-    displayProductRows,
-    displaySalesRows,
-    displayCashierRows,
-    displayCategoryRows,
-    displayRefundRows,
-    displayStockMovementRows,
-    displayVoidedRows,
-    inventory,
-    isOnline,
-    hasServerRows,
-    serverInputVatRows,
-    serverReportRows,
-    settings.currency,
-    syncQueue,
-    vatOutputRows,
-    vendors,
-  ]);
+  })();
 
   const exportReport = async (format: 'csv' | 'json' | 'excel' | 'pdf') => {
     if (!isOnline) {
@@ -1932,10 +1744,21 @@ function ReportsContent() {
 
             {!isOnline && (
               <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-                <p className="font-semibold">Offline report preview</p>
+                <p className="font-semibold">Server connection required</p>
                 <p className="mt-1">
-                  These rows come from this device’s tenant-isolated cache and may not contain the
-                  complete history. Reconnect for authoritative totals and exports.
+                  Reports are never substituted with browser-only data. Any rows still visible are
+                  the last successfully verified server result; reconnect and press Refresh for the
+                  latest database values.
+                </p>
+              </section>
+            )}
+
+            {(serverReportError || cashierDetailError) && (
+              <section className="rounded-xl border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
+                <p className="font-semibold">Report could not be verified</p>
+                <p className="mt-1">
+                  {cashierDetailError ?? serverReportError} No unverified or older result is being
+                  presented as the selected report. Press Refresh to try again.
                 </p>
               </section>
             )}
@@ -1968,16 +1791,25 @@ function ReportsContent() {
                 />
                 <ReportPanel title="Payment mix">
                   <div className="space-y-4">
-                    {data.paymentTotals.map((item) => (
+                    {displayPaymentRows.map((item) => (
                       <MetricBar
                         key={item.method}
                         label={`${paymentMethodLabel(item.method)} (${item.count})`}
                         value={
                           item.receivable > 0
                             ? `${formatMoney(item.receivable, settings.currency)} due`
-                            : formatMoney(item.collected + item.creditCollected, settings.currency)
+                            : formatMoney(
+                                item.collected +
+                                  ('creditCollected' in item ? Number(item.creditCollected) : 0),
+                                settings.currency
+                              )
                         }
-                        percent={((item.total + item.creditCollected) / maxPayment) * 100}
+                        percent={
+                          ((item.total +
+                            ('creditCollected' in item ? Number(item.creditCollected) : 0)) /
+                            maxPayment) *
+                          100
+                        }
                       />
                     ))}
                   </div>
@@ -2170,7 +2002,7 @@ function ReportsContent() {
                   'Status',
                 ]}
                 empty="No inventory records."
-                rows={inventory.map((item) => [
+                rows={displayInventoryRows.map((item) => [
                   item.name,
                   item.genericName,
                   item.sku,
@@ -2192,7 +2024,7 @@ function ReportsContent() {
             {activeView === 'stock-ledger' && (
               <ReportTable
                 title="Stock movement ledger"
-                subtitle="Every local stock deduction is recorded as a delta for safer offline sync"
+                subtitle="Authoritative stock deductions and adjustments recorded by the server"
                 headers={[
                   'Date',
                   'Product',
@@ -2266,7 +2098,11 @@ function ReportsContent() {
                 title="Cashier summary"
                 subtitle="Select a cashier above to inspect the itemized statement."
                 headers={['Cashier', 'Transactions', 'Revenue', 'Profit']}
-                empty="No cashier sales recorded in this period."
+                empty={
+                  serverReportError
+                    ? 'The cashier report is unavailable because the server request failed.'
+                    : 'No cashier sales recorded in this period.'
+                }
                 rows={displayCashierRows
                   .slice()
                   .sort((left, right) => right.revenue - left.revenue)
@@ -2295,7 +2131,9 @@ function ReportsContent() {
                     <p className="mt-2 text-2xl font-bold font-tabular">
                       {cashierSummaryLoading
                         ? 'Loading…'
-                        : formatMoney(Number(amount), settings.currency)}
+                        : serverReportError
+                          ? 'Unavailable'
+                          : formatMoney(Number(amount), settings.currency)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       Selected cashier and period
@@ -2310,9 +2148,11 @@ function ReportsContent() {
                 subtitle="Every item sold in the selected period; returned/refunded sales are excluded from completed sales."
                 headers={['Date', 'Receipt', 'Item', 'Qty', 'Unit Price', 'Line Total', 'Payment']}
                 empty={
-                  cashierDetailLoading
-                    ? 'Loading this cashier’s sales from the database…'
-                    : 'No completed sales for this cashier in the selected period.'
+                  cashierDetailError
+                    ? 'The cashier report is unavailable because the server request failed.'
+                    : cashierDetailLoading
+                      ? 'Loading this cashier’s sales from the database…'
+                      : 'No completed sales for this cashier in the selected period.'
                 }
                 rows={cashierDetailItemRows.map(({ sale, item }) => [
                   new Date(sale.timestamp).toLocaleString(),
@@ -2380,7 +2220,7 @@ function ReportsContent() {
                 subtitle="Products at or below reorder level"
                 headers={['Product', 'SKU', 'Qty', 'Reorder', 'Status']}
                 empty="No low-stock products."
-                rows={inventory
+                rows={displayInventoryRows
                   .filter((item) => item.currentQty <= item.reorderLevel)
                   .map((item) => [
                     item.name,
@@ -2398,7 +2238,7 @@ function ReportsContent() {
                 subtitle="Products marked as expiring soon"
                 headers={['Product', 'SKU', 'Batch', 'Expiry', 'Qty']}
                 empty="No expiring products."
-                rows={inventory
+                rows={displayInventoryRows
                   .filter((item) => item.stockStatus === 'expiring-soon')
                   .map((item) => [
                     item.name,
@@ -2416,7 +2256,7 @@ function ReportsContent() {
                 subtitle="Products blocked from sale because expiry date has passed"
                 headers={['Product', 'SKU', 'Batch', 'Expiry', 'Qty']}
                 empty="No expired products."
-                rows={inventory
+                rows={displayInventoryRows
                   .filter((item) => item.stockStatus === 'expired')
                   .map((item) => [
                     item.name,
@@ -2434,7 +2274,7 @@ function ReportsContent() {
                 subtitle="Supplier records and balances"
                 headers={['Supplier', 'Contact', 'Phone', 'Terms', 'Balance']}
                 empty="No suppliers recorded yet."
-                rows={vendors.map((vendor) => [
+                rows={displayVendorRows.map((vendor) => [
                   vendor.name,
                   vendor.contactName,
                   vendor.phone,
@@ -2542,20 +2382,10 @@ function ReportsContent() {
             {activeView === 'audit' && (
               <ReportTable
                 title="Audit trail"
-                subtitle="Authoritative server audit events and local sync status"
+                subtitle="Authoritative server audit events"
                 headers={['Created', 'Entity', 'Action', 'User', 'Operation']}
                 empty="No audit events yet."
-                rows={(isOnline && hasServerRows('audit')
-                  ? serverReportRows.audit
-                  : !isOnline
-                    ? syncQueue.map((item) => ({
-                        createdAt: item.createdAt,
-                        entityType: item.entity,
-                        action: item.action,
-                        userId: '-',
-                        operationId: item.operationId,
-                      }))
-                    : [])!.map((item) => {
+                rows={(hasServerRows('audit') ? serverReportRows.audit : []).map((item) => {
                   const row = item as {
                     createdAt?: string;
                     entityType?: string;

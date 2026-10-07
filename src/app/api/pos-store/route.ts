@@ -373,6 +373,40 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   const values: unknown[] = [auth.tenantId];
   const where: string[] = ['tenant_id = $1'];
 
+  if (report === 'inventory') {
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `SELECT data
+       FROM pos_tenant_inventory
+       WHERE tenant_id = $1 AND product_status = 'active'
+       ORDER BY lower(name) ASC, id ASC
+       LIMIT $2 OFFSET $3`,
+      values
+    );
+    return NextResponse.json({
+      rows: result.rows.map((row) => protectInventoryFinancials(row.data, auth)),
+      limit,
+      offset,
+    });
+  }
+
+  if (report === 'suppliers') {
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `SELECT data
+       FROM pos_tenant_records
+       WHERE tenant_id = $1 AND store_name = 'vendors'
+       ORDER BY lower(data->>'name') ASC, record_id ASC
+       LIMIT $2 OFFSET $3`,
+      values
+    );
+    return NextResponse.json({
+      rows: result.rows.map((row) => row.data),
+      limit,
+      offset,
+    });
+  }
+
   if (report === 'vat') {
     appendDateRange(params, 'timestamp', values, where);
     where.push("status = 'completed'");
@@ -424,7 +458,6 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
               SELECT count(*)
               FROM pos_app_users report_user
               WHERE report_user.tenant_id = $1
-                AND report_user.status = 'active'
                 AND lower(regexp_replace(trim(report_user.name), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${cashierNameParam}), '\\s+', ' ', 'g'))
             )
             AND (
@@ -507,7 +540,6 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
               SELECT count(*)
               FROM pos_app_users report_user
               WHERE report_user.tenant_id = $1
-                AND report_user.status = 'active'
                 AND lower(regexp_replace(trim(report_user.name), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
             )
             AND (

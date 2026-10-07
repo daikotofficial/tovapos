@@ -22,6 +22,17 @@ const baseUrl = process.env.TEST_BASE_URL || 'http://localhost:4028';
 const stamp = Date.now();
 const tenantIds = [];
 
+function businessDateKey(value) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value));
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
 if (!databaseUrl) throw new Error('DATABASE_URL is required for integration-test cleanup');
 
 async function request(path, options = {}) {
@@ -557,6 +568,30 @@ try {
   assert.equal(completeReportMetrics.response.status, 200);
   assert.equal(completeReportMetrics.body.grossProfit, 40);
   assert.equal(completeReportMetrics.body.netProfit, 40);
+  const reportSale = completeSalesReport.body.rows[0];
+  const reportDate = businessDateKey(reportSale.timestamp);
+  assert.equal(typeof reportSale.cashierId, 'string');
+  const [strictCashierRange, excludedCashierRange] = await Promise.all([
+    authenticated(
+      `/api/pos-store?store=sales&report=sales-by-cashier-detail&cashierId=${encodeURIComponent(reportSale.cashierId)}&cashierName=${encodeURIComponent(reportSale.cashier)}&from=${reportDate}&to=${reportDate}&limit=10`,
+      reportViewerCookie
+    ),
+    authenticated(
+      `/api/pos-store?store=sales&report=sales-by-cashier-detail&cashierId=${encodeURIComponent(reportSale.cashierId)}&cashierName=${encodeURIComponent(reportSale.cashier)}&from=2000-01-01&to=2000-01-01&limit=10`,
+      reportViewerCookie
+    ),
+  ]);
+  assert.equal(strictCashierRange.response.status, 200);
+  assert.equal(strictCashierRange.body.rows.length, 5);
+  assert.equal(
+    strictCashierRange.body.rows.every(
+      (sale) =>
+        sale.cashierId === reportSale.cashierId && businessDateKey(sale.timestamp) === reportDate
+    ),
+    true
+  );
+  assert.equal(excludedCashierRange.response.status, 200);
+  assert.equal(excludedCashierRange.body.rows.length, 0);
   const acceptedIndex = sales.findIndex((result) => result.response.status === 201);
   const replay = await authenticated(
     '/api/commands/sale',
