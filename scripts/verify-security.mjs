@@ -327,6 +327,86 @@ try {
   );
   assert.equal(privilegeEscalation.response.status, 403);
   assert.equal(privilegeEscalation.body.code, 'PERMISSION_ESCALATION_FORBIDDEN');
+
+  const reportViewerEmail = `report-viewer-${stamp}@example.test`;
+  const reportViewerCreate = await authenticated(
+    '/api/pos-store?store=users',
+    companyA.cookie,
+    {
+      id: `report-viewer-${stamp}`,
+      name: 'Read Only Report Viewer',
+      email: reportViewerEmail,
+      role: 'viewer',
+      permissions: ['view-only', 'reports'],
+      status: 'active',
+      pin: '',
+      newPassword: 'Strong!Reporter123',
+      createdAt: new Date().toISOString(),
+    },
+    'PUT'
+  );
+  assert.equal(reportViewerCreate.response.status, 200);
+  const reportViewerLogin = await request('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: reportViewerEmail,
+      password: 'Strong!Reporter123',
+      remember: false,
+    }),
+  });
+  assert.equal(reportViewerLogin.response.status, 200);
+  const reportViewerCookie = reportViewerLogin.response.headers.get('set-cookie').split(';')[0];
+  const [reportUsers, reportInventory, reportInventoryMetrics, reportSettings, emptySalesReport] =
+    await Promise.all([
+      authenticated('/api/pos-store?store=users', reportViewerCookie),
+      authenticated(`/api/pos-store?store=inventory&ids=${sharedId}`, reportViewerCookie),
+      authenticated('/api/pos-store?store=inventory&metrics=true', reportViewerCookie),
+      authenticated('/api/pos-store?store=settings', reportViewerCookie),
+      authenticated('/api/pos-store?store=sales&report=sales&limit=10', reportViewerCookie),
+    ]);
+  assert.equal(reportUsers.response.status, 200);
+  assert.equal(
+    reportUsers.body.some((user) => user.name === 'Restricted Cashier'),
+    true
+  );
+  assert.equal(
+    reportUsers.body.some((user) => user.name === 'Delegated Manager'),
+    true
+  );
+  assert.equal(
+    reportUsers.body.some((user) => user.name === 'Owner b'),
+    false
+  );
+  assert.equal(
+    reportUsers.body
+      .filter((user) => user.id !== `report-viewer-${stamp}`)
+      .every((user) => user.email === '' && user.permissions.length === 0 && user.pin === ''),
+    true
+  );
+  assert.equal(reportInventory.response.status, 200);
+  assert.equal(reportInventory.body[0].unitCost, 2);
+  assert.equal(reportInventoryMetrics.response.status, 200);
+  assert.equal(reportInventoryMetrics.body.totalValue, 10);
+  assert.equal(reportInventoryMetrics.body.potentialProfit, 40);
+  assert.equal(reportSettings.response.status, 200);
+  assert.equal(reportSettings.body[0].businessName, companyA.tenant.name);
+  assert.equal('paystackCustomerCode' in reportSettings.body[0], false);
+  assert.equal(emptySalesReport.response.status, 200);
+  const reportViewerWrite = await authenticated(
+    '/api/commands/stock-adjustment',
+    reportViewerCookie,
+    {
+      operationId: `report-viewer-write-${stamp}`,
+      idempotencyKey: `report-viewer-write:${stamp}`,
+      inventoryItemId: sharedId,
+      quantityDelta: 1,
+      reason: 'Permission regression check',
+    }
+  );
+  assert.equal(reportViewerWrite.response.status, 403);
+  assert.equal(reportViewerWrite.body.code, 'FORBIDDEN');
+
   const cashierLogin = await request('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -457,6 +537,26 @@ try {
   );
   assert.equal(sales.filter((result) => result.response.status === 201).length, 5);
   assert.equal(sales.filter((result) => result.response.status === 409).length, 5);
+  const [completeSalesReport, completeCashierReport, completeReportMetrics] = await Promise.all([
+    authenticated('/api/pos-store?store=sales&report=sales&limit=10', reportViewerCookie),
+    authenticated(
+      '/api/pos-store?store=sales&report=sales-by-cashier&limit=10',
+      reportViewerCookie
+    ),
+    authenticated('/api/pos-store?store=sales&metrics=true', reportViewerCookie),
+  ]);
+  assert.equal(completeSalesReport.response.status, 200);
+  assert.equal(completeSalesReport.body.rows.length, 5);
+  assert.equal(completeSalesReport.body.rows[0].items[0].unitCost, 2);
+  assert.equal(completeCashierReport.response.status, 200);
+  assert.equal(
+    completeCashierReport.body.rows.some((row) => row.cashier === 'Owner a'),
+    true
+  );
+  assert.equal(completeCashierReport.body.rows[0].profit > 0, true);
+  assert.equal(completeReportMetrics.response.status, 200);
+  assert.equal(completeReportMetrics.body.grossProfit, 40);
+  assert.equal(completeReportMetrics.body.netProfit, 40);
   const acceptedIndex = sales.findIndex((result) => result.response.status === 201);
   const replay = await authenticated(
     '/api/commands/sale',

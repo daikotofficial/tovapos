@@ -201,8 +201,46 @@ function authAllows(auth: AuthContext, permission: Permission): boolean {
   );
 }
 
+/**
+ * Report permission is an accounting read boundary, not a partial-data flag.
+ * A report reader must receive the same report figures as an owner or the
+ * report becomes misleading (for example, zero cost would inflate profit).
+ * Mutation endpoints continue to use assertWritePermission independently.
+ */
+function hasCompleteReportReadAccess(auth: AuthContext): boolean {
+  return authAllows(auth, 'reports');
+}
+
+function authAllowsReportFinancials(auth: AuthContext, permission: Permission): boolean {
+  return hasCompleteReportReadAccess(auth) || authAllows(auth, permission);
+}
+
+function reportSafeSettings(data: Record<string, unknown>): Record<string, unknown> {
+  const reportFields = [
+    'id',
+    'businessName',
+    'businessMode',
+    'activeBusinessMode',
+    'currency',
+    'taxName',
+    'taxNumber',
+    'taxRate',
+    'taxRates',
+    'taxMode',
+    'subscriptionPlanId',
+    'subscriptionStatus',
+    'subscriptionRenewsAt',
+    'expiryAlertDays',
+    'paymentMethods',
+    'updatedAt',
+  ];
+  return Object.fromEntries(
+    reportFields.flatMap((field) => (field in data ? [[field, data[field]]] : []))
+  );
+}
+
 function protectSaleFinancials(data: Record<string, unknown>, auth: AuthContext) {
-  if (authAllows(auth, 'view-cost-price')) return data;
+  if (authAllowsReportFinancials(auth, 'view-cost-price')) return data;
   const items = Array.isArray(data.items)
     ? data.items.map((item) => (item && typeof item === 'object' ? { ...item, unitCost: 0 } : item))
     : data.items;
@@ -219,7 +257,7 @@ function protectInventoryFinancials(data: Record<string, unknown>, auth: AuthCon
     packPrice: hasPackPricing ? packPrice : undefined,
     packQuantity: hasPackPricing ? packQuantity : undefined,
   };
-  if (authAllows(auth, 'view-cost-price')) return normalized;
+  if (authAllowsReportFinancials(auth, 'view-cost-price')) return normalized;
   const { unitCost: _unitCost, profitMargin: _profitMargin, ...safe } = normalized;
   return { ...safe, unitCost: 0, profitMargin: 0 };
 }
@@ -259,8 +297,12 @@ async function getInventoryMetrics(request: NextRequest, auth: AuthContext) {
     outOfStock: Number(row.out_of_stock ?? 0),
     expired: Number(row.expired ?? 0),
     expiringSoon: Number(row.expiring_soon ?? 0),
-    totalValue: authAllows(auth, 'view-cost-price') ? Number(row.total_value ?? 0) : 0,
-    potentialProfit: authAllows(auth, 'view-profit') ? Number(row.potential_profit ?? 0) : 0,
+    totalValue: authAllowsReportFinancials(auth, 'view-cost-price')
+      ? Number(row.total_value ?? 0)
+      : 0,
+    potentialProfit: authAllowsReportFinancials(auth, 'view-profit')
+      ? Number(row.potential_profit ?? 0)
+      : 0,
   });
 }
 
@@ -437,7 +479,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         cash: Number(row.cash ?? 0),
         card: Number(row.card ?? 0),
         transfer: Number(row.transfer ?? 0),
-        profit: authAllows(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
+        profit: authAllowsReportFinancials(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
       })),
       limit,
       offset,
@@ -681,7 +723,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     return NextResponse.json({
       rows: result.rows.map((row) => ({
         ...row,
-        profit: authAllows(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
+        profit: authAllowsReportFinancials(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
       })),
       limit,
       offset,
@@ -712,7 +754,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     return NextResponse.json({
       rows: result.rows.map((row) => ({
         ...row,
-        profit: authAllows(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
+        profit: authAllowsReportFinancials(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
       })),
       limit,
       offset,
@@ -835,8 +877,8 @@ async function getSalesMetrics(request: NextRequest, auth: AuthContext) {
 
   const sales = salesResult.rows[0] ?? {};
   const expenses = Number(expenseResult.rows[0]?.expenses ?? 0);
-  const canViewProfit = authAllows(auth, 'view-profit');
-  const canViewExpenses = authAllows(auth, 'expenses');
+  const canViewProfit = authAllowsReportFinancials(auth, 'view-profit');
+  const canViewExpenses = authAllowsReportFinancials(auth, 'expenses');
   const grossProfit = canViewProfit ? Number(sales.gross_profit ?? 0) : 0;
   return NextResponse.json({
     completedCount: Number(sales.completed_count ?? 0),
@@ -1087,7 +1129,7 @@ export async function GET(request: NextRequest) {
     await assertRetailOnlyFeature(auth, storeName);
     if (
       isViewOnlyUser(auth) &&
-      (storeName === 'settings' ||
+      ((storeName === 'settings' && !hasCompleteReportReadAccess(auth)) ||
         (storeName === 'users' && !auth.user.permissions.includes('reports')))
     ) {
       throw new HttpError(403, 'View-only accounts cannot access administration data', 'FORBIDDEN');
@@ -1165,6 +1207,9 @@ export async function GET(request: NextRequest) {
       [auth.tenantId, storeName]
     );
 
+    if (storeName === 'settings' && isViewOnlyUser(auth)) {
+      return NextResponse.json(result.rows.map((row) => reportSafeSettings(row.data)));
+    }
     return NextResponse.json(result.rows.map((row) => row.data));
   } catch (error) {
     return errorResponse(error);
