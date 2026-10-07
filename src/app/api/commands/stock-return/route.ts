@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
 
     const body = (await request.json()) as Record<string, unknown>;
     const productId = text(body.productId);
+    const saleId = text(body.saleId);
     const reason = text(body.reason);
     const notes = text(body.notes);
     const quantity = positive(body.quantity, 'Return quantity');
@@ -127,6 +128,7 @@ export async function POST(request: NextRequest) {
       let restoredStockQuantity = 0;
       stage = 'calculating return';
       for (const row of salesResult.rows) {
+        if (saleId && String(row.id) !== saleId) continue;
         if (remaining <= 0) break;
         const sale = row.data as SaleTransaction;
         const lines = Array.isArray(sale.items) ? sale.items as ReturnableLine[] : [];

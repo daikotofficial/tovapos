@@ -16,6 +16,16 @@ const inputClass = 'w-full rounded-lg border border-border bg-background px-3 py
 const labelClass = 'mb-1.5 block text-xs font-semibold text-muted-foreground';
 
 type Action = 'receive' | 'return';
+type ReturnableSale = {
+  saleId: string;
+  transactionId: string;
+  timestamp: string;
+  itemName: string;
+  quantity: number;
+  returnableQuantity: number;
+  unitPrice: number;
+  returnedQuantity: number;
+};
 
 function nextExpiry(): string {
   const date = new Date();
@@ -33,6 +43,7 @@ export default function StockManagementScreen() {
   const [liveSuggestions, setLiveSuggestions] = useState<InventoryItem[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [batches, setBatches] = useState<StockBatch[]>([]);
+  const [returnableSales, setReturnableSales] = useState<ReturnableSale[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [audits, setAudits] = useState<{ id: number; action: string; metadata?: Record<string, unknown>; createdAt: string; userId: string }[]>([]);
   const [selectedBatch, setSelectedBatch] = useState<StockBatch | null>(null);
@@ -47,6 +58,7 @@ export default function StockManagementScreen() {
   const [supplierPhone, setSupplierPhone] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [batchId, setBatchId] = useState('');
+  const [selectedSaleId, setSelectedSaleId] = useState('');
   const [reason, setReason] = useState('Damaged');
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -97,9 +109,10 @@ export default function StockManagementScreen() {
     setLoadingBatches(true);
     try {
       const response = await fetch(`/api/commands/stock-management?productId=${encodeURIComponent(product.id)}`);
-      const payload = (await response.json()) as { batches?: StockBatch[]; movements?: StockMovement[]; audits?: { id: number; action: string; metadata?: Record<string, unknown>; createdAt: string; userId: string }[]; error?: string };
+      const payload = (await response.json()) as { batches?: StockBatch[]; returnableSales?: ReturnableSale[]; movements?: StockMovement[]; audits?: { id: number; action: string; metadata?: Record<string, unknown>; createdAt: string; userId: string }[]; error?: string };
       if (!response.ok) throw new Error(payload.error ?? 'Unable to load product batches');
       setBatches(payload.batches ?? []);
+      setReturnableSales(payload.returnableSales ?? []);
       setMovements(payload.movements ?? []);
       setAudits(payload.audits ?? []);
     } catch (error) {
@@ -125,6 +138,7 @@ export default function StockManagementScreen() {
     setSupplierPhone(selectedProduct.supplierPhone ?? '');
     setInvoiceNumber('');
     setBatchId('');
+    setSelectedSaleId('');
     setReason('Damaged');
     setNotes('');
     setShowActionModal(true);
@@ -136,6 +150,7 @@ export default function StockManagementScreen() {
     const parsedQuantity = Number(quantity);
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) { toast.error('Enter a quantity greater than zero.'); return; }
     if (action === 'receive' && (!Number(unitCost) || Number(unitCost) <= 0)) { toast.error('Enter the purchase/cost price.'); return; }
+    if (action === 'return' && !selectedSaleId) { toast.error('Select the original sale receipt for this customer return.'); return; }
     setIsSaving(true);
     try {
       const operationId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -144,7 +159,7 @@ export default function StockManagementScreen() {
       const response = await fetch(action === 'return' ? '/api/commands/stock-return' : '/api/commands/stock-management', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(action === 'return'
-          ? { operationId, productId: selectedProduct.id, quantity: parsedQuantity, reason, notes }
+          ? { operationId, productId: selectedProduct.id, saleId: selectedSaleId, quantity: parsedQuantity, reason, notes }
           : { operationId, action, productId: selectedProduct.id, quantity: parsedQuantity, unitCost: Number(unitCost), sellingPrice: sellingPrice ? Number(sellingPrice) : undefined, expiryDate, sku, barcode, supplier, supplierPhone, invoiceNumber, reason, notes }),
       });
       const payload = (await response.json()) as { inventory?: InventoryItem; movement?: StockMovement; error?: string };
@@ -203,7 +218,7 @@ export default function StockManagementScreen() {
       <AddStockModal open={showAddProduct} onClose={() => setShowAddProduct(false)} editItem={null} onSave={async (item) => { await upsertInventoryItem(item); setShowAddProduct(false); toast.success('Product added successfully.'); }} />
       <Modal open={showActionModal} onClose={() => setShowActionModal(false)} title={action === 'receive' ? 'Receive Products' : 'Return Stock'} subtitle={selectedProduct ? `${selectedProduct.name} · Current stock ${selectedProduct.currentQty}` : ''} size="lg" footer={<><button type="button" onClick={() => setShowActionModal(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted">Cancel</button><button type="submit" form="stock-action-form" disabled={isSaving} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{isSaving ? 'Saving...' : action === 'receive' ? 'Receive Stock' : 'Return Stock'}</button></>}>
         <form id="stock-action-form" onSubmit={submitAction} className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div><label className={labelClass}>Quantity {action === 'receive' ? 'Received' : 'Returned'} *</label><input required type="text" inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0" /></div>{action === 'receive' ? <><div><label className={labelClass}>Purchase / Cost Price *</label><input required type="text" inputMode="decimal" value={unitCost} onChange={(event) => setUnitCost(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0.00" /></div><div><label className={labelClass}>Selling Price</label><input type="text" inputMode="decimal" value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="Keep existing price" /></div><div><label className={labelClass}>Expiry Date *</label><DatePicker value={expiryDate} onChange={setExpiryDate} placeholder="Expiry date" /></div><div><label className={labelClass}>New SKU</label><input value={sku} onChange={(event) => setSku(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Existing SKU if unchanged" /></div><div><label className={labelClass}>New Barcode</label><input value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Scan or type barcode" /></div><div><label className={labelClass}>Vendor Name <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplier} onChange={(event) => setSupplier(event.target.value)} className={inputClass} placeholder="Vendor or supplier name" /></div><div><label className={labelClass}>Vendor Phone <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplierPhone} onChange={(event) => setSupplierPhone(event.target.value)} className={inputClass} placeholder="Phone number" inputMode="tel" /></div><div><label className={labelClass}>Invoice Number <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} className={`${inputClass} font-mono`} placeholder="Invoice/reference number" /></div></> : <div><label className={labelClass}>Return Reason *</label><NiceSelect value={reason} onChange={setReason} options={[{ value: 'Damaged', label: 'Damaged' }, { value: 'Expired', label: 'Expired' }, { value: 'Defective', label: 'Defective' }, { value: 'Customer return', label: 'Customer return' }, { value: 'Other', label: 'Other' }]} /></div>}</div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div><label className={labelClass}>Quantity {action === 'receive' ? 'Received' : 'Returned'} *</label><input required type="text" inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0" /></div>{action === 'receive' ? <><div><label className={labelClass}>Purchase / Cost Price *</label><input required type="text" inputMode="decimal" value={unitCost} onChange={(event) => setUnitCost(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0.00" /></div><div><label className={labelClass}>Selling Price</label><input type="text" inputMode="decimal" value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="Keep existing price" /></div><div><label className={labelClass}>Expiry Date *</label><DatePicker value={expiryDate} onChange={setExpiryDate} placeholder="Expiry date" /></div><div><label className={labelClass}>New SKU</label><input value={sku} onChange={(event) => setSku(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Existing SKU if unchanged" /></div><div><label className={labelClass}>New Barcode</label><input value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Scan or type barcode" /></div><div><label className={labelClass}>Vendor Name <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplier} onChange={(event) => setSupplier(event.target.value)} className={inputClass} placeholder="Vendor or supplier name" /></div><div><label className={labelClass}>Vendor Phone <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplierPhone} onChange={(event) => setSupplierPhone(event.target.value)} className={inputClass} placeholder="Vendor or supplier phone" inputMode="tel" /></div><div><label className={labelClass}>Invoice Number <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} className={`${inputClass} font-mono`} placeholder="Invoice/reference number" /></div></> : <><div><label className={labelClass}>Original sale receipt *</label><NiceSelect value={selectedSaleId} onChange={setSelectedSaleId} options={returnableSales.map((sale) => ({ value: sale.saleId, label: `${sale.transactionId} · ${new Date(sale.timestamp).toLocaleString()} · ${sale.returnableQuantity} available` }))} /></div><div><label className={labelClass}>Return Reason *</label><NiceSelect value={reason} onChange={setReason} options={[{ value: 'Damaged', label: 'Damaged' }, { value: 'Expired', label: 'Expired' }, { value: 'Defective', label: 'Defective' }, { value: 'Customer return', label: 'Customer return' }, { value: 'Other', label: 'Other' }]} /></div></>}</div>
           {action === 'return' && <div><label className={labelClass}>Notes / Return Details</label><textarea value={notes} onChange={(event) => setNotes(event.target.value)} className={`${inputClass} min-h-24 resize-y`} placeholder="Add return or supplier reference details" /></div>}
         </form>
       </Modal>

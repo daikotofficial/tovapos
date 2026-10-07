@@ -68,7 +68,40 @@ export async function GET(request: NextRequest) {
     const batches = await loadBatches(auth.tenantId, productId);
     const movementResult = await getPosPool().query(`SELECT data FROM pos_tenant_records WHERE tenant_id = $1 AND store_name = 'stockMovements' AND data->>'inventoryItemId' = $2 ORDER BY data->>'createdAt' DESC`, [auth.tenantId, productId]);
     const auditResult = await getPosPool().query(`SELECT id, action, entity_id AS \"entityId\", metadata, created_at AS \"createdAt\", user_id AS \"userId\" FROM pos_audit_log WHERE tenant_id = $1 AND entity_type = 'inventory' AND entity_id = $2 ORDER BY created_at DESC, id DESC`, [auth.tenantId, productId]);
-    return NextResponse.json({ batches, movements: movementResult.rows.map((row) => row.data), audits: auditResult.rows });
+    const salesResult = await getPosPool().query(
+      `SELECT id, data FROM pos_tenant_sales
+       WHERE tenant_id = $1 AND status = 'completed'
+         AND data->'items' @> jsonb_build_array(jsonb_build_object('inventoryItemId', $2))
+       ORDER BY timestamp DESC, id DESC`,
+      [auth.tenantId, productId]
+    );
+    const returnableSales = salesResult.rows.flatMap((row) => {
+      const sale = row.data as Record<string, unknown>;
+      const items = Array.isArray(sale.items) ? sale.items : [];
+      const matchingItems = items.filter(
+        (item) =>
+          item &&
+          typeof item === 'object' &&
+          String((item as Record<string, unknown>).inventoryItemId) === productId &&
+          Number((item as Record<string, unknown>).quantity ?? 0) > 0
+      );
+      return matchingItems.map((item) => {
+        const line = item as Record<string, unknown>;
+        const quantity = Number(line.quantity ?? 0);
+        const returnedQuantity = Number(line.returnedQuantity ?? 0);
+        return {
+          saleId: String(row.id),
+          transactionId: String(sale.transactionId ?? row.id),
+          timestamp: String(sale.timestamp ?? ''),
+          itemName: String(line.name ?? ''),
+          quantity,
+          returnableQuantity: Math.max(0, quantity),
+          unitPrice: Number(line.unitPrice ?? 0),
+          returnedQuantity,
+        };
+      }).filter((item) => item.returnableQuantity > 0);
+    });
+    return NextResponse.json({ batches, movements: movementResult.rows.map((row) => row.data), audits: auditResult.rows, returnableSales });
   } catch (error) { return errorResponse(error); }
 }
 
