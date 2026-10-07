@@ -59,7 +59,9 @@ type InventoryCursor = { name: string; id: string };
 // double-counting records that have already been indexed.
 const SALES_SOURCE_CTE = `
 WITH sale_rows AS (
-  SELECT tenant_id, id, timestamp, cashier, status, grand_total, gross_profit,
+  SELECT tenant_id, id, timestamp, cashier,
+         coalesce(nullif(lower(trim(data->>'status')), ''), nullif(lower(trim(status)), ''), 'completed') AS status,
+         grand_total, gross_profit,
          amount_due, tax_amount, payment_method, data
   FROM pos_tenant_sales
   WHERE tenant_id = $1
@@ -67,7 +69,7 @@ WITH sale_rows AS (
   SELECT records.tenant_id, records.record_id AS id,
          (records.data->>'timestamp')::timestamptz AS timestamp,
          coalesce(records.data->>'cashier', '') AS cashier,
-         coalesce(records.data->>'status', 'completed') AS status,
+         coalesce(nullif(lower(trim(records.data->>'status')), ''), 'completed') AS status,
          coalesce(nullif(records.data->>'grandTotal', '')::float8, 0) AS grand_total,
          coalesce(nullif(records.data->>'grossProfit', '')::float8, 0) AS gross_profit,
          coalesce(nullif(records.data->>'amountDue', '')::float8, 0) AS amount_due,
@@ -524,10 +526,13 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
 
   if (report === 'sales-by-cashier-detail') {
     const detailValues: unknown[] = [auth.tenantId];
-    const detailWhere: string[] = ['tenant_id = $1', "status = 'completed'"];
-    // Use the same indexed sales source as the cashier summary. Older sales may
-    // have cashier identity in the indexed column even when their JSON payload
-    // predates cashierId, so matching only data->>'cashierId' silently hides them.
+    const detailWhere: string[] = [
+      'tenant_id = $1',
+      "coalesce(nullif(lower(trim(data->>'status')), ''), nullif(lower(trim(status)), ''), 'completed') = 'completed'",
+    ];
+    // My Sales History is the proven canonical source for cashier transactions.
+    // Query that same indexed table here so the cross-cashier report cannot
+    // disagree with the cashier's own history because of a second data source.
     appendDateRange(params, 'timestamp', detailValues, detailWhere);
     if (cashierId) {
       detailValues.push(cashierId);
@@ -559,29 +564,9 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     }
     detailValues.push(limit, offset);
     const detailResult = await getPosPool().query(
-      `WITH sale_rows AS (
-         SELECT id, timestamp, cashier, status, data
-         FROM pos_tenant_sales
-         WHERE tenant_id = $1
-         UNION ALL
-         SELECT records.record_id AS id,
-                (records.data->>'timestamp')::timestamptz AS timestamp,
-                coalesce(records.data->>'cashier', '') AS cashier,
-                coalesce(records.data->>'status', 'completed') AS status,
-                records.data
-         FROM pos_tenant_records records
-         WHERE records.tenant_id = $1
-           AND records.store_name = 'sales'
-           AND NOT EXISTS (
-             SELECT 1
-             FROM pos_tenant_sales indexed
-             WHERE indexed.tenant_id = records.tenant_id
-               AND indexed.id = records.record_id
-           )
-       )
-       SELECT data
-       FROM sale_rows
-       WHERE ${detailWhere.slice(1).join(' AND ')}
+      `SELECT data
+       FROM pos_tenant_sales
+       WHERE ${detailWhere.join(' AND ')}
        ORDER BY timestamp DESC, id DESC
        LIMIT $${detailValues.length - 1} OFFSET $${detailValues.length}`,
       detailValues

@@ -563,7 +563,8 @@ try {
   // a unique tenant-scoped name match instead of returning a false zero.
   await cleanupClient.query(
     `UPDATE pos_tenant_sales
-     SET data = jsonb_set(data, '{cashierId}', to_jsonb($3::text), true)
+     SET data = jsonb_set(data, '{cashierId}', to_jsonb($3::text), true),
+         status = 'paid'
      WHERE tenant_id = $1 AND id = $2`,
     [companyA.tenant.id, sales[acceptedIndex].body.sale.id, `legacy-cashier-${stamp}`]
   );
