@@ -705,16 +705,23 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   }
 
   if (report === 'audit') {
-    appendDateRange(params, 'created_at', values, where);
+    appendDateRange(params, 'audit.created_at', values, where);
+    const auditWhere = where.map((condition) =>
+      condition === 'tenant_id = $1' ? 'audit.tenant_id = $1' : condition
+    );
     values.push(limit, offset);
     const result = await getPosPool().query(
       `
-      SELECT id, action, entity_type AS "entityType", entity_id AS "entityId",
-             operation_id AS "operationId", user_id AS "userId",
-             created_at AS "createdAt"
-      FROM pos_audit_log
-      WHERE ${where.join(' AND ')}
-      ORDER BY created_at DESC, id DESC
+      SELECT audit.id, audit.action, audit.entity_type AS "entityType",
+             audit.entity_id AS "entityId", audit.operation_id AS "operationId",
+             audit.user_id AS "userId",
+             coalesce(actor.name, nullif(audit.after_data->>'userName', ''), audit.user_id) AS "userName",
+             audit.created_at AS "createdAt"
+      FROM pos_audit_log audit
+      LEFT JOIN pos_app_users actor
+        ON actor.tenant_id = audit.tenant_id AND actor.id = audit.user_id
+      WHERE ${auditWhere.join(' AND ')}
+      ORDER BY audit.created_at DESC, audit.id DESC
       LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
@@ -738,6 +745,57 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
       values
     );
     return NextResponse.json({ rows: result.rows.map((row) => row.data), limit, offset });
+  }
+
+  if (report === 'sales-shifts') {
+    appendDateRange(params, "(shifts.data->>'businessDate')::date", values, where, true);
+    where.push("shifts.store_name = 'salesShifts'");
+    const shiftWhere = where.map((condition) =>
+      condition === 'tenant_id = $1' ? 'shifts.tenant_id = $1' : condition
+    );
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `SELECT shifts.data,
+              coalesce(sum(sales.grand_total), 0)::float8 AS "liveTotalSales",
+              coalesce(sum(CASE
+                WHEN sales.payment_method = 'cash'
+                  THEN coalesce(nullif(sales.data->>'amountPaid', '')::numeric, sales.grand_total)
+                WHEN sales.payment_method = 'split'
+                  THEN coalesce((sales.data->'paymentBreakdown'->>'cash')::numeric, 0)
+                ELSE 0
+              END), 0)::float8 AS "liveCashSales"
+       FROM pos_tenant_records shifts
+       LEFT JOIN pos_tenant_sales sales
+         ON sales.tenant_id = shifts.tenant_id
+        AND sales.status = 'completed'
+        AND sales.data->>'shiftId' = shifts.record_id
+        AND sales.data->>'cashierId' = shifts.data->>'userId'
+       WHERE ${shiftWhere.join(' AND ')}
+       GROUP BY shifts.tenant_id, shifts.record_id, shifts.data
+       ORDER BY shifts.data->>'businessDate' DESC, shifts.data->>'openedAt' DESC, shifts.record_id DESC
+       LIMIT $${values.length - 1} OFFSET $${values.length}`,
+      values
+    );
+    return NextResponse.json({
+      rows: result.rows.map((row) => {
+        const shift = row.data as Record<string, unknown>;
+        const totalSales = Number(row.liveTotalSales ?? 0);
+        const cashSales = Number(row.liveCashSales ?? 0);
+        const openingCash = Number(shift.openingCash ?? 0);
+        return {
+          ...shift,
+          totalSales,
+          cashSales,
+          expectedCash: openingCash + cashSales,
+          cashVariance:
+            shift.status === 'closed'
+              ? Number(shift.closingCash ?? 0) - (openingCash + cashSales)
+              : undefined,
+        };
+      }),
+      limit,
+      offset,
+    });
   }
 
   if (report === 'stock-ledger') {

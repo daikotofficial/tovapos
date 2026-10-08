@@ -16,7 +16,9 @@ function validDate(value: unknown): value is string {
 }
 
 function currentBusinessDate(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: process.env.POS_TIMEZONE ?? 'Africa/Lagos' }).format(new Date());
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: process.env.POS_TIMEZONE ?? 'Africa/Lagos',
+  }).format(new Date());
 }
 
 function validId(value: unknown): value is string {
@@ -24,7 +26,7 @@ function validId(value: unknown): value is string {
 }
 
 function cashFromSale(data: Record<string, unknown>): number {
-  if (data.paymentMethod === 'cash') return Number(data.grandTotal ?? 0);
+  if (data.paymentMethod === 'cash') return collectedFromSale(data);
   if (data.paymentMethod === 'split') {
     const breakdown = data.paymentBreakdown;
     return breakdown && typeof breakdown === 'object'
@@ -34,13 +36,22 @@ function cashFromSale(data: Record<string, unknown>): number {
   return 0;
 }
 
+function collectedFromSale(data: Record<string, unknown>): number {
+  if (data.amountPaid !== undefined && data.amountPaid !== null) {
+    const amountPaid = Number(data.amountPaid);
+    if (Number.isFinite(amountPaid) && amountPaid >= 0) return amountPaid;
+  }
+  return Number(data.grandTotal ?? 0);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request);
     assertTenantActive(auth);
     assertWritePermission(auth, 'checkout');
     const businessDate = request.nextUrl.searchParams.get('businessDate') ?? '';
-    if (!validDate(businessDate) || businessDate !== currentBusinessDate()) throw new HttpError(400, 'Business date is invalid or not today', 'VALIDATION_ERROR');
+    if (!validDate(businessDate) || businessDate !== currentBusinessDate())
+      throw new HttpError(400, 'Business date is invalid or not today', 'VALIDATION_ERROR');
     const result = await getPosPool().query(
       `SELECT data FROM pos_tenant_records
        WHERE tenant_id = $1 AND store_name = 'salesShifts'
@@ -51,23 +62,34 @@ export async function GET(request: NextRequest) {
     const shift = result.rows[0]?.data as Record<string, unknown> | undefined;
     if (!shift) return NextResponse.json(null);
     const sales = await getPosPool().query(
-      `SELECT data FROM pos_tenant_records
-       WHERE tenant_id = $1 AND store_name = 'sales'
-         AND data->>'status' = 'completed'
+      `SELECT data FROM pos_tenant_sales
+       WHERE tenant_id = $1 AND status = 'completed'
          AND data->>'cashierId' = $2
          AND data->>'shiftId' = $3`,
       [auth.tenantId, auth.user.id, shift.id]
     );
-    const paymentBreakdown: Record<string, number> = { cash: 0, card: 0, 'bank-transfer': 0, mobile: 0, credit: 0 };
+    const paymentBreakdown: Record<string, number> = {
+      cash: 0,
+      card: 0,
+      'bank-transfer': 0,
+      mobile: 0,
+      credit: 0,
+    };
     for (const row of sales.rows) {
       const data = row.data as Record<string, unknown>;
-      if (data.paymentMethod === 'split' && data.paymentBreakdown && typeof data.paymentBreakdown === 'object') {
-        for (const [method, amount] of Object.entries(data.paymentBreakdown as Record<string, unknown>)) {
+      if (
+        data.paymentMethod === 'split' &&
+        data.paymentBreakdown &&
+        typeof data.paymentBreakdown === 'object'
+      ) {
+        for (const [method, amount] of Object.entries(
+          data.paymentBreakdown as Record<string, unknown>
+        )) {
           paymentBreakdown[method] = (paymentBreakdown[method] ?? 0) + Number(amount ?? 0);
         }
       } else {
         const method = typeof data.paymentMethod === 'string' ? data.paymentMethod : 'cash';
-        paymentBreakdown[method] = (paymentBreakdown[method] ?? 0) + Number(data.grandTotal ?? 0);
+        paymentBreakdown[method] = (paymentBreakdown[method] ?? 0) + collectedFromSale(data);
       }
     }
     const totalSales = sales.rows.reduce((sum, row) => sum + Number(row.data?.grandTotal ?? 0), 0);
@@ -93,7 +115,11 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as Record<string, unknown>;
     const action = body.action;
     const businessDate = body.businessDate;
-    if ((action !== 'open' && action !== 'close') || !validDate(businessDate) || businessDate !== currentBusinessDate()) {
+    if (
+      (action !== 'open' && action !== 'close') ||
+      !validDate(businessDate) ||
+      businessDate !== currentBusinessDate()
+    ) {
       throw new HttpError(400, 'Shift action or business date is invalid', 'VALIDATION_ERROR');
     }
     const shiftId = `shift-${auth.user.id}-${businessDate}`;
@@ -111,11 +137,21 @@ export async function POST(request: NextRequest) {
         [auth.tenantId, auth.user.id, businessDate]
       );
       if (action === 'open') {
-        if (existing.rows[0]) throw new HttpError(409, 'Sales has already been opened or closed for today', 'SHIFT_ALREADY_EXISTS');
+        if (existing.rows[0])
+          throw new HttpError(
+            409,
+            'Sales has already been opened or closed for today',
+            'SHIFT_ALREADY_EXISTS'
+          );
         const openingCash = Number(body.openingCash);
-        const openingPurpose = typeof body.openingPurpose === 'string' ? body.openingPurpose.trim() : '';
+        const openingPurpose =
+          typeof body.openingPurpose === 'string' ? body.openingPurpose.trim() : '';
         if (!Number.isFinite(openingCash) || openingCash < 0 || !openingPurpose) {
-          throw new HttpError(400, 'Opening cash and handover purpose are required', 'VALIDATION_ERROR');
+          throw new HttpError(
+            400,
+            'Opening cash and handover purpose are required',
+            'VALIDATION_ERROR'
+          );
         }
         const shift = {
           id: shiftId,
@@ -142,27 +178,38 @@ export async function POST(request: NextRequest) {
       }
 
       const shift = existing.rows[0]?.data as Record<string, unknown> | undefined;
-      if (shiftId !== `shift-${auth.user.id}-${businessDate}`) throw new HttpError(409, 'Shift ownership is invalid', 'SHIFT_NOT_OPEN');
+      if (shiftId !== `shift-${auth.user.id}-${businessDate}`)
+        throw new HttpError(409, 'Shift ownership is invalid', 'SHIFT_NOT_OPEN');
       if (!shift || shift.userId !== auth.user.id || shift.status !== 'open') {
-        throw new HttpError(409, 'This sales shift is not open for the signed-in user', 'SHIFT_NOT_OPEN');
+        throw new HttpError(
+          409,
+          'This sales shift is not open for the signed-in user',
+          'SHIFT_NOT_OPEN'
+        );
       }
       const closingCash = Number(body.closingCash);
       if (!Number.isFinite(closingCash) || closingCash < 0) {
         throw new HttpError(400, 'Closing cash is invalid', 'VALIDATION_ERROR');
       }
       const sales = await client.query(
-        `SELECT data FROM pos_tenant_records
-         WHERE tenant_id = $1 AND store_name = 'sales'
-           AND data->>'status' = 'completed'
+        `SELECT data FROM pos_tenant_sales
+         WHERE tenant_id = $1 AND status = 'completed'
            AND data->>'cashierId' = $2
            AND data->>'shiftId' = $3`,
         [auth.tenantId, auth.user.id, shiftId]
       );
-      const totalSales = sales.rows.reduce((sum, row) => sum + Number(row.data?.grandTotal ?? 0), 0);
+      const totalSales = sales.rows.reduce(
+        (sum, row) => sum + Number(row.data?.grandTotal ?? 0),
+        0
+      );
       const cashSales = sales.rows.reduce((sum, row) => sum + cashFromSale(row.data), 0);
       const expectedCash = Number(shift.openingCash ?? 0) + cashSales;
       if (Math.abs(closingCash - expectedCash) > 0.005) {
-        throw new HttpError(409, 'Cash does not balance. Sales cannot be closed until the count matches expected cash.', 'CASH_OUT_OF_BALANCE');
+        throw new HttpError(
+          409,
+          'Cash does not balance. Sales cannot be closed until the count matches expected cash.',
+          'CASH_OUT_OF_BALANCE'
+        );
       }
       const closed = {
         ...shift,

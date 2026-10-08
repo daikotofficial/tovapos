@@ -308,7 +308,7 @@ export default function InputVatPage() {
           open={open}
           onClose={() => setOpen(false)}
           title="Record Input VAT"
-          subtitle="Record VAT paid to a vendor. This does not affect inventory or calculate VAT net-off."
+          subtitle="Record VAT paid to a vendor for VAT reconciliation. Inventory quantities are not changed automatically."
           size="lg"
           footer={
             <>

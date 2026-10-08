@@ -57,6 +57,22 @@ interface ReportRange {
   preset: ReportPreset;
 }
 
+interface SalesShiftReportRow {
+  id: string;
+  businessDate: string;
+  userId: string;
+  userName: string;
+  openingCash: number;
+  openedAt: string;
+  totalSales: number;
+  cashSales: number;
+  expectedCash: number;
+  closingCash?: number;
+  cashVariance?: number;
+  closedAt?: string;
+  status: 'open' | 'closed';
+}
+
 const rangePresets: { id: ReportPreset; label: string; days?: number }[] = [
   { id: 'today', label: 'Today', days: 0 },
   { id: '7d', label: '7 Days', days: 6 },
@@ -245,6 +261,13 @@ function paymentAmountsForSale(sale: SaleTransaction): Record<string, number> {
     return amounts;
   }
   return { [sale.paymentMethod]: sale.grandTotal };
+}
+
+function outputVatTaxBase(sale: SaleTransaction, item: SaleLineItem | null, vat: number): number {
+  if (item) {
+    return Math.max(0, item.lineTotal - (item.taxMode === 'inclusive' ? vat : 0));
+  }
+  return Math.max(0, sale.grandTotal - vat);
 }
 
 function toDateInputValue(date: Date): string {
@@ -730,22 +753,25 @@ function ReportsContent() {
           'customers',
           'inventory',
           'suppliers',
+          'sales-shifts',
         ];
         const rowReports =
           activeView === 'overview'
             ? ['sales', 'payment-methods']
             : activeView === 'vat'
               ? ['vat', 'input-vat']
-              : activeView === 'discounts'
-                ? ['sales']
-                : activeView === 'profit'
-                  ? ['sales-by-product']
-                  : ['low-stock', 'expiring', 'expired'].includes(activeView)
-                    ? ['inventory']
-                    : serverReportViews.includes(activeView) &&
-                        activeView !== 'sales-by-cashier-detail'
-                      ? [activeView]
-                      : [];
+              : activeView === 'cashier-closing'
+                ? ['sales-shifts']
+                : activeView === 'discounts'
+                  ? ['sales']
+                  : activeView === 'profit'
+                    ? ['sales-by-product']
+                    : ['low-stock', 'expiring', 'expired'].includes(activeView)
+                      ? ['inventory']
+                      : serverReportViews.includes(activeView) &&
+                          activeView !== 'sales-by-cashier-detail'
+                        ? [activeView]
+                        : [];
         const results = await Promise.all(
           rowReports.map(async (report) => {
             const requestInput = {
@@ -920,6 +946,7 @@ function ReportsContent() {
   >;
   const serverInventoryRows = (serverReportRows.inventory ?? []) as InventoryItem[];
   const serverVendorRows = (serverReportRows.suppliers ?? []) as Vendor[];
+  const serverSalesShiftRows = (serverReportRows['sales-shifts'] ?? []) as SalesShiftReportRow[];
 
   const hasServerRows = useCallback(
     (report: string) => {
@@ -946,6 +973,7 @@ function ReportsContent() {
       tenant?.id,
     ]
   );
+  const displaySalesShiftRows = hasServerRows('sales-shifts') ? serverSalesShiftRows : [];
   const displaySalesRows = hasServerRows('sales') ? serverSalesRows : [];
   const vatSalesRows = hasServerRows('vat') ? serverVatRows : displaySalesRows;
   const vatOutputRows: { sale: SaleTransaction; item: SaleLineItem | null; vat: number }[] = [];
@@ -959,6 +987,17 @@ function ReportsContent() {
       vatOutputRows.push({ sale, item: null, vat: Number(sale.taxAmount || 0) });
     }
   });
+  const displayInputVatRows = hasServerRows('input-vat')
+    ? serverInputVatRows.filter((record) => record.status === 'recorded')
+    : [];
+  const totalOutputVat = vatOutputRows.reduce((sum, row) => sum + row.vat, 0);
+  const totalInputVat = displayInputVatRows.reduce(
+    (sum, record) => sum + Number(record.inputVatAmount || 0),
+    0
+  );
+  const vatBalance = totalOutputVat - totalInputVat;
+  const vatRemittable = Math.max(0, vatBalance);
+  const inputVatCredit = Math.max(0, -vatBalance);
   const selectedCashierName =
     cashierName ||
     users.find((user) => user.id === cashierId)?.name ||
@@ -986,7 +1025,7 @@ function ReportsContent() {
   const hasServerCashierDetailRows = hasServerRows('sales-by-cashier-detail');
   const cashierDetailSales = hasServerCashierDetailRows ? serverCashierDetailRows : [];
   const cashierDetailItemRows = cashierDetailSales.flatMap((sale) =>
-    sale.items.map((item) => ({ sale, item }))
+    sale.items.map((item, itemIndex) => ({ sale, item, isFirstReceiptRow: itemIndex === 0 }))
   );
   const selectedCashierRows = displayCashierRows.filter(
     (row) =>
@@ -1141,14 +1180,16 @@ function ReportsContent() {
         return {
           filename: 'cashier-sales-detail-report',
           headers: ['Date', 'Receipt', 'Item', 'Qty', 'Unit Price', 'Line Total', 'Payment'],
-          rows: cashierDetailItemRows.map(({ sale, item }) => [
+          rows: cashierDetailItemRows.map(({ sale, item, isFirstReceiptRow }) => [
             formatReportTimestamp(sale.timestamp),
             sale.transactionId,
             item.name,
             item.quantity.toString(),
             item.unitPrice.toFixed(2),
             item.lineTotal.toFixed(2),
-            paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
+            isFirstReceiptRow
+              ? paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency)
+              : '',
           ]),
         };
       }
@@ -1449,18 +1490,16 @@ function ReportsContent() {
             new Date(sale.timestamp).toLocaleString(),
             item?.name ?? 'Sale VAT',
             vat.toFixed(2),
-            Number(item?.lineTotal ?? sale.grandTotal).toFixed(2),
+            outputVatTaxBase(sale, item, vat).toFixed(2),
           ]),
-          ...serverInputVatRows
-            .filter((record) => record.status === 'recorded')
-            .map((record) => [
-              'VAT paid',
-              record.invoiceNumber ?? record.recordNumber,
-              record.date,
-              record.vendorName,
-              record.inputVatAmount.toFixed(2),
-              record.goodsAmount.toFixed(2),
-            ]),
+          ...displayInputVatRows.map((record) => [
+            'VAT paid',
+            record.invoiceNumber ?? record.recordNumber,
+            record.date,
+            record.vendorName,
+            record.inputVatAmount.toFixed(2),
+            record.goodsAmount.toFixed(2),
+          ]),
         ],
       };
     }
@@ -1498,27 +1537,58 @@ function ReportsContent() {
       const auditRows = hasServerRows('audit') ? serverReportRows.audit : [];
       return {
         filename: 'audit-report',
-        headers: ['Created', 'Entity', 'Action', 'User', 'Operation'],
+        headers: ['Created', 'Entity', 'Record', 'Action', 'Performed By', 'Operation'],
         rows: auditRows.map((item) => {
           const row = item as {
             createdAt?: string;
             entityType?: string;
+            entityId?: string;
             action?: string;
             userId?: string;
+            userName?: string;
             operationId?: string;
           };
           return [
             row.createdAt ? new Date(row.createdAt).toLocaleString() : '-',
             row.entityType ?? '-',
+            row.entityId ?? '-',
             row.action ?? '-',
-            row.userId ?? '-',
+            row.userName ?? row.userId ?? '-',
             row.operationId ?? '-',
           ];
         }),
       };
     }
 
-    if (activeView === 'cashier-closing' || activeView === 'end-of-day') {
+    if (activeView === 'cashier-closing') {
+      return {
+        filename: 'cashier-closing-report',
+        headers: [
+          'Business Date',
+          'Cashier',
+          'Status',
+          'Opening Cash',
+          'Total Sales',
+          'Cash Sales',
+          'Expected Cash',
+          'Closing Cash',
+          'Variance',
+        ],
+        rows: displaySalesShiftRows.map((shift) => [
+          shift.businessDate,
+          shift.userName,
+          shift.status,
+          Number(shift.openingCash).toFixed(2),
+          Number(shift.totalSales).toFixed(2),
+          Number(shift.cashSales).toFixed(2),
+          Number(shift.expectedCash).toFixed(2),
+          shift.closingCash === undefined ? '' : Number(shift.closingCash).toFixed(2),
+          shift.cashVariance === undefined ? '' : Number(shift.cashVariance).toFixed(2),
+        ]),
+      };
+    }
+
+    if (activeView === 'end-of-day') {
       return {
         filename: `${activeView}-report`,
         headers: ['Metric', 'Value'],
@@ -2247,14 +2317,20 @@ function ReportsContent() {
                       ? 'Loading this cashier’s sales from the database…'
                       : cashierEmptyMessage
                 }
-                rows={cashierDetailItemRows.map(({ sale, item }) => [
+                rows={cashierDetailItemRows.map(({ sale, item, isFirstReceiptRow }) => [
                   formatReportTimestamp(sale.timestamp),
                   sale.transactionId,
                   item.name,
                   item.quantity.toString(),
                   formatMoney(item.unitPrice, settings.currency),
                   formatMoney(item.lineTotal, settings.currency),
-                  paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
+                  isFirstReceiptRow
+                    ? paymentMethodLabel(
+                        sale.paymentMethod,
+                        sale.paymentBreakdown,
+                        settings.currency
+                      )
+                    : '—',
                 ])}
               />
             )}
@@ -2378,23 +2454,58 @@ function ReportsContent() {
             )}
 
             {activeView === 'vat' && (
-              <ReportTable
-                title="VAT reconciliation"
-                subtitle="Only VAT-bearing sales items and recorded input VAT are included for the selected period."
-                headers={['Type', 'Reference', 'Date', 'Item / Vendor', 'VAT Amount', 'Tax Base']}
-                empty="No VAT collected or paid in this period."
-                rows={[
-                  ...vatOutputRows.map(({ sale, item, vat }): string[] => [
-                    'VAT collected',
-                    sale.transactionId,
-                    new Date(sale.timestamp).toLocaleString(),
-                    item?.name ?? 'Sale VAT',
-                    formatMoney(vat, settings.currency),
-                    formatMoney(item?.lineTotal ?? sale.grandTotal, settings.currency),
-                  ]),
-                  ...serverInputVatRows
-                    .filter((record) => record.status === 'recorded')
-                    .map((record): string[] => [
+              <>
+                <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {[
+                    [
+                      'Total Output VAT Collected',
+                      totalOutputVat,
+                      'VAT collected on completed taxable sales in this period.',
+                    ],
+                    [
+                      'Total Input VAT Paid',
+                      totalInputVat,
+                      'Recorded VAT paid to vendors in this period.',
+                    ],
+                    [
+                      'Total VAT Amount Remittable',
+                      vatRemittable,
+                      inputVatCredit > 0
+                        ? `${formatMoney(inputVatCredit, settings.currency)} input VAT credit remains.`
+                        : 'Output VAT less input VAT for this period.',
+                    ],
+                  ].map(([label, amount, subtitle]) => (
+                    <article
+                      key={String(label)}
+                      className="rounded-xl border border-border bg-white p-4 shadow-card"
+                    >
+                      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
+                      <p className="mt-2 text-2xl font-bold font-tabular">
+                        {serverReportsLoading
+                          ? 'Loading…'
+                          : serverReportError
+                            ? 'Unavailable'
+                            : formatMoney(Number(amount), settings.currency)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+                    </article>
+                  ))}
+                </section>
+                <ReportTable
+                  title="VAT reconciliation"
+                  subtitle="Output VAT less recorded input VAT determines the amount remittable for the selected period."
+                  headers={['Type', 'Reference', 'Date', 'Item / Vendor', 'VAT Amount', 'Tax Base']}
+                  empty="No VAT collected or paid in this period."
+                  rows={[
+                    ...vatOutputRows.map(({ sale, item, vat }): string[] => [
+                      'VAT collected',
+                      sale.transactionId,
+                      new Date(sale.timestamp).toLocaleString(),
+                      item?.name ?? 'Sale VAT',
+                      formatMoney(vat, settings.currency),
+                      formatMoney(outputVatTaxBase(sale, item, vat), settings.currency),
+                    ]),
+                    ...displayInputVatRows.map((record): string[] => [
                       'VAT paid',
                       record.invoiceNumber ?? record.recordNumber,
                       record.date,
@@ -2402,8 +2513,9 @@ function ReportsContent() {
                       formatMoney(record.inputVatAmount, settings.currency),
                       formatMoney(record.goodsAmount, settings.currency),
                     ]),
-                ]}
-              />
+                  ]}
+                />
+              </>
             )}
 
             {activeView === 'discounts' && (
@@ -2453,11 +2565,43 @@ function ReportsContent() {
               />
             )}
 
-            {(activeView === 'cashier-closing' || activeView === 'end-of-day') && (
+            {activeView === 'cashier-closing' && (
               <ReportTable
-                title={
-                  activeView === 'cashier-closing' ? 'Cashier closing report' : 'End-of-day report'
-                }
+                title="Cashier closing report"
+                subtitle="Server-recorded opening cash, completed sales, expected cash, counted cash, and variance for each shift."
+                headers={[
+                  'Business Date',
+                  'Cashier',
+                  'Status',
+                  'Opening Cash',
+                  'Total Sales',
+                  'Cash Sales',
+                  'Expected Cash',
+                  'Closing Cash',
+                  'Variance',
+                ]}
+                empty="No cashier shifts were recorded in this period."
+                rows={displaySalesShiftRows.map((shift) => [
+                  shift.businessDate,
+                  shift.userName,
+                  shift.status === 'closed' ? 'Closed' : 'Open',
+                  formatMoney(shift.openingCash, settings.currency),
+                  formatMoney(shift.totalSales, settings.currency),
+                  formatMoney(shift.cashSales, settings.currency),
+                  formatMoney(shift.expectedCash, settings.currency),
+                  shift.closingCash === undefined
+                    ? '—'
+                    : formatMoney(shift.closingCash, settings.currency),
+                  shift.cashVariance === undefined
+                    ? '—'
+                    : formatMoney(shift.cashVariance, settings.currency),
+                ])}
+              />
+            )}
+
+            {activeView === 'end-of-day' && (
+              <ReportTable
+                title="End-of-day report"
                 subtitle="Sales, expenses, profit, and sync summary for the selected period"
                 headers={['Metric', 'Value']}
                 empty="No report data yet."
@@ -2476,21 +2620,24 @@ function ReportsContent() {
               <ReportTable
                 title="Audit trail"
                 subtitle="Authoritative server audit events"
-                headers={['Created', 'Entity', 'Action', 'User', 'Operation']}
+                headers={['Created', 'Entity', 'Record', 'Action', 'Performed By', 'Operation']}
                 empty="No audit events yet."
                 rows={(hasServerRows('audit') ? serverReportRows.audit : []).map((item) => {
                   const row = item as {
                     createdAt?: string;
                     entityType?: string;
+                    entityId?: string;
                     action?: string;
                     userId?: string;
+                    userName?: string;
                     operationId?: string;
                   };
                   return [
                     row.createdAt ? new Date(row.createdAt).toLocaleString() : '-',
                     row.entityType ?? '-',
+                    row.entityId ?? '-',
                     row.action ?? '-',
-                    row.userId ?? '-',
+                    row.userName ?? row.userId ?? '-',
                     row.operationId ?? '-',
                   ];
                 })}

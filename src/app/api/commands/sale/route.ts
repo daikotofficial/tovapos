@@ -62,7 +62,9 @@ function parsePaymentBreakdown(
 }
 
 function currentBusinessDate(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: process.env.POS_TIMEZONE ?? 'Africa/Lagos' }).format(new Date());
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: process.env.POS_TIMEZONE ?? 'Africa/Lagos',
+  }).format(new Date());
 }
 
 function commandHash(body: unknown): string {
@@ -83,7 +85,8 @@ function parseItems(value: unknown): SaleCommandItem[] {
     const quantity = Number(item.quantity);
     const discount = Number(item.discount ?? 0);
     const unitPrice = Number(item.unitPrice);
-    const saleUnit = item.saleUnit === 'carton' ? 'carton' : item.saleUnit === 'pack' ? 'pack' : 'piece';
+    const saleUnit =
+      item.saleUnit === 'carton' ? 'carton' : item.saleUnit === 'pack' ? 'pack' : 'piece';
     if (
       !inventoryItemId ||
       !Number.isFinite(quantity) ||
@@ -104,10 +107,15 @@ function parseItems(value: unknown): SaleCommandItem[] {
     const existing = aggregated.get(inventoryItemId);
     if (existing) {
       if (existing.saleUnit !== saleUnit || existing.unitPrice !== unitPrice) {
-        throw new HttpError(400, 'A product cannot be sold with mixed units in one sale', 'VALIDATION_ERROR');
+        throw new HttpError(
+          400,
+          'A product cannot be sold with mixed units in one sale',
+          'VALIDATION_ERROR'
+        );
       }
       existing.quantity += quantity;
-    } else aggregated.set(inventoryItemId, { inventoryItemId, quantity, discount, unitPrice, saleUnit });
+    } else
+      aggregated.set(inventoryItemId, { inventoryItemId, quantity, discount, unitPrice, saleUnit });
   }
   return [...aggregated.values()];
 }
@@ -172,8 +180,17 @@ export async function POST(request: NextRequest) {
         [auth.tenantId, shiftId]
       );
       const activeShift = shiftResult.rows[0]?.data as Record<string, unknown> | undefined;
-      if (!activeShift || activeShift.status !== 'open' || activeShift.userId !== auth.user.id || activeShift.businessDate !== currentBusinessDate()) {
-        throw new HttpError(409, 'The signed-in user has no authoritative open sales shift', 'SHIFT_NOT_OPEN');
+      if (
+        !activeShift ||
+        activeShift.status !== 'open' ||
+        activeShift.userId !== auth.user.id ||
+        activeShift.businessDate !== currentBusinessDate()
+      ) {
+        throw new HttpError(
+          409,
+          'The signed-in user has no authoritative open sales shift',
+          'SHIFT_NOT_OPEN'
+        );
       }
       const claimed = await client.query(
         `INSERT INTO pos_idempotency_keys
@@ -224,6 +241,7 @@ export async function POST(request: NextRequest) {
       let subtotal = 0;
       let discountTotal = 0;
       let taxAmount = 0;
+      let exclusiveTaxAmount = 0;
       const updatedInventory: InventoryItem[] = [];
 
       const lineItems = items.map((requested) => {
@@ -257,10 +275,18 @@ export async function POST(request: NextRequest) {
           Number.isInteger(Number(productData.packQuantity)) &&
           Number(productData.packQuantity) >= 1;
         if (requested.saleUnit !== 'piece' && !packConfigured) {
-          throw new HttpError(409, `${row.name} has no ${requested.saleUnit} price configured`, 'PACK_PRICE_NOT_CONFIGURED');
+          throw new HttpError(
+            409,
+            `${row.name} has no ${requested.saleUnit} price configured`,
+            'PACK_PRICE_NOT_CONFIGURED'
+          );
         }
-        const unitsPerSale = requested.saleUnit === 'piece' ? 1 : Math.floor(Number(productData.packQuantity));
-        const canonicalPrice = requested.saleUnit === 'piece' ? Number(row.selling_price) : Number(productData.packPrice);
+        const unitsPerSale =
+          requested.saleUnit === 'piece' ? 1 : Math.floor(Number(productData.packQuantity));
+        const canonicalPrice =
+          requested.saleUnit === 'piece'
+            ? Number(row.selling_price)
+            : Number(productData.packPrice);
         const canOverridePrice = ['owner', 'super-admin', 'manager'].includes(auth.user.role);
         if (!canOverridePrice && requested.unitPrice !== canonicalPrice) {
           throw new HttpError(403, 'The selected unit price is no longer valid', 'PRICE_MISMATCH');
@@ -284,6 +310,7 @@ export async function POST(request: NextRequest) {
         subtotal = money(subtotal + calculated.gross);
         discountTotal = money(discountTotal + calculated.discountAmount);
         taxAmount = money(taxAmount + calculated.taxAmount);
+        exclusiveTaxAmount = money(exclusiveTaxAmount + calculated.exclusiveTaxAmount);
         const nextQuantity = Number(row.current_qty) - stockQuantity;
         updatedInventory.push({
           ...productData,
@@ -324,7 +351,8 @@ export async function POST(request: NextRequest) {
       for (const updated of updatedInventory) {
         const requested = items.find((item) => item.inventoryItemId === updated.id);
         if (!requested) continue;
-        const unitsPerSale = requested.saleUnit === 'piece' ? 1 : Math.max(1, Number(updated.packQuantity) || 1);
+        const unitsPerSale =
+          requested.saleUnit === 'piece' ? 1 : Math.max(1, Number(updated.packQuantity) || 1);
         let remainingToAllocate = requested.quantity * unitsPerSale;
         const batchRows = await client.query(
           `SELECT record_id, data FROM pos_tenant_records
@@ -339,22 +367,32 @@ export async function POST(request: NextRequest) {
           const batch = batchRow.data as { id: string; quantityRemaining: number; status: string };
           const allocated = Math.min(remainingToAllocate, Number(batch.quantityRemaining));
           const nextRemaining = Number(batch.quantityRemaining) - allocated;
-          const nextBatch = { ...batch, quantityRemaining: nextRemaining, status: nextRemaining === 0 ? 'exhausted' : 'active' };
+          const nextBatch = {
+            ...batch,
+            quantityRemaining: nextRemaining,
+            status: nextRemaining === 0 ? 'exhausted' : 'active',
+          };
           await client.query(
             `UPDATE pos_tenant_records SET data = $3::jsonb, version = version + 1, updated_at = now()
              WHERE tenant_id = $1 AND store_name = 'stockBatches' AND record_id = $2`,
             [auth.tenantId, batchRow.record_id, JSON.stringify({ ...batchRow.data, ...nextBatch })]
           );
           if (nextRemaining === 0) {
-            updated.skuAliases = (updated.skuAliases ?? []).map((alias) => alias.batchId === batch.id ? { ...alias, active: false, inactivatedAt: now } : alias);
-            updated.barcodeAliases = (updated.barcodeAliases ?? []).map((alias) => alias.batchId === batch.id ? { ...alias, active: false, inactivatedAt: now } : alias);
+            updated.skuAliases = (updated.skuAliases ?? []).map((alias) =>
+              alias.batchId === batch.id ? { ...alias, active: false, inactivatedAt: now } : alias
+            );
+            updated.barcodeAliases = (updated.barcodeAliases ?? []).map((alias) =>
+              alias.batchId === batch.id ? { ...alias, active: false, inactivatedAt: now } : alias
+            );
           }
           remainingToAllocate -= allocated;
         }
       }
 
       const taxable = money(subtotal - discountTotal);
-      const grandTotal = money(taxable + taxAmount);
+      // Inclusive VAT is already contained in the discounted selling price.
+      // Only exclusive VAT is added to what the customer pays.
+      const grandTotal = money(taxable + exclusiveTaxAmount);
       const receipt = await client.query(
         `INSERT INTO pos_receipt_sequences (tenant_id, next_number)
          VALUES ($1, 2)
@@ -401,7 +439,17 @@ export async function POST(request: NextRequest) {
           barcode: updated.barcode,
           batchLot: updated.batchLot,
           type: 'sale',
-          quantityDelta: -(requested.quantity * (requested.saleUnit === 'piece' ? 1 : Math.max(1, Math.floor(Number((inventoryById.get(updated.id).data as InventoryItem).packQuantity) || 1)))),
+          quantityDelta: -(
+            requested.quantity *
+            (requested.saleUnit === 'piece'
+              ? 1
+              : Math.max(
+                  1,
+                  Math.floor(
+                    Number((inventoryById.get(updated.id).data as InventoryItem).packQuantity) || 1
+                  )
+                ))
+          ),
           quantityBefore: before,
           quantityAfter: updated.currentQty,
           unitCost: updated.unitCost,

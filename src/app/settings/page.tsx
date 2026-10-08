@@ -44,7 +44,8 @@ export default function SettingsPage() {
 }
 
 function SettingsPageContent() {
-  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated, currentUser } = usePosStore();
+  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated, currentUser } =
+    usePosStore();
   const [form, setForm] = useState<BusinessSettings>(settings);
   const [saved, setSaved] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
@@ -56,8 +57,8 @@ function SettingsPageContent() {
   const planOptions = Object.values(subscriptionPlans);
   const isViewOnly = Boolean(
     currentUser?.permissions.includes('view-only') &&
-      currentUser.role !== 'owner' &&
-      currentUser.role !== 'super-admin'
+    currentUser.role !== 'owner' &&
+    currentUser.role !== 'super-admin'
   );
 
   useEffect(() => {
@@ -81,7 +82,8 @@ function SettingsPageContent() {
         window.location.reload();
       })
       .catch((error) => {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : 'Payment verification failed.');
+        if (!cancelled)
+          toast.error(error instanceof Error ? error.message : 'Payment verification failed.');
       });
     return () => {
       cancelled = true;
@@ -161,788 +163,817 @@ function SettingsPageContent() {
         <PermissionGate permission="settings">
           <WorkstationPrinterCard />
           <div className="mx-auto max-w-6xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
-          <nav className="sticky top-0 z-10 flex gap-2 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 shadow-card backdrop-blur scrollbar-thin">
-            {[
-              ...(!isOnPremise ? [['subscription', 'Plan']] : []),
-              ['loyalty', 'Loyalty'],
-              ['business-profile', 'Business'],
-              ['tax-receipts', 'Tax & Receipts'],
-              ['tax-types', 'Tax Types'],
-              ['alerts', 'Alerts'],
-              ['pos-rules', 'POS Rules'],
-              ['branches', 'Branches'],
-              ['appearance', 'Appearance'],
-            ]
-              .filter(([id]) => !isHospitality || !['loyalty', 'alerts', 'pos-rules'].includes(id))
-              .map(([id, label]) => (
-                <a
-                  key={id}
-                  href={`#${id}`}
-                  className="whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-                >
-                  {label}
-                </a>
-              ))}
-          </nav>
-          {!isOnPremise && (
+            <nav className="sticky top-0 z-10 flex gap-2 overflow-x-auto rounded-xl border border-border bg-card/95 p-2 shadow-card backdrop-blur scrollbar-thin">
+              {[
+                ...(!isOnPremise ? [['subscription', 'Plan']] : []),
+                ['loyalty', 'Loyalty'],
+                ['business-profile', 'Business'],
+                ['tax-receipts', 'Tax & Receipts'],
+                ['tax-types', 'Tax Types'],
+                ['alerts', 'Alerts'],
+                ['pos-rules', 'POS Rules'],
+                ['branches', 'Branches'],
+                ['appearance', 'Appearance'],
+              ]
+                .filter(
+                  ([id]) => !isHospitality || !['loyalty', 'alerts', 'pos-rules'].includes(id)
+                )
+                .map(([id, label]) => (
+                  <a
+                    key={id}
+                    href={`#${id}`}
+                    className="whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                  >
+                    {label}
+                  </a>
+                ))}
+            </nav>
+            {!isOnPremise && (
+              <div
+                id="subscription"
+                className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+              >
+                <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                  <CreditCard size={16} className="text-primary" />
+                  <span className="text-sm font-semibold">Subscription & Plan</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-3">
+                  <div className="rounded-lg bg-muted/40 px-4 py-3">
+                    <p className="text-xs font-bold uppercase text-muted-foreground">
+                      Current plan
+                    </p>
+                    <p className="mt-1 text-lg font-bold">{productUsage.plan.name}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-4 py-3">
+                    <p className="text-xs font-bold uppercase text-muted-foreground">
+                      Product usage
+                    </p>
+                    <p className="mt-1 text-lg font-bold font-tabular">
+                      {productUsage.currentProducts.toLocaleString()}
+                      {productUsage.limit
+                        ? ` / ${productUsage.limit.toLocaleString()}`
+                        : ' / Custom'}
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Counts distinct product/batch records, not units in stock.
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-4 py-3">
+                    <p className="text-xs font-bold uppercase text-muted-foreground">Status</p>
+                    <p className="mt-1 text-lg font-bold capitalize">
+                      {settings.subscriptionStatus ?? 'active'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-4">
+                  <span className="text-xs font-semibold text-muted-foreground">Billing:</span>
+                  {(['monthly', 'yearly'] as const).map((cycle) => (
+                    <button
+                      key={cycle}
+                      type="button"
+                      onClick={() => setBillingCycle(cycle)}
+                      className={`rounded-md px-3 py-1.5 text-xs font-bold capitalize ${billingCycle === cycle ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground'}`}
+                    >
+                      {cycle}
+                    </button>
+                  ))}
+                  <span className="text-xs text-muted-foreground">
+                    Yearly billing includes the published 5% discount. Payment is renewed manually.
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 border-t border-border p-5 lg:grid-cols-3">
+                  {planOptions.map((plan) => {
+                    const active = (form.subscriptionPlanId ?? 'starter') === plan.id;
+                    const planPrice =
+                      billingCycle === 'yearly' && plan.monthlyPrice
+                        ? Math.round(plan.monthlyPrice * 12 * 0.95)
+                        : plan.monthlyPrice;
+                    return (
+                      <div
+                        key={plan.id}
+                        className={`flex flex-col rounded-xl border p-4 ${
+                          active ? 'border-primary bg-primary/5' : 'border-border bg-background'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-base font-black">{plan.name}</p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              {plan.description}
+                            </p>
+                          </div>
+                          {active && <CheckCircle2 size={18} className="shrink-0 text-primary" />}
+                        </div>
+                        <p className="mt-3 text-sm font-bold">
+                          {planPrice
+                            ? `NGN ${planPrice.toLocaleString()} / ${billingCycle === 'yearly' ? 'year' : 'month'}`
+                            : 'Custom'}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Product limit:{' '}
+                          {plan.productLimit ? plan.productLimit.toLocaleString() : 'Custom'}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void changePlan(plan.id)}
+                          disabled={active || payingPlan !== null}
+                          className="mt-4 rounded-lg border border-border px-3 py-2 text-sm font-semibold disabled:opacity-60"
+                        >
+                          {active
+                            ? 'Current plan'
+                            : payingPlan === plan.id
+                              ? 'Opening Paystack…'
+                              : plan.id === 'delux'
+                                ? 'Contact sales'
+                                : `Subscribe to ${plan.name}`}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div
-              id="subscription"
+              id="loyalty"
+              style={{ display: isHospitality ? 'none' : undefined }}
               className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
             >
-              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                <CreditCard size={16} className="text-primary" />
-                <span className="text-sm font-semibold">Subscription & Plan</span>
+              <div className="px-4 py-3 border-b border-border">
+                <span className="text-sm font-semibold">Customer Loyalty</span>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Configure monetary loyalty credit earned from paid purchases and when it can be
+                  used.
+                </p>
               </div>
-              <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-3">
-                <div className="rounded-lg bg-muted/40 px-4 py-3">
-                  <p className="text-xs font-bold uppercase text-muted-foreground">Current plan</p>
-                  <p className="mt-1 text-lg font-bold">{productUsage.plan.name}</p>
-                </div>
-                <div className="rounded-lg bg-muted/40 px-4 py-3">
-                  <p className="text-xs font-bold uppercase text-muted-foreground">Product usage</p>
-                  <p className="mt-1 text-lg font-bold font-tabular">
-                    {productUsage.currentProducts.toLocaleString()}
-                    {productUsage.limit ? ` / ${productUsage.limit.toLocaleString()}` : ' / Custom'}
-                  </p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Counts distinct product/batch records, not units in stock.
-                  </p>
-                </div>
-                <div className="rounded-lg bg-muted/40 px-4 py-3">
-                  <p className="text-xs font-bold uppercase text-muted-foreground">Status</p>
-                  <p className="mt-1 text-lg font-bold capitalize">
-                    {settings.subscriptionStatus ?? 'active'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-4">
-                <span className="text-xs font-semibold text-muted-foreground">Billing:</span>
-                {(['monthly', 'yearly'] as const).map((cycle) => (
-                  <button
-                    key={cycle}
-                    type="button"
-                    onClick={() => setBillingCycle(cycle)}
-                    className={`rounded-md px-3 py-1.5 text-xs font-bold capitalize ${billingCycle === cycle ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground'}`}
-                  >
-                    {cycle}
-                  </button>
-                ))}
-                <span className="text-xs text-muted-foreground">
-                  Yearly billing includes the published 5% discount. Payment is renewed manually.
-                </span>
-              </div>
-              <div className="grid grid-cols-1 gap-3 border-t border-border p-5 lg:grid-cols-3">
-                {planOptions.map((plan) => {
-                  const active = (form.subscriptionPlanId ?? 'starter') === plan.id;
-                  const planPrice = billingCycle === 'yearly' && plan.monthlyPrice ? Math.round(plan.monthlyPrice * 12 * 0.95) : plan.monthlyPrice;
-                  return (
-                    <div
-                      key={plan.id}
-                      className={`flex flex-col rounded-xl border p-4 ${
-                        active ? 'border-primary bg-primary/5' : 'border-border bg-background'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-base font-black">{plan.name}</p>
-                          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                            {plan.description}
-                          </p>
-                        </div>
-                        {active && <CheckCircle2 size={18} className="shrink-0 text-primary" />}
-                      </div>
-                      <p className="mt-3 text-sm font-bold">
-                        {planPrice
-                          ? `NGN ${planPrice.toLocaleString()} / ${billingCycle === 'yearly' ? 'year' : 'month'}`
-                          : 'Custom'}
-                      </p>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Product limit:{' '}
-                        {plan.productLimit ? plan.productLimit.toLocaleString() : 'Custom'}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => void changePlan(plan.id)}
-                        disabled={active || payingPlan !== null}
-                        className="mt-4 rounded-lg border border-border px-3 py-2 text-sm font-semibold disabled:opacity-60"
-                      >
-                        {active ? 'Current plan' : payingPlan === plan.id ? 'Opening Paystack…' : plan.id === 'delux' ? 'Contact sales' : `Subscribe to ${plan.name}`}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div
-            id="loyalty"
-            style={{ display: isHospitality ? 'none' : undefined }}
-            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-          >
-            <div className="px-4 py-3 border-b border-border">
-              <span className="text-sm font-semibold">Customer Loyalty</span>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Configure monetary loyalty credit earned from paid purchases and when it can be
-                used.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
-              <label className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-3 md:col-span-2">
-                <span>
-                  <span className="block text-sm font-medium">Enable customer loyalty</span>
-                  <span className="block text-xs text-muted-foreground">
-                    Credit sales do not earn or redeem loyalty credit.
+              <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
+                <label className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-3 md:col-span-2">
+                  <span>
+                    <span className="block text-sm font-medium">Enable customer loyalty</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Credit sales do not earn or redeem loyalty credit.
+                    </span>
                   </span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={form.loyaltyEnabled ?? false}
-                  onChange={(event) => setForm({ ...form, loyaltyEnabled: event.target.checked })}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Loyalty credit earned (%)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.loyaltyEarnPercent ?? 1}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      loyaltyEarnPercent: Math.max(0, Number(event.target.value) || 0),
-                    })
-                  }
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  Example: 1% of NGN 100,000 adds NGN 1,000 to the customer&apos;s loyalty credit.
-                </span>
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">
-                  Minimum loyalty credit before use
-                </span>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={form.loyaltyRedemptionThreshold ?? 100}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      loyaltyRedemptionThreshold: Math.max(0, Number(event.target.value) || 0),
-                    })
-                  }
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2"
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  The credit stays on the customer account until it reaches this amount.
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <div
-            id="business-profile"
-            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-          >
-            <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-              <Building2 size={16} className="text-primary" />
-              <span className="text-sm font-semibold">Business Profile</span>
-            </div>
-            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Business / Store Name</span>
-                <input
-                  value={form.businessName}
-                  onChange={(e) => setForm({ ...form, businessName: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Business Type</span>
-                <NiceSelect
-                  value={form.businessMode ?? 'retail'}
-                  onChange={(businessMode) =>
-                    setForm({
-                      ...form,
-                      businessMode: businessMode as BusinessMode,
-                      activeBusinessMode: businessMode === 'hospitality' ? 'hospitality' : 'retail',
-                    })
-                  }
-                  options={
-                    form.businessMode === 'retail-hospitality'
-                      ? [{ value: 'retail-hospitality', label: 'Retail + Hospitality' }]
-                      : form.businessMode === 'hospitality'
-                        ? [{ value: 'hospitality', label: 'Hospitality only' }]
-                        : [{ value: 'retail', label: 'Retail only' }]
-                  }
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  This business type is selected during signup. Retail and hospitality records
-                  remain in separate sections.
-                </span>
-              </label>
-              {form.businessMode === 'retail-hospitality' && (
+                  <input
+                    type="checkbox"
+                    checked={form.loyaltyEnabled ?? false}
+                    onChange={(event) => setForm({ ...form, loyaltyEnabled: event.target.checked })}
+                  />
+                </label>
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Active operating area</span>
-                  <NiceSelect
-                    value={form.activeBusinessMode ?? 'retail'}
-                    onChange={(activeBusinessMode) =>
-                      setForm({
-                        ...form,
-                        activeBusinessMode: activeBusinessMode as 'retail' | 'hospitality',
-                      })
-                    }
-                    options={[
-                      { value: 'retail', label: 'Retail — products, POS, inventory' },
-                      {
-                        value: 'hospitality',
-                        label: 'Hospitality — reservations, rooms & services',
-                      },
-                    ]}
-                  />
-                  <span className="text-[11px] text-muted-foreground">
-                    Save this setting before changing operating areas. Only the selected area will
-                    appear in navigation.
-                  </span>
-                </label>
-              )}
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Company logo</span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    if (file.size > 2 * 1024 * 1024) {
-                      toast.error('Logo must be 2 MB or smaller.');
-                      return;
-                    }
-                    const reader = new FileReader();
-                    reader.onload = () => setForm({ ...form, logoUrl: String(reader.result) });
-                    reader.readAsDataURL(file);
-                  }}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                />
-                {form.logoUrl && (
-                  <AppImage
-                    src={form.logoUrl}
-                    alt="Company logo preview"
-                    width={72}
-                    height={72}
-                    className="mt-2 h-16 w-16 rounded object-contain"
-                    unoptimized
-                  />
-                )}
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Phone</span>
-                <input
-                  value={form.phone ?? ''}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Email</span>
-                <input
-                  value={form.email ?? ''}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                />
-              </label>
-              <label className="space-y-1 md:col-span-2">
-                <span className="text-xs text-muted-foreground">Address</span>
-                <input
-                  value={form.address ?? ''}
-                  onChange={(e) => setForm({ ...form, address: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                />
-              </label>
-            </div>
-          </div>
-
-          <div
-            id="tax-receipts"
-            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-          >
-            <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-              <Receipt size={16} className="text-primary" />
-              <span className="text-sm font-semibold">Tax, Receipts & Payments</span>
-            </div>
-            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Currency</span>
-                <NiceSelect
-                  value={form.currency}
-                  onChange={(currency) => setForm({ ...form, currency })}
-                  options={[
-                    { value: 'NGN', label: 'NGN' },
-                    { value: 'USD', label: 'USD' },
-                    { value: 'GHS', label: 'GHS' },
-                    { value: 'KES', label: 'KES' },
-                  ]}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Default VAT / Tax Rate (%)</span>
-                <input
-                  type="number"
-                  value={form.taxRate}
-                  onChange={(e) => setForm({ ...form, taxRate: Number(e.target.value) })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">VAT Pricing Mode</span>
-                <NiceSelect
-                  value={form.taxMode ?? 'exclusive'}
-                  onChange={(taxMode) =>
-                    setForm({ ...form, taxMode: taxMode as BusinessSettings['taxMode'] })
-                  }
-                  options={[
-                    { value: 'exclusive', label: 'VAT exempt (no VAT)' },
-                    { value: 'inclusive', label: 'VAT applies (add separately)' },
-                  ]}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Tax Name</span>
-                <input
-                  value={form.taxName ?? form.taxNumber ?? ''}
-                  onChange={(e) => setForm({ ...form, taxName: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Receipt Prefix</span>
-                <input
-                  value={form.receiptPrefix ?? 'TXN'}
-                  onChange={(e) => setForm({ ...form, receiptPrefix: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                />
-              </label>
-              <label className="space-y-1 md:col-span-2">
-                <span className="text-xs text-muted-foreground">Receipt Footer</span>
-                <textarea
-                  value={form.receiptFooter}
-                  onChange={(e) => setForm({ ...form, receiptFooter: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background min-h-24"
-                />
-              </label>
-              <div className="grid gap-3 border-t border-border pt-4 md:col-span-2 md:grid-cols-3">
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={form.receiptShowLogo ?? true}
-                    onChange={(e) => setForm({ ...form, receiptShowLogo: e.target.checked })}
-                  />
-                  Show logo on receipt
-                </label>
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={form.receiptShowBusinessDetails ?? true}
-                    onChange={(e) =>
-                      setForm({ ...form, receiptShowBusinessDetails: e.target.checked })
-                    }
-                  />
-                  Show business contact
-                </label>
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={form.receiptShowCustomer ?? true}
-                    onChange={(e) => setForm({ ...form, receiptShowCustomer: e.target.checked })}
-                  />
-                  Show customer details
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div
-            id="tax-types"
-            className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-          >
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <span className="text-sm font-semibold">VAT / Tax types</span>
-              <button
-                type="button"
-                onClick={() =>
-                  setForm({
-                    ...form,
-                    taxRates: [
-                      ...(form.taxRates ?? []),
-                      {
-                        id: `tax-${Date.now()}`,
-                        name: 'New tax',
-                        rate: 0,
-                        mode: 'exclusive',
-                        active: true,
-                      },
-                    ],
-                  })
-                }
-                className="inline-flex items-center gap-1 rounded-lg bg-secondary px-3 py-2 text-xs font-semibold"
-              >
-                <Plus size={13} /> Add tax
-              </button>
-            </div>
-            <div className="space-y-2 p-5">
-              {(form.taxRates ?? []).map((tax, index) => (
-                <div
-                  key={tax.id}
-                  className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_120px_160px_auto]"
-                >
-                  <input
-                    value={tax.name}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        taxRates: form.taxRates!.map((item, i) =>
-                          i === index ? { ...item, name: e.target.value } : item
-                        ),
-                      })
-                    }
-                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                    placeholder="VAT"
-                  />
+                  <span className="text-xs text-muted-foreground">Loyalty credit earned (%)</span>
                   <input
                     type="number"
                     min="0"
-                    value={tax.rate}
-                    onChange={(e) =>
+                    step="0.01"
+                    value={form.loyaltyEarnPercent ?? 1}
+                    onChange={(event) =>
                       setForm({
                         ...form,
-                        taxRates: form.taxRates!.map((item, i) =>
-                          i === index ? { ...item, rate: Number(e.target.value) } : item
-                        ),
+                        loyaltyEarnPercent: Math.max(0, Number(event.target.value) || 0),
                       })
                     }
-                    className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
                   />
-                  <NiceSelect
-                    value={tax.mode}
-                    onChange={(mode) =>
+                  <span className="text-[11px] text-muted-foreground">
+                    Example: 1% of NGN 100,000 adds NGN 1,000 to the customer&apos;s loyalty credit.
+                  </span>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">
+                    Minimum loyalty credit before use
+                  </span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={form.loyaltyRedemptionThreshold ?? 100}
+                    onChange={(event) =>
                       setForm({
                         ...form,
-                        taxRates: form.taxRates!.map((item, i) =>
-                          i === index ? { ...item, mode: mode as 'inclusive' | 'exclusive' } : item
-                        ),
+                        loyaltyRedemptionThreshold: Math.max(0, Number(event.target.value) || 0),
                       })
                     }
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                  />
+                  <span className="text-[11px] text-muted-foreground">
+                    The credit stays on the customer account until it reaches this amount.
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div
+              id="business-profile"
+              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+            >
+              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                <Building2 size={16} className="text-primary" />
+                <span className="text-sm font-semibold">Business Profile</span>
+              </div>
+              <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Business / Store Name</span>
+                  <input
+                    value={form.businessName}
+                    onChange={(e) => setForm({ ...form, businessName: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Business Type</span>
+                  <NiceSelect
+                    value={form.businessMode ?? 'retail'}
+                    onChange={(businessMode) =>
+                      setForm({
+                        ...form,
+                        businessMode: businessMode as BusinessMode,
+                        activeBusinessMode:
+                          businessMode === 'hospitality' ? 'hospitality' : 'retail',
+                      })
+                    }
+                    options={
+                      form.businessMode === 'retail-hospitality'
+                        ? [{ value: 'retail-hospitality', label: 'Retail + Hospitality' }]
+                        : form.businessMode === 'hospitality'
+                          ? [{ value: 'hospitality', label: 'Hospitality only' }]
+                          : [{ value: 'retail', label: 'Retail only' }]
+                    }
+                  />
+                  <span className="text-[11px] text-muted-foreground">
+                    This business type is selected during signup. Retail and hospitality records
+                    remain in separate sections.
+                  </span>
+                </label>
+                {form.businessMode === 'retail-hospitality' && (
+                  <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Active operating area</span>
+                    <NiceSelect
+                      value={form.activeBusinessMode ?? 'retail'}
+                      onChange={(activeBusinessMode) =>
+                        setForm({
+                          ...form,
+                          activeBusinessMode: activeBusinessMode as 'retail' | 'hospitality',
+                        })
+                      }
+                      options={[
+                        { value: 'retail', label: 'Retail — products, POS, inventory' },
+                        {
+                          value: 'hospitality',
+                          label: 'Hospitality — reservations, rooms & services',
+                        },
+                      ]}
+                    />
+                    <span className="text-[11px] text-muted-foreground">
+                      Save this setting before changing operating areas. Only the selected area will
+                      appear in navigation.
+                    </span>
+                  </label>
+                )}
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Company logo</span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 2 * 1024 * 1024) {
+                        toast.error('Logo must be 2 MB or smaller.');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = () => setForm({ ...form, logoUrl: String(reader.result) });
+                      reader.readAsDataURL(file);
+                    }}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                  {form.logoUrl && (
+                    <AppImage
+                      src={form.logoUrl}
+                      alt="Company logo preview"
+                      width={72}
+                      height={72}
+                      className="mt-2 h-16 w-16 rounded object-contain"
+                      unoptimized
+                    />
+                  )}
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Phone</span>
+                  <input
+                    value={form.phone ?? ''}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Email</span>
+                  <input
+                    value={form.email ?? ''}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                  />
+                </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-xs text-muted-foreground">Address</span>
+                  <input
+                    value={form.address ?? ''}
+                    onChange={(e) => setForm({ ...form, address: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div
+              id="tax-receipts"
+              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+            >
+              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                <Receipt size={16} className="text-primary" />
+                <span className="text-sm font-semibold">Tax, Receipts & Payments</span>
+              </div>
+              <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Currency</span>
+                  <NiceSelect
+                    value={form.currency}
+                    onChange={(currency) => setForm({ ...form, currency })}
                     options={[
-                      { value: 'exclusive', label: 'VAT exempt (no VAT)' },
-                      { value: 'inclusive', label: 'VAT applies (add separately)' },
+                      { value: 'NGN', label: 'NGN' },
+                      { value: 'USD', label: 'USD' },
+                      { value: 'GHS', label: 'GHS' },
+                      { value: 'KES', label: 'KES' },
                     ]}
                   />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForm({ ...form, taxRates: form.taxRates!.filter((_, i) => i !== index) })
-                    }
-                    className="text-danger"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div
-              id="alerts"
-              style={{ display: isHospitality ? 'none' : undefined }}
-              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-            >
-              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                <Bell size={16} className="text-primary" />
-                <span className="text-sm font-semibold">Alerts & Notifications</span>
-              </div>
-              <div className="p-5 grid grid-cols-1 gap-4">
+                </label>
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Low Stock Threshold Default</span>
+                  <span className="text-xs text-muted-foreground">Default VAT / Tax Rate (%)</span>
                   <input
                     type="number"
-                    min={1}
-                    max={365}
-                    value={form.lowStockAlertDays}
-                    onChange={(e) =>
-                      setForm({ ...form, lowStockAlertDays: Number(e.target.value) })
+                    value={form.taxRate}
+                    onChange={(e) => setForm({ ...form, taxRate: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">VAT Pricing Mode</span>
+                  <NiceSelect
+                    value={form.taxMode ?? 'exclusive'}
+                    onChange={(taxMode) =>
+                      setForm({ ...form, taxMode: taxMode as BusinessSettings['taxMode'] })
                     }
+                    options={[
+                      { value: 'exclusive', label: 'VAT added to selling price' },
+                      { value: 'inclusive', label: 'VAT included in selling price' },
+                    ]}
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Tax Name</span>
+                  <input
+                    value={form.taxName ?? form.taxNumber ?? ''}
+                    onChange={(e) => setForm({ ...form, taxName: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-border bg-background"
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Expiry Alert Days</span>
+                  <span className="text-xs text-muted-foreground">Receipt Prefix</span>
                   <input
-                    type="number"
-                    value={form.expiryAlertDays ?? 30}
-                    onChange={(e) => setForm({ ...form, expiryAlertDays: Number(e.target.value) })}
+                    value={form.receiptPrefix ?? 'TXN'}
+                    onChange={(e) => setForm({ ...form, receiptPrefix: e.target.value })}
                     className="w-full px-3 py-2 rounded-lg border border-border bg-background"
                   />
                 </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Notification Recipients</span>
-                  <input
-                    value={form.notificationRecipients ?? ''}
-                    onChange={(e) => setForm({ ...form, notificationRecipients: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                    placeholder="manager@store.com, owner@store.com"
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-xs text-muted-foreground">Receipt Footer</span>
+                  <textarea
+                    value={form.receiptFooter}
+                    onChange={(e) => setForm({ ...form, receiptFooter: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg border border-border bg-background min-h-24"
                   />
                 </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Expiry Email Recipients</span>
-                  <input
-                    value={form.expiryEmailRecipients ?? ''}
-                    onChange={(e) => setForm({ ...form, expiryEmailRecipients: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-border bg-background"
-                    placeholder="stock@store.com, owner@store.com"
-                  />
-                  <span className="block text-[11px] text-muted-foreground">
-                    A complete expiry report is emailed every Monday at 7:00 AM West Africa Time.
-                    Products already expired and products expiring within the configured window are
-                    included. Separate multiple addresses with commas.
-                  </span>
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    ['inApp', 'In-app'],
-                    ['dashboard', 'Dashboard'],
-                    ['email', 'Email'],
-                  ].map(([key, label]) => (
-                    <label
-                      key={key}
-                      className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={
-                          form.notificationChannels?.[
-                            key as keyof NonNullable<BusinessSettings['notificationChannels']>
-                          ] ?? false
-                        }
-                        onChange={(e) =>
-                          setForm({
-                            ...form,
-                            notificationChannels: {
-                              inApp: form.notificationChannels?.inApp ?? true,
-                              dashboard: form.notificationChannels?.dashboard ?? true,
-                              email: form.notificationChannels?.email ?? false,
-                              [key]: e.target.checked,
-                            },
-                          })
-                        }
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div
-              id="pos-rules"
-              style={{ display: isHospitality ? 'none' : undefined }}
-              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-            >
-              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                <ShieldCheck size={16} className="text-primary" />
-                <span className="text-sm font-semibold">POS Rules</span>
-              </div>
-              <div className="p-5 grid grid-cols-1 gap-3">
-                <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
-                  <span>
-                    <span className="block text-sm font-medium">Allow Offline Sales</span>
-                    <span className="block text-xs text-muted-foreground">
-                      Cashiers can keep selling without internet.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={form.allowOfflineSales}
-                    onChange={(e) => setForm({ ...form, allowOfflineSales: e.target.checked })}
-                  />
-                </label>
-                <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
-                  <span>
-                    <span className="block text-sm font-medium">Allow Negative Stock</span>
-                    <span className="block text-xs text-muted-foreground">
-                      Keep disabled for strict stock control.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={form.allowNegativeStock ?? false}
-                    onChange={(e) => setForm({ ...form, allowNegativeStock: e.target.checked })}
-                  />
-                </label>
-                <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
-                  <span>
-                    <span className="block text-sm font-medium">Allow Selling Below Cost</span>
-                    <span className="block text-xs text-muted-foreground">
-                      Use only for clearance or manager-approved sales.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={form.allowSellingBelowCost ?? false}
-                    onChange={(e) => setForm({ ...form, allowSellingBelowCost: e.target.checked })}
-                  />
-                </label>
-                <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
-                  <span>
-                    <span className="block text-sm font-medium">Cashier Discounts</span>
-                    <span className="block text-xs text-muted-foreground">
-                      Cashiers can apply order and line discounts.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={form.allowCashierDiscounts ?? true}
-                    onChange={(e) => setForm({ ...form, allowCashierDiscounts: e.target.checked })}
-                  />
-                </label>
-                <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
-                  <span>
-                    <span className="block text-sm font-medium">Manager Approval for Refunds</span>
-                    <span className="block text-xs text-muted-foreground">
-                      Refunds will require elevated permission.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={form.requireManagerForRefunds}
-                    onChange={(e) =>
-                      setForm({ ...form, requireManagerForRefunds: e.target.checked })
-                    }
-                  />
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div
-              id="branches"
-              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-            >
-              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                <Settings size={16} className="text-primary" />
-                <span className="text-sm font-semibold">Branches</span>
-              </div>
-              <div className="p-5 grid grid-cols-1 gap-4">
-                <TextListArea
-                  label="Branches / Locations"
-                  value={form.branches ?? []}
-                  onChange={(branches) => setForm({ ...form, branches })}
-                />
-                <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                  Enter one branch or location per line.
-                </p>
-              </div>
-            </div>
-
-            <div
-              id="appearance"
-              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
-            >
-              <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-                <Palette size={16} className="text-primary" />
-                <span className="text-sm font-semibold">Appearance & Connection Recovery</span>
-              </div>
-              <div className="p-5 grid grid-cols-1 gap-4">
-                <div className="grid grid-cols-[80px_1fr] gap-3">
-                  <input
-                    type="color"
-                    value={form.themeColor ?? '#19b8a6'}
-                    onChange={(e) => setForm({ ...form, themeColor: e.target.value })}
-                    className="h-10 w-full rounded-lg border border-border bg-background p-1"
-                  />
-                  <label className="space-y-1">
-                    <span className="text-xs text-muted-foreground">Theme Hex Code</span>
+                <div className="grid gap-3 border-t border-border pt-4 md:col-span-2 md:grid-cols-3">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
                     <input
-                      value={form.themeColor ?? '#19b8a6'}
-                      onChange={(e) => setForm({ ...form, themeColor: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border border-border bg-background font-tabular"
-                      placeholder="#19b8a6"
+                      type="checkbox"
+                      checked={form.receiptShowLogo ?? true}
+                      onChange={(e) => setForm({ ...form, receiptShowLogo: e.target.checked })}
+                    />
+                    Show logo on receipt
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={form.receiptShowBusinessDetails ?? true}
+                      onChange={(e) =>
+                        setForm({ ...form, receiptShowBusinessDetails: e.target.checked })
+                      }
+                    />
+                    Show business contact
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={form.receiptShowCustomer ?? true}
+                      onChange={(e) => setForm({ ...form, receiptShowCustomer: e.target.checked })}
+                    />
+                    Show customer details
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div
+              id="tax-types"
+              className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+            >
+              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                <span className="text-sm font-semibold">VAT / Tax types</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      taxRates: [
+                        ...(form.taxRates ?? []),
+                        {
+                          id: `tax-${Date.now()}`,
+                          name: 'New tax',
+                          rate: 0,
+                          mode: 'exclusive',
+                          active: true,
+                        },
+                      ],
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-lg bg-secondary px-3 py-2 text-xs font-semibold"
+                >
+                  <Plus size={13} /> Add tax
+                </button>
+              </div>
+              <div className="space-y-2 p-5">
+                {(form.taxRates ?? []).map((tax, index) => (
+                  <div
+                    key={tax.id}
+                    className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_120px_160px_auto]"
+                  >
+                    <input
+                      value={tax.name}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          taxRates: form.taxRates!.map((item, i) =>
+                            i === index ? { ...item, name: e.target.value } : item
+                          ),
+                        })
+                      }
+                      className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                      placeholder="VAT"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      value={tax.rate}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          taxRates: form.taxRates!.map((item, i) =>
+                            i === index ? { ...item, rate: Number(e.target.value) } : item
+                          ),
+                        })
+                      }
+                      className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    />
+                    <NiceSelect
+                      value={tax.mode}
+                      onChange={(mode) =>
+                        setForm({
+                          ...form,
+                          taxRates: form.taxRates!.map((item, i) =>
+                            i === index
+                              ? { ...item, mode: mode as 'inclusive' | 'exclusive' }
+                              : item
+                          ),
+                        })
+                      }
+                      options={[
+                        { value: 'exclusive', label: 'VAT added to selling price' },
+                        { value: 'inclusive', label: 'VAT included in selling price' },
+                      ]}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm({ ...form, taxRates: form.taxRates!.filter((_, i) => i !== index) })
+                      }
+                      className="text-danger"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div
+                id="alerts"
+                style={{ display: isHospitality ? 'none' : undefined }}
+                className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+              >
+                <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                  <Bell size={16} className="text-primary" />
+                  <span className="text-sm font-semibold">Alerts & Notifications</span>
+                </div>
+                <div className="p-5 grid grid-cols-1 gap-4">
+                  <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">
+                      Low Stock Threshold Default
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={form.lowStockAlertDays}
+                      onChange={(e) =>
+                        setForm({ ...form, lowStockAlertDays: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Expiry Alert Days</span>
+                    <input
+                      type="number"
+                      value={form.expiryAlertDays ?? 30}
+                      onChange={(e) =>
+                        setForm({ ...form, expiryAlertDays: Number(e.target.value) })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Notification Recipients</span>
+                    <input
+                      value={form.notificationRecipients ?? ''}
+                      onChange={(e) => setForm({ ...form, notificationRecipients: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                      placeholder="manager@store.com, owner@store.com"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Expiry Email Recipients</span>
+                    <input
+                      value={form.expiryEmailRecipients ?? ''}
+                      onChange={(e) => setForm({ ...form, expiryEmailRecipients: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                      placeholder="stock@store.com, owner@store.com"
+                    />
+                    <span className="block text-[11px] text-muted-foreground">
+                      A complete expiry report is emailed every Monday at 7:00 AM West Africa Time.
+                      Products already expired and products expiring within the configured window
+                      are included. Separate multiple addresses with commas.
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      ['inApp', 'In-app'],
+                      ['dashboard', 'Dashboard'],
+                      ['email', 'Email'],
+                    ].map(([key, label]) => (
+                      <label
+                        key={key}
+                        className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={
+                            form.notificationChannels?.[
+                              key as keyof NonNullable<BusinessSettings['notificationChannels']>
+                            ] ?? false
+                          }
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              notificationChannels: {
+                                inApp: form.notificationChannels?.inApp ?? true,
+                                dashboard: form.notificationChannels?.dashboard ?? true,
+                                email: form.notificationChannels?.email ?? false,
+                                [key]: e.target.checked,
+                              },
+                            })
+                          }
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                id="pos-rules"
+                style={{ display: isHospitality ? 'none' : undefined }}
+                className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+              >
+                <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                  <ShieldCheck size={16} className="text-primary" />
+                  <span className="text-sm font-semibold">POS Rules</span>
+                </div>
+                <div className="p-5 grid grid-cols-1 gap-3">
+                  <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
+                    <span>
+                      <span className="block text-sm font-medium">Allow Offline Sales</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Cashiers can keep selling without internet.
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={form.allowOfflineSales}
+                      onChange={(e) => setForm({ ...form, allowOfflineSales: e.target.checked })}
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
+                    <span>
+                      <span className="block text-sm font-medium">Allow Negative Stock</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Keep disabled for strict stock control.
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={form.allowNegativeStock ?? false}
+                      onChange={(e) => setForm({ ...form, allowNegativeStock: e.target.checked })}
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
+                    <span>
+                      <span className="block text-sm font-medium">Allow Selling Below Cost</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Use only for clearance or manager-approved sales.
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={form.allowSellingBelowCost ?? false}
+                      onChange={(e) =>
+                        setForm({ ...form, allowSellingBelowCost: e.target.checked })
+                      }
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
+                    <span>
+                      <span className="block text-sm font-medium">Cashier Discounts</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Cashiers can apply order and line discounts.
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={form.allowCashierDiscounts ?? true}
+                      onChange={(e) =>
+                        setForm({ ...form, allowCashierDiscounts: e.target.checked })
+                      }
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-4 py-3">
+                    <span>
+                      <span className="block text-sm font-medium">
+                        Manager Approval for Refunds
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        Refunds will require elevated permission.
+                      </span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={form.requireManagerForRefunds}
+                      onChange={(e) =>
+                        setForm({ ...form, requireManagerForRefunds: e.target.checked })
+                      }
                     />
                   </label>
                 </div>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Appearance</span>
-                  <NiceSelect
-                    value={form.themeMode ?? 'light'}
-                    onChange={(themeMode) =>
-                      setForm({
-                        ...form,
-                        themeMode: themeMode as BusinessSettings['themeMode'],
-                      })
-                    }
-                    options={[
-                      { value: 'light', label: 'Light mode' },
-                      { value: 'dark', label: 'Dark mode' },
-                    ]}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div
+                id="branches"
+                className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+              >
+                <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                  <Settings size={16} className="text-primary" />
+                  <span className="text-sm font-semibold">Branches</span>
+                </div>
+                <div className="p-5 grid grid-cols-1 gap-4">
+                  <TextListArea
+                    label="Branches / Locations"
+                    value={form.branches ?? []}
+                    onChange={(branches) => setForm({ ...form, branches })}
                   />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Font</span>
-                  <NiceSelect
-                    value={form.fontFamily ?? 'Inter'}
-                    onChange={(fontFamily) => setForm({ ...form, fontFamily })}
-                    options={[
-                      'Inter',
-                      'Roboto',
-                      'Open Sans',
-                      'Lato',
-                      'Montserrat',
-                      'Poppins',
-                      'Nunito',
-                      'Source Sans 3',
-                      'Work Sans',
-                      'System UI',
-                    ].map((font) => ({ value: font, label: font }))}
-                  />
-                </label>
-                <div className="rounded-xl border border-border bg-muted/30 px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Wifi size={15} className="text-primary" />
-                    <span className="text-sm font-semibold">Updates Waiting</span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {pendingSyncCount} update{pendingSyncCount === 1 ? '' : 's'} waiting to be sent.
-                    Updates are sent automatically when the service is available.
+                  <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    Enter one branch or location per line.
                   </p>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <div className="px-5 py-4 border-t border-border flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              {pendingSyncCount} update{pendingSyncCount === 1 ? '' : 's'} waiting to be sent.
-            </p>
-            <button
-              onClick={save}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold"
-            >
-              <Save size={14} />
-              {saved ? 'Saved' : 'Save Settings'}
-            </button>
-          </div>
+              <div
+                id="appearance"
+                className="scroll-mt-16 bg-card border border-border rounded-xl shadow-card"
+              >
+                <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+                  <Palette size={16} className="text-primary" />
+                  <span className="text-sm font-semibold">Appearance & Connection Recovery</span>
+                </div>
+                <div className="p-5 grid grid-cols-1 gap-4">
+                  <div className="grid grid-cols-[80px_1fr] gap-3">
+                    <input
+                      type="color"
+                      value={form.themeColor ?? '#19b8a6'}
+                      onChange={(e) => setForm({ ...form, themeColor: e.target.value })}
+                      className="h-10 w-full rounded-lg border border-border bg-background p-1"
+                    />
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">Theme Hex Code</span>
+                      <input
+                        value={form.themeColor ?? '#19b8a6'}
+                        onChange={(e) => setForm({ ...form, themeColor: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg border border-border bg-background font-tabular"
+                        placeholder="#19b8a6"
+                      />
+                    </label>
+                  </div>
+                  <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Appearance</span>
+                    <NiceSelect
+                      value={form.themeMode ?? 'light'}
+                      onChange={(themeMode) =>
+                        setForm({
+                          ...form,
+                          themeMode: themeMode as BusinessSettings['themeMode'],
+                        })
+                      }
+                      options={[
+                        { value: 'light', label: 'Light mode' },
+                        { value: 'dark', label: 'Dark mode' },
+                      ]}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs text-muted-foreground">Font</span>
+                    <NiceSelect
+                      value={form.fontFamily ?? 'Inter'}
+                      onChange={(fontFamily) => setForm({ ...form, fontFamily })}
+                      options={[
+                        'Inter',
+                        'Roboto',
+                        'Open Sans',
+                        'Lato',
+                        'Montserrat',
+                        'Poppins',
+                        'Nunito',
+                        'Source Sans 3',
+                        'Work Sans',
+                        'System UI',
+                      ].map((font) => ({ value: font, label: font }))}
+                    />
+                  </label>
+                  <div className="rounded-xl border border-border bg-muted/30 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Wifi size={15} className="text-primary" />
+                      <span className="text-sm font-semibold">Updates Waiting</span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {pendingSyncCount} update{pendingSyncCount === 1 ? '' : 's'} waiting to be
+                      sent. Updates are sent automatically when the service is available.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 border-t border-border flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {pendingSyncCount} update{pendingSyncCount === 1 ? '' : 's'} waiting to be sent.
+              </p>
+              <button
+                onClick={save}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold"
+              >
+                <Save size={14} />
+                {saved ? 'Saved' : 'Save Settings'}
+              </button>
+            </div>
           </div>
         </PermissionGate>
       )}
     </AppLayout>
   );
 }
-
 
 function WorkstationPrinterCard() {
   const [printerReady, setPrinterReady] = useState(false);
@@ -952,8 +983,12 @@ function WorkstationPrinterCard() {
     setStartingPrinter(true);
     try {
       const response = await fetch('http://127.0.0.1:4318/health');
-      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!response.ok || !result?.ok) throw new Error(result?.error || 'Printer helper is not installed or running.');
+      const result = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+      } | null;
+      if (!response.ok || !result?.ok)
+        throw new Error(result?.error || 'Printer helper is not installed or running.');
       setPrinterReady(true);
       toast.success('Receipt printer is ready.');
     } catch {
@@ -965,24 +1000,43 @@ function WorkstationPrinterCard() {
 
   return (
     <div className="mx-auto max-w-6xl px-3 pt-4 sm:px-6">
-      <div id="workstation" className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
+      <div
+        id="workstation"
+        className="overflow-hidden rounded-xl border border-border bg-card shadow-card"
+      >
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Printer size={16} className="shrink-0 text-primary" />
           <div>
             <span className="text-sm font-semibold">This computer</span>
-            <p className="text-xs text-muted-foreground">Printer setup for this user and workstation.</p>
+            <p className="text-xs text-muted-foreground">
+              Printer setup for this user and workstation.
+            </p>
           </div>
         </div>
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
-            Install the helper once on this computer. It stays available across TOVAPOS website updates.
+            Install the helper once on this computer. It stays available across TOVAPOS website
+            updates.
           </p>
           <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
-            <a href="/api/print-helper/windows" download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90">
+            <a
+              href="/api/print-helper/windows"
+              download
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary/90"
+            >
               <Printer size={14} /> Install helper
             </a>
-            <button type="button" onClick={checkPrinter} disabled={startingPrinter} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground transition hover:bg-muted disabled:opacity-60">
-              {startingPrinter ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+            <button
+              type="button"
+              onClick={checkPrinter}
+              disabled={startingPrinter}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold text-secondary-foreground transition hover:bg-muted disabled:opacity-60"
+            >
+              {startingPrinter ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <CheckCircle2 size={14} />
+              )}
               {startingPrinter ? 'Testing...' : printerReady ? 'Printer ready' : 'Test printer'}
             </button>
           </div>
@@ -1108,7 +1162,14 @@ function AccountSecurityCard() {
                     autoComplete="current-password"
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10"
                   />
-                  <button type="button" onClick={() => setShowCurrentPassword(!showCurrentPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showCurrentPassword ? 'Hide Current password' : 'Show Current password'}>
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    aria-label={
+                      showCurrentPassword ? 'Hide Current password' : 'Show Current password'
+                    }
+                  >
                     {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
@@ -1125,7 +1186,12 @@ function AccountSecurityCard() {
                     autoComplete="new-password"
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10"
                   />
-                  <button type="button" onClick={() => setShowNewPassword(!showNewPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showNewPassword ? 'Hide New password' : 'Show New password'}>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    aria-label={showNewPassword ? 'Hide New password' : 'Show New password'}
+                  >
                     {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
@@ -1142,7 +1208,16 @@ function AccountSecurityCard() {
                     autoComplete="new-password"
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-10"
                   />
-                  <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showConfirmPassword ? 'Hide Confirm new password' : 'Show Confirm new password'}>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    aria-label={
+                      showConfirmPassword
+                        ? 'Hide Confirm new password'
+                        : 'Show Confirm new password'
+                    }
+                  >
                     {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
@@ -1182,14 +1257,8 @@ function TextListArea({
     <label className="space-y-1">
       <span className="text-xs text-muted-foreground">{label}</span>
       <textarea
-        value={value.join("\n")}
-        onChange={(e) =>
-          onChange(
-            e.target.value
-              .split("\n")
-              .filter(Boolean)
-          )
-        }
+        value={value.join('\n')}
+        onChange={(e) => onChange(e.target.value.split('\n').filter(Boolean))}
         className="min-h-24 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
       />
     </label>

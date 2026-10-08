@@ -63,9 +63,7 @@ export function computeWeightedAverageUnitCost(
   ) {
     return 0;
   }
-  return (
-    (currentQuantity * currentUnitCost + receivedQuantity * receivedUnitCost) / totalQuantity
-  );
+  return (currentQuantity * currentUnitCost + receivedQuantity * receivedUnitCost) / totalQuantity;
 }
 
 export function getDiscountedSellingPrice(item: InventoryItem): number {
@@ -112,8 +110,14 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     maxStock: Number(item.maxStock) || Math.max(currentQty, reorderLevel),
     unitCost,
     sellingPrice,
-    packPricingEnabled: Boolean((item.packPricingEnabled || hasValidPackPricing) && hasValidPackPricing),
-    packPrice: packPricingEnabledValue(Boolean(item.packPricingEnabled || hasValidPackPricing), packPrice, packQuantity),
+    packPricingEnabled: Boolean(
+      (item.packPricingEnabled || hasValidPackPricing) && hasValidPackPricing
+    ),
+    packPrice: packPricingEnabledValue(
+      Boolean(item.packPricingEnabled || hasValidPackPricing),
+      packPrice,
+      packQuantity
+    ),
     packQuantity: hasValidPackPricing ? packQuantity : undefined,
     packUnit: item.packUnit === 'carton' ? 'carton' : 'pack',
     skuAliases: Array.isArray(item.skuAliases) ? item.skuAliases : [],
@@ -121,7 +125,7 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     profitMargin: computeProfitMargin(unitCost, sellingPrice),
     discountType: item.discountType ?? 'none',
     discountValue: Number(item.discountValue) || 0,
-    taxApplicable: Boolean(item.taxMode === 'inclusive' && (item.taxApplicable || taxRate > 0)),
+    taxApplicable: Boolean(item.taxApplicable || taxRate > 0),
     taxRate,
     taxMode: item.taxMode ?? 'exclusive',
     unitOfMeasurement: item.unitOfMeasurement ?? 'unit',
