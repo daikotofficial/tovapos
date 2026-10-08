@@ -318,6 +318,43 @@ async function loadCompleteReportRows<T = unknown>(input: {
   }
 }
 
+type CashierReportDiagnostics = {
+  completedSalesInPeriod: number;
+  cashierCompletedSalesAllTime: number;
+  matchedCompletedSales: number;
+  resolvedCashierId: string;
+  resolvedCashierName: string;
+};
+
+async function loadCompleteCashierReportRows(input: {
+  report: 'sales-by-cashier-detail';
+  from?: string;
+  to?: string;
+  cashierId: string;
+  cashierName: string;
+}): Promise<{ rows: SaleTransaction[]; diagnostics?: CashierReportDiagnostics }> {
+  const rows: SaleTransaction[] = [];
+  let diagnostics: CashierReportDiagnostics | undefined;
+  let offset = 0;
+  while (true) {
+    const result = await loadReportRows<SaleTransaction>({
+      ...input,
+      limit: REPORT_PAGE_SIZE,
+      offset,
+      requireServer: true,
+    });
+    diagnostics ??= result.diagnostics;
+    if (rows.length + result.rows.length > MAX_COMPLETE_REPORT_ROWS) {
+      throw new Error(
+        `This report exceeds ${MAX_COMPLETE_REPORT_ROWS.toLocaleString()} rows. Narrow the reporting period and try again.`
+      );
+    }
+    rows.push(...result.rows);
+    if (result.rows.length < REPORT_PAGE_SIZE) return { rows, diagnostics };
+    offset += REPORT_PAGE_SIZE;
+  }
+}
+
 function csvEscape(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
@@ -567,6 +604,9 @@ function ReportsContent() {
   const [cashierDetailLoading, setCashierDetailLoading] = useState(false);
   const [serverReportError, setServerReportError] = useState<string | null>(null);
   const [cashierDetailError, setCashierDetailError] = useState<string | null>(null);
+  const [cashierDiagnostics, setCashierDiagnostics] = useState<CashierReportDiagnostics | null>(
+    null
+  );
   const [reportRefreshToken, setReportRefreshToken] = useState(0);
   const [reportCashiers, setReportCashiers] = useState<TovaUser[]>([]);
 
@@ -577,6 +617,7 @@ function ReportsContent() {
     setServerReportKeys({});
     setServerReportError(null);
     setCashierDetailError(null);
+    setCashierDiagnostics(null);
     setCashierId('all');
     setCashierName('');
     setDraftCashierId('all');
@@ -742,23 +783,29 @@ function ReportsContent() {
     if (activeView !== 'sales-by-cashier' || cashierId === 'all') {
       setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': [] }));
       setCashierDetailError(null);
+      setCashierDiagnostics(null);
       return;
     }
     let cancelled = false;
     async function loadCashierDetail() {
       setCashierDetailLoading(true);
       setCashierDetailError(null);
+      setCashierDiagnostics(null);
       try {
         const requestInput = {
-          report: 'sales-by-cashier-detail',
+          report: 'sales-by-cashier-detail' as const,
           from: range.preset === 'all' ? undefined : range.from,
           to: range.preset === 'all' ? undefined : range.to,
           cashierId,
           cashierName,
         };
-        const rows = await loadCompleteReportRows<SaleTransaction>(requestInput);
+        const result = await loadCompleteCashierReportRows(requestInput);
         if (cancelled) return;
-        setServerReportRows((current) => ({ ...current, 'sales-by-cashier-detail': rows }));
+        setServerReportRows((current) => ({
+          ...current,
+          'sales-by-cashier-detail': result.rows,
+        }));
+        setCashierDiagnostics(result.diagnostics ?? null);
         setServerReportKeys((current) => ({
           ...current,
           'sales-by-cashier-detail': reportRequestKey({ ...requestInput, tenantId: tenant?.id }),
@@ -998,6 +1045,9 @@ function ReportsContent() {
   const cashierSummaryLoading =
     cashierDetailLoading || (!selectedCashierSummary && serverReportsLoading);
   const cashierSummaryError = cashierDetailError ?? serverReportError;
+  const cashierEmptyMessage = cashierDiagnostics
+    ? `No completed sales matched. Database verification: ${cashierDiagnostics.completedSalesInPeriod} completed sale(s) exist in this business for the selected period; ${cashierDiagnostics.cashierCompletedSalesAllTime} completed sale(s) are linked to ${cashierDiagnostics.resolvedCashierName || selectedCashierName || 'this cashier'} across all dates; ${cashierDiagnostics.matchedCompletedSales} match both filters.`
+    : 'No completed sales for this cashier in the selected period.';
 
   const displayCreditSalesRows = hasServerRows('credit-sales') ? serverCreditSalesRows : [];
   const displayExpenseRows = hasServerRows('expenses') ? serverExpenseRows : [];
@@ -1037,6 +1087,7 @@ function ReportsContent() {
     }
     setCashierDetailLoading(draftCashierId !== 'all');
     setCashierDetailError(null);
+    setCashierDiagnostics(null);
     setRange({ ...draftRange, preset: 'custom' });
     setCashierId(draftCashierId);
     setCashierName(draftCashierName);
@@ -1054,16 +1105,24 @@ function ReportsContent() {
     setDraftRange(nextRange);
   };
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
+  const cashierOptionsByName = new Map<string, { value: string; label: string }>();
+  cashierDirectoryUsers.forEach((user) => {
+    cashierOptionsByName.set(user.name.trim().replace(/\s+/g, ' ').toLowerCase(), {
+      value: user.id,
+      label: user.name,
+    });
+  });
+  serverCashierRows.forEach((row) => {
+    const key = row.cashier.trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!cashierOptionsByName.has(key)) {
+      cashierOptionsByName.set(key, { value: row.cashierId, label: row.cashier });
+    }
+  });
   const cashierOptions = [
     { value: 'all', label: 'All cashiers' },
-    ...Array.from(
-      new Map([
-        ...cashierDirectoryUsers.map((user) => [user.id, user.name] as const),
-        ...serverCashierRows.map((row) => [row.cashierId, row.cashier] as const),
-      ]).entries()
-    )
-      .sort(([, left], [, right]) => left.localeCompare(right))
-      .map(([value, label]) => ({ value, label })),
+    ...Array.from(cashierOptionsByName.values()).sort((left, right) =>
+      left.label.localeCompare(right.label)
+    ),
   ];
   const exportTable = (() => {
     if (activeView === 'sales-by-cashier') {
@@ -2175,7 +2234,7 @@ function ReportsContent() {
                     ? 'The cashier report is unavailable because the server request failed.'
                     : cashierDetailLoading
                       ? 'Loading this cashier’s sales from the database…'
-                      : 'No completed sales for this cashier in the selected period.'
+                      : cashierEmptyMessage
                 }
                 rows={cashierDetailItemRows.map(({ sale, item }) => [
                   formatReportTimestamp(sale.timestamp),

@@ -525,6 +525,45 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   }
 
   if (report === 'sales-by-cashier-detail') {
+    let resolvedCashierId = cashierId ?? '';
+    let resolvedCashierName = cashierName ?? '';
+    let cashierNameIsUnique = false;
+    if (cashierId || cashierName) {
+      const normalizedName = cashierName?.trim() ?? '';
+      const directoryResult = await getPosPool().query(
+        `SELECT id, name
+         FROM pos_app_users
+         WHERE tenant_id = $1
+           AND (
+             id = $2
+             OR (
+               $3 <> ''
+               AND lower(regexp_replace(trim(name), '\\s+', ' ', 'g')) =
+                   lower(regexp_replace(trim($3), '\\s+', ' ', 'g'))
+             )
+           )
+         ORDER BY CASE WHEN id = $2 THEN 0 ELSE 1 END, id`,
+        [auth.tenantId, cashierId ?? '', normalizedName]
+      );
+      const exactDirectoryUser = directoryResult.rows.find((row) => row.id === cashierId);
+      const directoryUser =
+        exactDirectoryUser ??
+        (directoryResult.rows.length === 1 ? directoryResult.rows[0] : undefined);
+      if (directoryUser) {
+        resolvedCashierId = String(directoryUser.id);
+        resolvedCashierName = String(directoryUser.name);
+        const normalizedDirectoryName = resolvedCashierName
+          .trim()
+          .replace(/\s+/g, ' ')
+          .toLowerCase();
+        cashierNameIsUnique =
+          directoryResult.rows.filter(
+            (row) =>
+              String(row.name).trim().replace(/\s+/g, ' ').toLowerCase() === normalizedDirectoryName
+          ).length === 1;
+      }
+    }
+
     const detailValues: unknown[] = [auth.tenantId];
     const detailWhere: string[] = [
       'tenant_id = $1',
@@ -534,34 +573,64 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     // Query that same indexed table here so the cross-cashier report cannot
     // disagree with the cashier's own history because of a second data source.
     appendDateRange(params, 'timestamp', detailValues, detailWhere);
-    if (cashierId) {
-      detailValues.push(cashierId);
+    const periodWhere = [...detailWhere];
+    const periodValues = [...detailValues];
+    if (resolvedCashierId || resolvedCashierName) {
+      detailValues.push(resolvedCashierId);
       const detailCashierIdParam = `$${detailValues.length}`;
-      if (cashierName) {
-        detailValues.push(cashierName);
+      if (resolvedCashierName && cashierNameIsUnique) {
+        detailValues.push(resolvedCashierName);
         const detailCashierNameParam = `$${detailValues.length}`;
         detailWhere.push(`(
           data->>'cashierId' = ${detailCashierIdParam}
-          OR (
-            1 = (
-              SELECT count(*)
-              FROM pos_app_users report_user
-              WHERE report_user.tenant_id = $1
-                AND lower(regexp_replace(trim(report_user.name), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
-            )
-            AND (
-              lower(regexp_replace(trim(cashier), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
-              OR lower(regexp_replace(trim(data->>'cashier'), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
-            )
-          )
+          OR lower(regexp_replace(trim(cashier), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
+          OR lower(regexp_replace(trim(data->>'cashier'), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${detailCashierNameParam}), '\\s+', ' ', 'g'))
         )`);
       } else {
-        detailWhere.push(`(
-          data->>'cashierId' = ${detailCashierIdParam}
-          OR cashier = ${detailCashierIdParam}
-        )`);
+        detailWhere.push(`data->>'cashierId' = ${detailCashierIdParam}`);
       }
     }
+
+    const completedPeriodResult = await getPosPool().query(
+      `SELECT count(*)::bigint AS count
+       FROM pos_tenant_sales
+       WHERE ${periodWhere.join(' AND ')}`,
+      periodValues
+    );
+    const matchedCountResult = await getPosPool().query(
+      `SELECT count(*)::bigint AS count
+       FROM pos_tenant_sales
+       WHERE ${detailWhere.join(' AND ')}`,
+      detailValues
+    );
+
+    const allTimeValues: unknown[] = [auth.tenantId];
+    const allTimeWhere = [
+      'tenant_id = $1',
+      "coalesce(nullif(lower(trim(data->>'status')), ''), nullif(lower(trim(status)), ''), 'completed') = 'completed'",
+    ];
+    if (resolvedCashierId || resolvedCashierName) {
+      allTimeValues.push(resolvedCashierId);
+      const allTimeCashierIdParam = `$${allTimeValues.length}`;
+      if (resolvedCashierName && cashierNameIsUnique) {
+        allTimeValues.push(resolvedCashierName);
+        const allTimeCashierNameParam = `$${allTimeValues.length}`;
+        allTimeWhere.push(`(
+          data->>'cashierId' = ${allTimeCashierIdParam}
+          OR lower(regexp_replace(trim(cashier), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${allTimeCashierNameParam}), '\\s+', ' ', 'g'))
+          OR lower(regexp_replace(trim(data->>'cashier'), '\\s+', ' ', 'g')) = lower(regexp_replace(trim(${allTimeCashierNameParam}), '\\s+', ' ', 'g'))
+        )`);
+      } else {
+        allTimeWhere.push(`data->>'cashierId' = ${allTimeCashierIdParam}`);
+      }
+    }
+    const cashierAllTimeResult = await getPosPool().query(
+      `SELECT count(*)::bigint AS count
+       FROM pos_tenant_sales
+       WHERE ${allTimeWhere.join(' AND ')}`,
+      allTimeValues
+    );
+
     detailValues.push(limit, offset);
     const detailResult = await getPosPool().query(
       `SELECT data
@@ -575,6 +644,13 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
       rows: detailResult.rows.map((row) => protectSaleFinancials(row.data, auth)),
       limit,
       offset,
+      diagnostics: {
+        completedSalesInPeriod: Number(completedPeriodResult.rows[0]?.count ?? 0),
+        cashierCompletedSalesAllTime: Number(cashierAllTimeResult.rows[0]?.count ?? 0),
+        matchedCompletedSales: Number(matchedCountResult.rows[0]?.count ?? 0),
+        resolvedCashierId,
+        resolvedCashierName,
+      },
     });
   }
 

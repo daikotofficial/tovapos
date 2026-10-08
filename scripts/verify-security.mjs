@@ -593,7 +593,7 @@ try {
   assert.equal(typeof reportSale.cashierId, 'string');
   const [strictCashierRange, excludedCashierRange] = await Promise.all([
     authenticated(
-      `/api/pos-store?store=sales&report=sales-by-cashier-detail&cashierId=${encodeURIComponent(reportCashier.id)}&cashierName=${encodeURIComponent(reportCashier.name)}&from=${reportDate}&to=${reportDate}&limit=10`,
+      `/api/pos-store?store=sales&report=sales-by-cashier-detail&cashierId=${encodeURIComponent(`legacy-cashier-${stamp}`)}&cashierName=${encodeURIComponent(reportCashier.name)}&from=${reportDate}&to=${reportDate}&limit=10`,
       reportViewerCookie
     ),
     authenticated(
@@ -603,6 +603,8 @@ try {
   ]);
   assert.equal(strictCashierRange.response.status, 200);
   assert.equal(strictCashierRange.body.rows.length, 5);
+  assert.equal(strictCashierRange.body.diagnostics.resolvedCashierId, reportCashier.id);
+  assert.equal(strictCashierRange.body.diagnostics.matchedCompletedSales, 5);
   assert.equal(
     strictCashierRange.body.rows.every(
       (sale) =>

@@ -98,6 +98,13 @@ export interface ReportRowsResult<T = unknown> {
   rows: T[];
   limit: number;
   offset: number;
+  diagnostics?: {
+    completedSalesInPeriod: number;
+    cashierCompletedSalesAllTime: number;
+    matchedCompletedSales: number;
+    resolvedCashierId: string;
+    resolvedCashierName: string;
+  };
 }
 
 export interface InventoryPageInput {
