@@ -289,6 +289,18 @@ function formatReportTimestamp(value: string): string {
   }).format(new Date(value));
 }
 
+function reportBusinessDate(value: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
 function createRange(preset: ReportPreset): ReportRange {
   const today = new Date();
   const to = toDateInputValue(today);
@@ -609,7 +621,7 @@ function ReportsContent() {
     users,
     settings: storeSettings,
     activeBusinessMode,
-    isOnline,
+    connectivity,
     hasPermission,
     hasViewPermission,
   } = usePosStore();
@@ -998,6 +1010,33 @@ function ReportsContent() {
   const vatBalance = totalOutputVat - totalInputVat;
   const vatRemittable = Math.max(0, vatBalance);
   const inputVatCredit = Math.max(0, -vatBalance);
+  const vatReconciliationRows = [
+    ...vatOutputRows.map(({ sale, item, vat }) => ({
+      sortDate: reportBusinessDate(sale.timestamp),
+      sortTime: new Date(sale.timestamp).getTime(),
+      type: 'VAT collected',
+      reference: sale.transactionId,
+      date: formatReportTimestamp(sale.timestamp),
+      subject: item?.name ?? 'Sale VAT',
+      vat,
+      taxBase: outputVatTaxBase(sale, item, vat),
+    })),
+    ...displayInputVatRows.map((record) => ({
+      sortDate: record.date,
+      sortTime: 0,
+      type: 'VAT paid',
+      reference: record.invoiceNumber ?? record.recordNumber,
+      date: record.date,
+      subject: record.vendorName,
+      vat: Number(record.inputVatAmount),
+      taxBase: Number(record.goodsAmount),
+    })),
+  ].sort(
+    (left, right) =>
+      right.sortDate.localeCompare(left.sortDate) ||
+      right.sortTime - left.sortTime ||
+      right.reference.localeCompare(left.reference)
+  );
   const selectedCashierName =
     cashierName ||
     users.find((user) => user.id === cashierId)?.name ||
@@ -1483,24 +1522,14 @@ function ReportsContent() {
       return {
         filename: 'vat-report',
         headers: ['Type', 'Reference', 'Date', 'Item / Vendor', 'VAT Amount', 'Tax Base'],
-        rows: [
-          ...vatOutputRows.map(({ sale, item, vat }) => [
-            'VAT collected',
-            sale.transactionId,
-            new Date(sale.timestamp).toLocaleString(),
-            item?.name ?? 'Sale VAT',
-            vat.toFixed(2),
-            outputVatTaxBase(sale, item, vat).toFixed(2),
-          ]),
-          ...displayInputVatRows.map((record) => [
-            'VAT paid',
-            record.invoiceNumber ?? record.recordNumber,
-            record.date,
-            record.vendorName,
-            record.inputVatAmount.toFixed(2),
-            record.goodsAmount.toFixed(2),
-          ]),
-        ],
+        rows: vatReconciliationRows.map((row) => [
+          row.type,
+          row.reference,
+          row.date,
+          row.subject,
+          row.vat.toFixed(2),
+          row.taxBase.toFixed(2),
+        ]),
       };
     }
 
@@ -1618,12 +1647,12 @@ function ReportsContent() {
   })();
 
   const exportReport = async (format: 'csv' | 'json' | 'excel' | 'pdf') => {
-    if (!isOnline) {
+    if (connectivity.status === 'offline') {
       toast.error('Reconnect before exporting so the report can be verified against the server.');
       return;
     }
     let exportRows = exportTable.rows;
-    if (activeView === 'sales-by-cashier' && cashierId !== 'all' && isOnline) {
+    if (activeView === 'sales-by-cashier' && cashierId !== 'all') {
       try {
         const allCashierSales = await loadCompleteReportRows<SaleTransaction>({
           report: 'sales-by-cashier-detail',
@@ -1633,14 +1662,16 @@ function ReportsContent() {
           cashierName,
         });
         exportRows = allCashierSales.flatMap((sale) =>
-          sale.items.map((item) => [
-            new Date(sale.timestamp).toLocaleString(),
+          sale.items.map((item, itemIndex) => [
+            formatReportTimestamp(sale.timestamp),
             sale.transactionId,
             item.name,
             item.quantity.toString(),
             item.unitPrice.toFixed(2),
             item.lineTotal.toFixed(2),
-            paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency),
+            itemIndex === 0
+              ? paymentMethodLabel(sale.paymentMethod, sale.paymentBreakdown, settings.currency)
+              : '',
           ])
         );
       } catch (error) {
@@ -1905,7 +1936,7 @@ function ReportsContent() {
               </p>
             </section>
 
-            {!isOnline && (
+            {connectivity.status === 'offline' && (
               <section className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
                 <p className="font-semibold">Server connection required</p>
                 <p className="mt-1">
@@ -2496,24 +2527,14 @@ function ReportsContent() {
                   subtitle="Output VAT less recorded input VAT determines the amount remittable for the selected period."
                   headers={['Type', 'Reference', 'Date', 'Item / Vendor', 'VAT Amount', 'Tax Base']}
                   empty="No VAT collected or paid in this period."
-                  rows={[
-                    ...vatOutputRows.map(({ sale, item, vat }): string[] => [
-                      'VAT collected',
-                      sale.transactionId,
-                      new Date(sale.timestamp).toLocaleString(),
-                      item?.name ?? 'Sale VAT',
-                      formatMoney(vat, settings.currency),
-                      formatMoney(outputVatTaxBase(sale, item, vat), settings.currency),
-                    ]),
-                    ...displayInputVatRows.map((record): string[] => [
-                      'VAT paid',
-                      record.invoiceNumber ?? record.recordNumber,
-                      record.date,
-                      record.vendorName,
-                      formatMoney(record.inputVatAmount, settings.currency),
-                      formatMoney(record.goodsAmount, settings.currency),
-                    ]),
-                  ]}
+                  rows={vatReconciliationRows.map((row): string[] => [
+                    row.type,
+                    row.reference,
+                    row.date,
+                    row.subject,
+                    formatMoney(row.vat, settings.currency),
+                    formatMoney(row.taxBase, settings.currency),
+                  ])}
                 />
               </>
             )}

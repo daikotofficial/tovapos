@@ -279,7 +279,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       activeController?.abort();
       const controller = new AbortController();
       activeController = controller;
-      const timeout = window.setTimeout(() => controller.abort(), 4_000);
+      const timeout = window.setTimeout(() => controller.abort(), 8_000);
       const startedAt = performance.now();
       try {
         const response = await fetch('/api/health', {
@@ -302,12 +302,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           window.localStorage.setItem(OFFLINE_SINCE_KEY, new Date().toISOString());
         }
         healthFailuresRef.current += 1;
-        const status = navigator.onLine
-          ? 'degraded'
-          : healthFailuresRef.current >= 2
-            ? 'offline'
-            : 'degraded';
-        setIsOnline(false);
+        const confirmedOffline = !navigator.onLine || healthFailuresRef.current >= 2;
+        const status = confirmedOffline ? 'offline' : 'degraded';
+        // A single transient health-check timeout must not put the entire POS
+        // into offline mode while authenticated API requests are still working.
+        setIsOnline(!confirmedOffline);
         setConnectivity((current) => ({
           ...current,
           status,
