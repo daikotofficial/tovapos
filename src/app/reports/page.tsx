@@ -288,7 +288,18 @@ function reportRequestKey(input: {
   cashierId?: string;
   cashierName?: string;
 }): string {
-  return JSON.stringify(input);
+  // Build the key in one fixed field order. JSON.stringify preserves insertion
+  // order, so stringifying differently constructed objects caused identical
+  // requests to receive different keys and valid server rows to be hidden as
+  // if they belonged to an older filter.
+  return JSON.stringify({
+    tenantId: input.tenantId ?? '',
+    report: input.report,
+    from: input.from ?? '',
+    to: input.to ?? '',
+    cashierId: input.cashierId ?? '',
+    cashierName: input.cashierName ?? '',
+  });
 }
 
 async function loadCompleteReportRows<T = unknown>(input: {
