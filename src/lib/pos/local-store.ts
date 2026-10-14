@@ -709,6 +709,7 @@ export async function loadReportRows<T = unknown>(input: {
   to?: string;
   cashierId?: string;
   cashierName?: string;
+  productId?: string;
   limit?: number;
   offset?: number;
   requireServer?: boolean;
@@ -721,6 +722,7 @@ export async function loadReportRows<T = unknown>(input: {
         to: input.to,
         cashierId: input.cashierId,
         cashierName: input.cashierName,
+        productId: input.productId,
         limit: input.limit ?? 100,
         offset: input.offset ?? 0,
       });
@@ -731,12 +733,12 @@ export async function loadReportRows<T = unknown>(input: {
 
   if (input.report === 'sales-by-cashier-detail') {
     const sales = await getAllFromBrowser<SaleTransaction>('sales');
-    const from = input.from ?? '';
-    const to = input.to ?? '';
     const selectedName = input.cashierName?.trim().toLowerCase();
     const filtered = sales
       .filter((sale) => {
-        const date = reportDateKey(sale.timestamp);
+        const timestamp = new Date(sale.timestamp).getTime();
+        const fromTime = input.from ? reportBoundaryTimestamp(input.from, false) : undefined;
+        const toTime = input.to ? reportBoundaryTimestamp(input.to, true) : undefined;
         const sameCashier =
           !input.cashierId ||
           sale.cashierId === input.cashierId ||
@@ -744,10 +746,10 @@ export async function loadReportRows<T = unknown>(input: {
             selectedName !== undefined &&
             sale.cashier.trim().toLowerCase() === selectedName);
         return Boolean(
-          date &&
+          Number.isFinite(timestamp) &&
           sameCashier &&
-          (!from || date >= from) &&
-          (!to || date <= to) &&
+          (fromTime === undefined || timestamp >= fromTime) &&
+          (toTime === undefined || timestamp < toTime) &&
           sale.status === 'completed'
         );
       })
@@ -766,6 +768,19 @@ export async function loadReportRows<T = unknown>(input: {
     limit: input.limit ?? 100,
     offset: input.offset ?? 0,
   };
+}
+
+function reportBoundaryTimestamp(value: string, endBoundary: boolean): number {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    if (endBoundary) date.setDate(date.getDate() + 1);
+    return date.getTime();
+  }
+  const parsed = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)
+    ? new Date(`${value}:00+01:00`)
+    : new Date(value);
+  return parsed.getTime();
 }
 
 export async function loadInventoryByIds(ids: string[]): Promise<InventoryItem[]> {

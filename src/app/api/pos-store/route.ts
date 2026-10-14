@@ -321,19 +321,53 @@ function appendDateRange(
 ): void {
   const from = params.get('from');
   const to = params.get('to');
-  const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
-  const isValidDate = (value: string | null): value is string => {
-    if (!value || !isoDatePattern.test(value)) return false;
-    const [year, month, day] = value.split('-').map(Number);
+  const localDateTimePattern = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/;
+  const parseBoundary = (value: string | null) => {
+    if (!value) return null;
+    const match = value.match(localDateTimePattern);
+    if (!match) return null;
+    const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const hour = Number(hourText ?? 0);
+    const minute = Number(minuteText ?? 0);
+    const second = Number(secondText ?? 0);
     const parsed = new Date(Date.UTC(year, month - 1, day));
-    return (
+    if (
       parsed.getUTCFullYear() === year &&
       parsed.getUTCMonth() === month - 1 &&
-      parsed.getUTCDate() === day
-    );
+      parsed.getUTCDate() === day &&
+      hour >= 0 &&
+      hour <= 23 &&
+      minute >= 0 &&
+      minute <= 59 &&
+      second >= 0 &&
+      second <= 59
+    ) {
+      return {
+        dateOnly: !hourText,
+        normalized: `${yearText}-${monthText}-${dayText}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`,
+      };
+    }
+    return null;
+  };
+  const fromBoundary = parseBoundary(from);
+  const toBoundary = parseBoundary(to);
+  const comparableBoundary = (boundary: NonNullable<typeof fromBoundary>, end: boolean) => {
+    if (!boundary.dateOnly || !end) return boundary.normalized;
+    const date = new Date(`${boundary.normalized.slice(0, 10)}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + 1);
+    return `${date.toISOString().slice(0, 10)}T00:00:00`;
   };
 
-  if ((from && !isValidDate(from)) || (to && !isValidDate(to)) || (from && to && from > to)) {
+  if (
+    (from && !fromBoundary) ||
+    (to && !toBoundary) ||
+    (fromBoundary &&
+      toBoundary &&
+      comparableBoundary(fromBoundary, false) >= comparableBoundary(toBoundary, true))
+  ) {
     throw new HttpError(400, 'Invalid report date range', 'VALIDATION_ERROR');
   }
 
@@ -346,9 +380,12 @@ function appendDateRange(
     const dateParam = `$${values.length}`;
     if (dateCast) {
       where.push(`${column} >= ${dateParam}::date`);
-    } else {
+    } else if (fromBoundary?.dateOnly) {
       values.push(reportTimezone);
       where.push(`${column} >= (${dateParam}::date::timestamp AT TIME ZONE $${values.length})`);
+    } else {
+      values.push(reportTimezone);
+      where.push(`${column} >= (${dateParam}::timestamp AT TIME ZONE $${values.length})`);
     }
   }
   if (to) {
@@ -356,11 +393,14 @@ function appendDateRange(
     const dateParam = `$${values.length}`;
     if (dateCast) {
       where.push(`${column} <= ${dateParam}::date`);
-    } else {
+    } else if (toBoundary?.dateOnly) {
       values.push(reportTimezone);
       where.push(
         `${column} < ((${dateParam}::date + 1)::timestamp AT TIME ZONE $${values.length})`
       );
+    } else {
+      values.push(reportTimezone);
+      where.push(`${column} < (${dateParam}::timestamp AT TIME ZONE $${values.length})`);
     }
   }
 }
@@ -368,6 +408,7 @@ function appendDateRange(
 async function getReportRows(request: NextRequest, auth: AuthContext) {
   assertPermission(auth, 'reports');
   const params = request.nextUrl.searchParams;
+  const productId = params.get('productId')?.trim() ?? '';
   const report = params.get('report') ?? 'sales';
   const limit = clampLimit(params.get('limit'));
   const offset = clampOffset(params.get('offset'));
@@ -801,6 +842,10 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
   if (report === 'stock-ledger') {
     appendDateRange(params, "(data->>'createdAt')::timestamptz", values, where);
     where.push("store_name = 'stockMovements'");
+    if (productId) {
+      values.push(productId);
+      where.push(`data->>'inventoryItemId' = $${values.length}`);
+    }
     values.push(limit, offset);
     const result = await getPosPool().query(
       `
@@ -877,6 +922,67 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
       rows: result.rows.map((row) => ({
         ...row,
         profit: authAllowsReportFinancials(auth, 'view-profit') ? Number(row.profit ?? 0) : 0,
+      })),
+      limit,
+      offset,
+    });
+  }
+
+  if (report === 'product-sales-history') {
+    if (!productId || productId.length > 160) {
+      throw new HttpError(400, 'A valid product is required', 'VALIDATION_ERROR');
+    }
+    values.push(productId);
+    const productIdParam = `$${values.length}`;
+    const itemWhere = [`item->>'inventoryItemId' = ${productIdParam}`, "status = 'completed'"];
+    appendDateRange(params, 'timestamp', values, itemWhere);
+    values.push(limit, offset);
+    const result = await getPosPool().query(
+      `
+      ${SALES_SOURCE_CTE}
+      SELECT
+        id AS "saleId",
+        coalesce(data->>'transactionId', id) AS "transactionId",
+        timestamp,
+        cashier,
+        coalesce(data->>'cashierId', '') AS "cashierId",
+        coalesce(data->>'customerName', 'Walk-in Customer') AS "customerName",
+        payment_method AS "paymentMethod",
+        data->'paymentBreakdown' AS "paymentBreakdown",
+        grand_total AS "saleTotal",
+        item->>'id' AS "itemId",
+        coalesce(item->>'name', '') AS "productName",
+        coalesce(nullif(item->>'sku', ''), '') AS sku,
+        coalesce(nullif(item->>'quantity', '')::float8, 0) AS quantity,
+        coalesce(nullif(item->>'unitPrice', '')::float8, 0) AS "unitPrice",
+        coalesce(nullif(item->>'discount', '')::float8, 0) AS discount,
+        coalesce(nullif(item->>'taxAmount', '')::float8, 0) AS "taxAmount",
+        coalesce(nullif(item->>'lineTotal', '')::float8, 0) AS "lineTotal",
+        coalesce(nullif(item->>'unitCost', '')::float8, 0) AS "unitCost",
+        coalesce(nullif(item->>'grossProfit', '')::float8, 0) AS "grossProfit"
+      FROM sale_rows
+      CROSS JOIN LATERAL jsonb_array_elements(coalesce(data->'items', '[]'::jsonb)) AS item
+      WHERE ${itemWhere.join(' AND ')}
+      ORDER BY timestamp DESC, id DESC, "itemId" ASC
+      LIMIT $${values.length - 1} OFFSET $${values.length}
+      `,
+      values
+    );
+    return NextResponse.json({
+      rows: result.rows.map((row) => ({
+        ...row,
+        quantity: Number(row.quantity ?? 0),
+        unitPrice: Number(row.unitPrice ?? 0),
+        discount: Number(row.discount ?? 0),
+        taxAmount: Number(row.taxAmount ?? 0),
+        lineTotal: Number(row.lineTotal ?? 0),
+        unitCost: authAllowsReportFinancials(auth, 'view-cost-price')
+          ? Number(row.unitCost ?? 0)
+          : 0,
+        grossProfit: authAllowsReportFinancials(auth, 'view-profit')
+          ? Number(row.grossProfit ?? 0)
+          : 0,
+        saleTotal: Number(row.saleTotal ?? 0),
       })),
       limit,
       offset,
@@ -1740,7 +1846,11 @@ export async function PUT(request: NextRequest) {
             record.themeColor !== undefined &&
             (typeof record.themeColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(record.themeColor))
           ) {
-            throw new HttpError(400, 'Branding colour must be a six-digit hex value', 'VALIDATION_ERROR');
+            throw new HttpError(
+              400,
+              'Branding colour must be a six-digit hex value',
+              'VALIDATION_ERROR'
+            );
           }
         }
         const existing = await client.query(

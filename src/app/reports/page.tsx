@@ -9,23 +9,29 @@ import {
   Download,
   FileText,
   History,
+  Loader2,
   Package,
   Receipt,
   RefreshCw,
+  ScanLine,
+  Search,
   TrendingDown,
   Users,
 } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import DatePicker from '@/components/ui/DatePicker';
+import DateTimePicker from '@/components/ui/DateTimePicker';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { formatMoney } from '@/lib/pos/money';
 import {
   loadInventoryMetrics,
+  loadInventoryPage,
   loadReportRows,
   loadSalesMetrics,
   loadSettings,
   loadUsers,
+  lookupInventoryItem,
   type InventoryMetrics,
   type SalesMetrics,
 } from '@/lib/pos/local-store';
@@ -56,6 +62,28 @@ interface ReportRange {
   to: string;
   preset: ReportPreset;
 }
+
+type ProductSalesHistoryRow = {
+  saleId: string;
+  transactionId: string;
+  timestamp: string;
+  cashier: string;
+  cashierId: string;
+  customerName: string;
+  paymentMethod: string;
+  paymentBreakdown?: Partial<Record<'cash' | 'card' | 'bank-transfer', number>>;
+  saleTotal: number;
+  itemId: string;
+  productName: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number;
+  taxAmount: number;
+  lineTotal: number;
+  unitCost: number;
+  grossProfit: number;
+};
 
 interface SalesShiftReportRow {
   id: string;
@@ -102,8 +130,8 @@ const reports: { id: ReportView; label: string; description: string; icon: React
   },
   {
     id: 'sales-by-product',
-    label: 'Sales by Product',
-    description: 'Units, revenue, product velocity, and top sellers',
+    label: 'Product History',
+    description: 'Select a product to inspect sales and stock history',
     icon: Package,
   },
   {
@@ -241,7 +269,8 @@ function paymentMethodLabel(
     const parts = Object.entries(breakdown)
       .filter(([, amount]) => Number(amount) > 0)
       .map(
-        ([name, amount]) => `${name === 'bank-transfer' ? 'Transfer' : name.replace('-', ' ')} ${formatMoney(Number(amount), currency)}`
+        ([name, amount]) =>
+          `${name === 'bank-transfer' ? 'Transfer' : name.replace('-', ' ')} ${formatMoney(Number(amount), currency)}`
       );
     return parts.length ? `Split: ${parts.join(' + ')}` : 'Split payment';
   }
@@ -313,6 +342,29 @@ function createRange(preset: ReportPreset): ReportRange {
   return { from: toDateInputValue(fromDate), to, preset };
 }
 
+function dateTimeInputValue(value: string): string {
+  if (!value) return '';
+  if (value.includes('T')) return value.slice(0, 16);
+  const date = new Date(`${value}T00:00:00`);
+  if (!Number.isFinite(date.getTime())) return '';
+  return `${toDateInputValue(date)}T00:00`;
+}
+
+function formatReportBoundary(value: string, endBoundary = false): string {
+  if (!value) return endBoundary ? 'Open-ended' : 'Open-ended';
+  const [datePart, timePart] = value.split('T');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  const dateLabel = new Intl.DateTimeFormat('en-NG', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  }).format(date);
+  if (!timePart) return dateLabel;
+  return `${dateLabel}, ${timePart.slice(0, 5)} WAT${endBoundary ? ' (exclusive)' : ''}`;
+}
+
 const REPORT_PAGE_SIZE = 500;
 const MAX_COMPLETE_REPORT_ROWS = 100_000;
 
@@ -323,6 +375,7 @@ function reportRequestKey(input: {
   to?: string;
   cashierId?: string;
   cashierName?: string;
+  productId?: string;
 }): string {
   // Build the key in one fixed field order. JSON.stringify preserves insertion
   // order, so stringifying differently constructed objects caused identical
@@ -335,6 +388,7 @@ function reportRequestKey(input: {
     to: input.to ?? '',
     cashierId: input.cashierId ?? '',
     cashierName: input.cashierName ?? '',
+    productId: input.productId ?? '',
   });
 }
 
@@ -344,6 +398,7 @@ async function loadCompleteReportRows<T = unknown>(input: {
   to?: string;
   cashierId?: string;
   cashierName?: string;
+  productId?: string;
 }): Promise<T[]> {
   const rows: T[] = [];
   let offset = 0;
@@ -656,6 +711,12 @@ function ReportsContent() {
   );
   const [reportRefreshToken, setReportRefreshToken] = useState(0);
   const [reportCashiers, setReportCashiers] = useState<TovaUser[]>([]);
+  const [productSearch, setProductSearch] = useState('');
+  const [productSearchResults, setProductSearchResults] = useState<InventoryItem[]>([]);
+  const [productSearchLoading, setProductSearchLoading] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<InventoryItem | null>(null);
+  const [productLookupLoading, setProductLookupLoading] = useState(false);
+  const [productHistorySort, setProductHistorySort] = useState<'newest' | 'oldest'>('newest');
 
   useEffect(() => {
     setSalesMetrics(null);
@@ -673,7 +734,38 @@ function ReportsContent() {
     setReportSettings(null);
     setReportCashierTenantId('');
     setReportSettingsTenantId('');
+    setProductSearch('');
+    setProductSearchResults([]);
+    setSelectedProduct(null);
+    setProductHistorySort('newest');
   }, [tenant?.id]);
+
+  useEffect(() => {
+    if (activeView !== 'sales-by-product') return;
+    const query = productSearch.trim();
+    if (query.length < 2 || selectedProduct?.name === query) return;
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      setProductSearchLoading(true);
+      void loadInventoryPage({ q: query, limit: 8 })
+        .then((result) => {
+          if (!cancelled) setProductSearchResults(result.items);
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            console.error('Failed to search products for report', error);
+            setProductSearchResults([]);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setProductSearchLoading(false);
+        });
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [activeView, productSearch, selectedProduct]);
 
   useEffect(() => {
     let cancelled = false;
@@ -777,20 +869,28 @@ function ReportsContent() {
                 ? ['sales-shifts']
                 : activeView === 'discounts'
                   ? ['sales']
-                  : activeView === 'profit'
-                    ? ['sales-by-product']
-                    : ['low-stock', 'expiring', 'expired'].includes(activeView)
-                      ? ['inventory']
-                      : serverReportViews.includes(activeView) &&
-                          activeView !== 'sales-by-cashier-detail'
-                        ? [activeView]
-                        : [];
+                  : activeView === 'sales-by-product'
+                    ? selectedProduct
+                      ? ['product-sales-history', 'stock-ledger']
+                      : []
+                    : activeView === 'profit'
+                      ? ['sales-by-product']
+                      : ['low-stock', 'expiring', 'expired'].includes(activeView)
+                        ? ['inventory']
+                        : serverReportViews.includes(activeView) &&
+                            activeView !== 'sales-by-cashier-detail'
+                          ? [activeView]
+                          : [];
         const results = await Promise.all(
           rowReports.map(async (report) => {
             const requestInput = {
               report,
               from,
               to,
+              productId:
+                activeView === 'sales-by-product' && selectedProduct
+                  ? selectedProduct.id
+                  : undefined,
             };
             return {
               report,
@@ -827,7 +927,15 @@ function ReportsContent() {
     return () => {
       cancelled = true;
     };
-  }, [activeView, range.from, range.preset, range.to, reportRefreshToken, tenant?.id]);
+  }, [
+    activeView,
+    range.from,
+    range.preset,
+    range.to,
+    reportRefreshToken,
+    selectedProduct,
+    tenant?.id,
+  ]);
 
   useEffect(() => {
     if (activeView !== 'sales-by-cashier' || cashierId === 'all') {
@@ -962,13 +1070,14 @@ function ReportsContent() {
   const serverSalesShiftRows = (serverReportRows['sales-shifts'] ?? []) as SalesShiftReportRow[];
 
   const hasServerRows = useCallback(
-    (report: string) => {
+    (report: string, productId?: string) => {
       const requestInput = {
         tenantId: tenant?.id,
         report,
         from: range.preset === 'all' ? undefined : range.from,
         to: range.preset === 'all' ? undefined : range.to,
         ...(report === 'sales-by-cashier-detail' ? { cashierId, cashierName } : {}),
+        ...(productId ? { productId } : {}),
       };
       return (
         Object.prototype.hasOwnProperty.call(serverReportRows, report) &&
@@ -1150,6 +1259,34 @@ function ReportsContent() {
   const displayCustomerRows = hasServerRows('customers') ? serverCustomerRows : [];
   const displayInventoryRows = hasServerRows('inventory') ? serverInventoryRows : [];
   const displayVendorRows = hasServerRows('suppliers') ? serverVendorRows : [];
+  const productHistoryRequest = selectedProduct
+    ? {
+        tenantId: tenant?.id,
+        report: 'product-sales-history',
+        from: range.preset === 'all' ? undefined : range.from,
+        to: range.preset === 'all' ? undefined : range.to,
+        productId: selectedProduct.id,
+      }
+    : null;
+  const productHistoryLoaded = Boolean(
+    productHistoryRequest &&
+    serverReportKeys['product-sales-history'] === reportRequestKey(productHistoryRequest)
+  );
+  const productLedgerLoaded = Boolean(
+    productHistoryRequest &&
+    serverReportKeys['stock-ledger'] ===
+      reportRequestKey({ ...productHistoryRequest, report: 'stock-ledger' })
+  );
+  const displayProductHistoryRows = productHistoryLoaded
+    ? (serverReportRows['product-sales-history'] as ProductSalesHistoryRow[])
+    : [];
+  const sortedProductHistoryRows = [...displayProductHistoryRows].sort((left, right) => {
+    const difference = new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
+    return productHistorySort === 'newest' ? -difference : difference;
+  });
+  const displayProductLedgerRows = productLedgerLoaded
+    ? (serverReportRows['stock-ledger'] as StockMovement[])
+    : [];
 
   const maxPayment = Math.max(
     ...displayPaymentRows.map(
@@ -1159,7 +1296,11 @@ function ReportsContent() {
   );
   const maxExpense = Math.max(...data.expensesByCategory.map((item) => item[1]), 1);
   const rangeLabel =
-    range.preset === 'all' ? 'All time' : `${range.from || 'Start'} to ${range.to || 'Today'}`;
+    range.preset === 'all'
+      ? 'All time'
+      : activeView === 'sales-by-cashier' && (range.from.includes('T') || range.to.includes('T'))
+        ? `${formatReportBoundary(range.from)} to ${formatReportBoundary(range.to, true)}`
+        : `${range.from || 'Start'} to ${range.to || 'Today'}`;
   const draftHasChanges =
     draftRange.from !== range.from ||
     draftRange.to !== range.to ||
@@ -1171,7 +1312,12 @@ function ReportsContent() {
       toast.error('Select both a start date and an end date.');
       return;
     }
-    if (draftRange.from > draftRange.to) {
+    if (
+      draftRange.from > draftRange.to ||
+      (draftRange.from.includes('T') &&
+        draftRange.to.includes('T') &&
+        draftRange.from >= draftRange.to)
+    ) {
       toast.error('Start date cannot be after the end date.');
       return;
     }
@@ -1193,6 +1339,32 @@ function ReportsContent() {
         ? { ...draftRange, [field]: value, preset: 'custom' as const }
         : { from: value, to: value, preset: 'custom' as const };
     setDraftRange(nextRange);
+  };
+  const selectProductForReport = (product: InventoryItem) => {
+    setSelectedProduct(product);
+    setProductSearch(product.name);
+    setProductSearchResults([]);
+  };
+  const lookupProductForReport = async () => {
+    const query = productSearch.trim();
+    if (!query) {
+      toast.error('Enter a product name, SKU, or barcode.');
+      return;
+    }
+    setProductLookupLoading(true);
+    try {
+      const product = await lookupInventoryItem(query);
+      if (!product) {
+        toast.error('No active product matched that name, SKU, or barcode.');
+        return;
+      }
+      selectProductForReport(product);
+    } catch (error) {
+      console.error('Failed to identify product for report', error);
+      toast.error('The product could not be identified. Try again.');
+    } finally {
+      setProductLookupLoading(false);
+    }
   };
   const activeReportInfo = reports.find((report) => report.id === activeView) ?? reports[0];
   const cashierOptionsByName = new Map<string, { value: string; label: string }>();
@@ -1313,9 +1485,43 @@ function ReportsContent() {
       };
     }
 
-    if (activeView === 'profit' || activeView === 'sales-by-product') {
+    if (activeView === 'sales-by-product') {
       return {
-        filename: activeView === 'profit' ? 'profit-report' : 'sales-by-product-report',
+        filename: 'product-history-report',
+        headers: [
+          'Date',
+          'Receipt',
+          'Product',
+          'SKU',
+          'Cashier',
+          'Customer',
+          'Qty',
+          'Unit Price',
+          'Discount',
+          'Line Total',
+          'Sale Total',
+          'Payment',
+        ],
+        rows: sortedProductHistoryRows.map((row) => [
+          formatReportTimestamp(row.timestamp),
+          row.transactionId,
+          row.productName,
+          row.sku,
+          row.cashier,
+          row.customerName || 'Walk-in Customer',
+          row.quantity.toString(),
+          row.unitPrice.toFixed(2),
+          `${row.discount.toFixed(2)}%`,
+          row.lineTotal.toFixed(2),
+          row.saleTotal.toFixed(2),
+          paymentMethodLabel(row.paymentMethod, row.paymentBreakdown, settings.currency),
+        ]),
+      };
+    }
+
+    if (activeView === 'profit') {
+      return {
+        filename: 'profit-report',
         headers: ['Product', 'Units', 'Revenue', 'Profit', 'Margin'],
         rows: displayProductRows.map((product) => [
           product.name,
@@ -1900,23 +2106,43 @@ function ReportsContent() {
                   )}
                   <label className="space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                      From (YYYY-MM-DD)
+                      {activeView === 'sales-by-cashier'
+                        ? 'From date and time'
+                        : 'From (YYYY-MM-DD)'}
                     </span>
-                    <DatePicker
-                      value={draftRange.from}
-                      onChange={(from) => updateDraftDate('from', from)}
-                      displayFormat="iso"
-                    />
+                    {activeView === 'sales-by-cashier' ? (
+                      <DateTimePicker
+                        value={dateTimeInputValue(draftRange.from)}
+                        onChange={(from) => updateDraftDate('from', from)}
+                        placeholder="Select start date and time"
+                      />
+                    ) : (
+                      <DatePicker
+                        value={draftRange.from}
+                        onChange={(from) => updateDraftDate('from', from)}
+                        displayFormat="iso"
+                      />
+                    )}
                   </label>
                   <label className="space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                      To (YYYY-MM-DD)
+                      {activeView === 'sales-by-cashier'
+                        ? 'To date and time (exclusive)'
+                        : 'To (YYYY-MM-DD)'}
                     </span>
-                    <DatePicker
-                      value={draftRange.to}
-                      onChange={(to) => updateDraftDate('to', to)}
-                      displayFormat="iso"
-                    />
+                    {activeView === 'sales-by-cashier' ? (
+                      <DateTimePicker
+                        value={dateTimeInputValue(draftRange.to)}
+                        onChange={(to) => updateDraftDate('to', to)}
+                        placeholder="Select end date and time"
+                      />
+                    ) : (
+                      <DatePicker
+                        value={draftRange.to}
+                        onChange={(to) => updateDraftDate('to', to)}
+                        displayFormat="iso"
+                      />
+                    )}
                   </label>
                   <button
                     type="button"
@@ -1930,11 +2156,22 @@ function ReportsContent() {
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
                 Active date range:{' '}
-                <span className="font-semibold text-foreground">{rangeLabel}</span>.
-                {draftHasChanges ? ' Select Apply range to update the reports.' : ' '}
+                <span className="font-semibold text-foreground">
+                  {activeView === 'sales-by-cashier' &&
+                  (range.from.includes('T') || range.to.includes('T'))
+                    ? `${formatReportBoundary(range.from)} to ${formatReportBoundary(range.to, true)}`
+                    : rangeLabel}
+                </span>
+                .{draftHasChanges ? ' Select Apply range to update the reports.' : ' '}
                 Sales, profit, expenses, and stock ledger use this period; inventory and customer
                 balances show their current state.
               </p>
+              {activeView === 'sales-by-cashier' && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Cashier results use the exact interval in WAT: the start is included and the end
+                  is excluded.
+                </p>
+              )}
             </section>
 
             {connectivity.status === 'offline' && (
@@ -2316,7 +2553,7 @@ function ReportsContent() {
                   ['Cash', cashierTenderSummary.cash],
                   ['Card', cashierTenderSummary.card],
                   ['Bank Transfer', cashierTenderSummary.transfer],
-                  ['Other / Credit / Mobile', cashierOtherTender],
+                  ['Other / Credit', cashierOtherTender],
                 ].map(([label, amount]) => (
                   <article
                     key={String(label)}
@@ -2331,7 +2568,7 @@ function ReportsContent() {
                           : formatMoney(Number(amount), settings.currency)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Selected cashier and period
+                      Exact selected cashier and period
                     </p>
                   </article>
                 ))}
@@ -2368,18 +2605,228 @@ function ReportsContent() {
             )}
 
             {activeView === 'sales-by-product' && (
-              <ReportTable
-                title="Sales by product"
-                subtitle="Product units, revenue, and profit"
-                headers={['Product', 'Units', 'Revenue', 'Profit']}
-                empty="No product sales recorded yet."
-                rows={displayProductRows.map((product) => [
-                  product.name,
-                  product.qty.toString(),
-                  formatMoney(product.revenue, settings.currency),
-                  formatMoney(product.profit, settings.currency),
-                ])}
-              />
+              <div className="space-y-5">
+                <section className="rounded-xl border border-border bg-white p-4 shadow-card sm:p-5">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-bold text-foreground">Product history</p>
+                    <p className="text-xs text-muted-foreground">
+                      Search by product name, SKU, or barcode, or scan a barcode to view the
+                      product&apos;s sales and stock history.
+                    </p>
+                  </div>
+                  <form
+                    className="relative mt-4 flex flex-col gap-2 sm:flex-row"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void lookupProductForReport();
+                    }}
+                  >
+                    <div className="relative min-w-0 flex-1">
+                      <Search
+                        size={16}
+                        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <input
+                        value={productSearch}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setProductSearch(value);
+                          if (value.trim().length < 2) setProductSearchResults([]);
+                        }}
+                        placeholder="Search product, SKU, or barcode"
+                        className="h-11 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm text-foreground shadow-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        aria-label="Search product for history report"
+                      />
+                      {(productSearchLoading || productLookupLoading) && (
+                        <Loader2
+                          size={16}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-primary"
+                        />
+                      )}
+                      {productSearchResults.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-border bg-card shadow-modal">
+                          {productSearchResults.map((product) => (
+                            <button
+                              key={product.id}
+                              type="button"
+                              onClick={() => selectProductForReport(product)}
+                              className="flex w-full items-start justify-between gap-3 border-b border-border px-3 py-2.5 text-left last:border-b-0 hover:bg-muted"
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-semibold text-foreground">
+                                  {product.name}
+                                </span>
+                                <span className="block truncate text-xs text-muted-foreground">
+                                  {product.sku}
+                                  {product.barcode ? ` · ${product.barcode}` : ''}
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                Stock {product.currentQty}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={productLookupLoading}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <ScanLine size={16} />
+                      Find product
+                    </button>
+                  </form>
+                  {selectedProduct && (
+                    <div className="mt-4 flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-foreground">
+                          {selectedProduct.name}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          SKU {selectedProduct.sku}
+                          {selectedProduct.barcode ? ` · Barcode ${selectedProduct.barcode}` : ''}
+                          {' · '}Current stock {selectedProduct.currentQty}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedProduct(null);
+                          setProductSearch('');
+                          setProductSearchResults([]);
+                        }}
+                        className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <span>Clear product</span>
+                      </button>
+                    </div>
+                  )}
+                </section>
+
+                {!selectedProduct ? (
+                  <section className="rounded-xl border border-dashed border-border bg-muted/20 p-8 text-center">
+                    <Package size={28} className="mx-auto text-muted-foreground/60" />
+                    <p className="mt-3 text-sm font-semibold text-foreground">
+                      Select a product to begin
+                    </p>
+                    <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+                      The report will show every sale, cashier, payment breakdown, and stock
+                      movement for the selected product.
+                    </p>
+                  </section>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                      <span className="text-xs font-semibold text-muted-foreground">
+                        Sales history order
+                      </span>
+                      <NiceSelect
+                        value={productHistorySort}
+                        onChange={(value) => setProductHistorySort(value as 'newest' | 'oldest')}
+                        className="w-full sm:w-44"
+                        options={[
+                          { value: 'newest', label: 'Newest first' },
+                          { value: 'oldest', label: 'Oldest first' },
+                        ]}
+                      />
+                    </div>
+                    <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {[
+                        [
+                          'Units sold',
+                          sortedProductHistoryRows
+                            .reduce((sum, row) => sum + row.quantity, 0)
+                            .toString(),
+                        ],
+                        [
+                          'Sales revenue',
+                          formatMoney(
+                            sortedProductHistoryRows.reduce((sum, row) => sum + row.lineTotal, 0),
+                            settings.currency
+                          ),
+                        ],
+                        [
+                          'Transactions',
+                          new Set(
+                            sortedProductHistoryRows.map((row) => row.saleId)
+                          ).size.toString(),
+                        ],
+                        ['Current stock', selectedProduct.currentQty.toString()],
+                      ].map(([label, value]) => (
+                        <div
+                          key={label}
+                          className="rounded-xl border border-border bg-white p-4 shadow-card"
+                        >
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                            {label}
+                          </p>
+                          <p className="mt-1 text-xl font-bold tabular-nums text-foreground">
+                            {value}
+                          </p>
+                        </div>
+                      ))}
+                    </section>
+                    <ReportTable
+                      title={`${selectedProduct.name} sales history`}
+                      subtitle="Completed sales containing this product, within the selected reporting period"
+                      headers={[
+                        'Date',
+                        'Receipt',
+                        'Cashier',
+                        'Customer',
+                        'Qty',
+                        'Unit price',
+                        'Discount',
+                        'Line total',
+                        'Sale total',
+                        'Payment',
+                      ]}
+                      empty="No completed sales for this product in the selected period."
+                      rows={sortedProductHistoryRows.map((row) => [
+                        formatReportTimestamp(row.timestamp),
+                        row.transactionId,
+                        row.cashier,
+                        row.customerName || 'Walk-in Customer',
+                        row.quantity.toString(),
+                        formatMoney(row.unitPrice, settings.currency),
+                        `${row.discount.toFixed(2)}%`,
+                        formatMoney(row.lineTotal, settings.currency),
+                        formatMoney(row.saleTotal, settings.currency),
+                        paymentMethodLabel(
+                          row.paymentMethod,
+                          row.paymentBreakdown,
+                          settings.currency
+                        ),
+                      ])}
+                    />
+                    <ReportTable
+                      title={`${selectedProduct.name} stock ledger`}
+                      subtitle="Stock changes recorded for this product, including sales and adjustments"
+                      headers={[
+                        'Date',
+                        'Type',
+                        'Reference',
+                        'Quantity change',
+                        'Balance after',
+                        'Reason',
+                        'By',
+                      ]}
+                      empty="No stock movements for this product in the selected period."
+                      rows={displayProductLedgerRows.map((movement) => [
+                        formatReportTimestamp(movement.createdAt),
+                        movement.type,
+                        movement.referenceLabel,
+                        movement.quantityDelta.toString(),
+                        movement.quantityAfter.toString(),
+                        movement.reason,
+                        movement.createdBy,
+                      ])}
+                    />
+                  </>
+                )}
+              </div>
             )}
 
             {activeView === 'sales-by-category' && (
