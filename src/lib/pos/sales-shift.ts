@@ -13,6 +13,8 @@ export interface LocalSalesShift {
   totalSales?: number;
   cashSales?: number;
   paymentBreakdown?: Record<string, number>;
+  netPaymentBreakdown?: Record<string, number>;
+  payoutTotalByMethod?: Record<string, number>;
   cashPayouts?: CashPayout[];
   status: 'open' | 'closed';
 }
@@ -21,6 +23,7 @@ export interface CashPayout {
   id: string;
   purpose: string;
   amount: number;
+  method: 'cash' | 'card' | 'bank-transfer';
   recordedAt: string;
   recordedBy: string;
 }

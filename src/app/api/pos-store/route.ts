@@ -824,20 +824,51 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         const cashSales = Number(row.liveCashSales ?? 0);
         const openingCash = Number(shift.openingCash ?? 0);
         const cashPayouts = Array.isArray(shift.cashPayouts) ? shift.cashPayouts : [];
-        const payoutTotal = cashPayouts.reduce(
-          (sum, payout) => sum + Number((payout as Record<string, unknown>).amount ?? 0),
+        const payoutTotalByMethod: Record<string, number> = {
+          cash: 0,
+          card: 0,
+          'bank-transfer': 0,
+        };
+        for (const payout of cashPayouts) {
+          const data = payout as Record<string, unknown>;
+          const method =
+            data.method === 'card' || data.method === 'bank-transfer' ? data.method : 'cash';
+          const amount = Number(data.amount ?? 0);
+          if (Number.isFinite(amount) && amount > 0) payoutTotalByMethod[method] += amount;
+        }
+        const payoutTotal = Object.values(payoutTotalByMethod).reduce(
+          (sum, amount) => sum + amount,
           0
         );
+        const grossPaymentBreakdown =
+          shift.paymentBreakdown && typeof shift.paymentBreakdown === 'object'
+            ? (shift.paymentBreakdown as Record<string, unknown>)
+            : {};
+        const netPaymentBreakdown = {
+          cash: Math.max(
+            0,
+            Number(grossPaymentBreakdown.cash ?? cashSales) - payoutTotalByMethod.cash
+          ),
+          card: Math.max(0, Number(grossPaymentBreakdown.card ?? 0) - payoutTotalByMethod.card),
+          'bank-transfer': Math.max(
+            0,
+            Number(grossPaymentBreakdown['bank-transfer'] ?? 0) -
+              payoutTotalByMethod['bank-transfer']
+          ),
+        };
         return {
           ...shift,
           totalSales,
           cashSales,
           cashPayouts,
           payoutTotal,
-          expectedCash: openingCash + cashSales - payoutTotal,
+          payoutTotalByMethod,
+          netPaymentBreakdown,
+          expectedCash: openingCash + cashSales - payoutTotalByMethod.cash,
           cashVariance:
             shift.status === 'closed'
-              ? Number(shift.closingCash ?? 0) - (openingCash + cashSales - payoutTotal)
+              ? Number(shift.closingCash ?? 0) -
+                (openingCash + cashSales - payoutTotalByMethod.cash)
               : undefined,
         };
       }),

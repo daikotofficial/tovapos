@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, LockKeyhole, LockOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import Modal from '@/components/ui/Modal';
+import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { formatMoney } from '@/lib/pos/money';
 import {
@@ -26,6 +27,33 @@ function cashCollectedForSale(sale: {
   return 0;
 }
 
+type PayoutMethod = CashPayout['method'];
+
+const payoutMethodOptions = [
+  { value: 'cash' as const, label: 'Cash' },
+  { value: 'bank-transfer' as const, label: 'Transfer' },
+  { value: 'card' as const, label: 'Card' },
+];
+
+function parseAmount(value: string): number {
+  return Number(value.replace(/,/g, ''));
+}
+
+function formatAmountInput(value: string): string {
+  const raw = value.replace(/,/g, '').trim();
+  if (!raw || raw === '.') return raw;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount)) return value;
+  return new Intl.NumberFormat(undefined, {
+    useGrouping: true,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function cleanAmountInput(value: string): string {
+  return value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
+}
+
 export default function SalesShiftBar() {
   const { currentUser, sales, settings } = usePosStore();
   const [shift, setShift] = useState<LocalSalesShift | null>(null);
@@ -33,9 +61,9 @@ export default function SalesShiftBar() {
   const [openingCash, setOpeningCash] = useState('');
   const [openingPurpose, setOpeningPurpose] = useState('');
   const [closingCash, setClosingCash] = useState('');
-  const [cashPayouts, setCashPayouts] = useState<Array<{ purpose: string; amount: string }>>([
-    { purpose: '', amount: '' },
-  ]);
+  const [cashPayouts, setCashPayouts] = useState<
+    Array<{ purpose: string; amount: string; method: PayoutMethod }>
+  >([{ purpose: '', amount: '', method: 'cash' }]);
   const [dontRemindToday, setDontRemindToday] = useState(false);
   const reminderKey = currentUser
     ? 'tovapos.sales-reminder.' +
@@ -106,20 +134,37 @@ export default function SalesShiftBar() {
   const localCashSales = todaySales.reduce((sum, sale) => sum + cashCollectedForSale(sale), 0);
   const totalSales = shift?.totalSales ?? localTotalSales;
   const cashSales = shift?.cashSales ?? localCashSales;
-  const payoutTotal = cashPayouts.reduce((sum, payout) => {
-    const amount = Number(payout.amount);
-    return sum + (Number.isFinite(amount) && amount > 0 ? amount : 0);
-  }, 0);
+  const payoutTotalsByMethod = cashPayouts.reduce<Record<PayoutMethod, number>>(
+    (totals, payout) => {
+      const amount = parseAmount(payout.amount);
+      if (Number.isFinite(amount) && amount > 0) totals[payout.method] += amount;
+      return totals;
+    },
+    { cash: 0, card: 0, 'bank-transfer': 0 }
+  );
+  const payoutTotal = Object.values(payoutTotalsByMethod).reduce((sum, amount) => sum + amount, 0);
   const expectedCashBeforePayouts = (shift?.openingCash ?? 0) + cashSales;
-  const expectedCash = expectedCashBeforePayouts - payoutTotal;
   const paymentBreakdown = shift?.paymentBreakdown ?? {};
+  const netCashSales = Math.max(
+    0,
+    Number(paymentBreakdown.cash ?? cashSales) - payoutTotalsByMethod.cash
+  );
+  const netCardPayments = Math.max(
+    0,
+    Number(paymentBreakdown.card ?? 0) - payoutTotalsByMethod.card
+  );
+  const netTransferPayments = Math.max(
+    0,
+    Number(paymentBreakdown['bank-transfer'] ?? 0) - payoutTotalsByMethod['bank-transfer']
+  );
+  const expectedCash = expectedCashBeforePayouts - payoutTotalsByMethod.cash;
   const nonCashSales = Math.max(0, totalSales - cashSales);
   const countedCash = Number(closingCash);
   const variance = Number.isFinite(countedCash) ? countedCash - expectedCash : 0;
   const balanced = closingCash !== '' && Math.abs(variance) < 0.005;
 
   const open = async () => {
-    const amount = Number(openingCash);
+    const amount = parseAmount(openingCash);
     if (!Number.isFinite(amount) || amount < 0) {
       toast.error('Enter the cash received at handover.');
       return;
@@ -169,7 +214,7 @@ export default function SalesShiftBar() {
     const normalizedPayouts: CashPayout[] = [];
     for (const payout of cashPayouts) {
       const purpose = payout.purpose.trim();
-      const amount = Number(payout.amount);
+      const amount = parseAmount(payout.amount);
       if (!purpose && !payout.amount) continue;
       if (!purpose || !Number.isFinite(amount) || amount <= 0) {
         toast.error('Each cash payout needs a purpose and an amount greater than zero.');
@@ -183,15 +228,30 @@ export default function SalesShiftBar() {
         id: crypto.randomUUID(),
         purpose,
         amount,
+        method: payout.method,
         recordedAt: new Date().toISOString(),
         recordedBy: currentUser?.id ?? '',
       });
     }
-    if (
-      normalizedPayouts.reduce((sum, payout) => sum + payout.amount, 0) > expectedCashBeforePayouts
-    ) {
-      toast.error('Cash payouts cannot be greater than the cash available in this shift.');
-      return;
+    const normalizedPayoutTotals = normalizedPayouts.reduce<Record<PayoutMethod, number>>(
+      (totals, payout) => {
+        totals[payout.method] += payout.amount;
+        return totals;
+      },
+      { cash: 0, card: 0, 'bank-transfer': 0 }
+    );
+    const availablePayoutTotals: Record<PayoutMethod, number> = {
+      cash: expectedCashBeforePayouts,
+      card: Number(paymentBreakdown.card ?? 0),
+      'bank-transfer': Number(paymentBreakdown['bank-transfer'] ?? 0),
+    };
+    for (const method of ['cash', 'card', 'bank-transfer'] as const) {
+      if (normalizedPayoutTotals[method] > availablePayoutTotals[method]) {
+        toast.error(
+          `The ${method === 'bank-transfer' ? 'transfer' : method} payout is greater than the amount available.`
+        );
+        return;
+      }
     }
     if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' && !navigator.onLine) {
       toast.error(
@@ -228,7 +288,7 @@ export default function SalesShiftBar() {
         status: 'closed',
       });
     setClosingCash('');
-    setCashPayouts([{ purpose: '', amount: '' }]);
+    setCashPayouts([{ purpose: '', amount: '', method: 'cash' }]);
     setMode(null);
     toast.success('Sales closed and cash balanced.');
   };
@@ -297,7 +357,7 @@ export default function SalesShiftBar() {
         onClose={() => setMode(null)}
         title={shift?.status === 'closed' ? 'Reopen Sales' : 'Open Sales'}
         subtitle="Record the cash handed over before you start selling."
-        size="sm"
+        size="md"
         footer={
           <>
             <button
@@ -322,11 +382,12 @@ export default function SalesShiftBar() {
             <span className="text-xs font-medium text-muted-foreground">Cash received</span>
             <input
               autoFocus
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={openingCash}
-              onChange={(e) => setOpeningCash(e.target.value)}
+              onChange={(e) => setOpeningCash(cleanAmountInput(e.target.value))}
+              onBlur={(e) => setOpeningCash(formatAmountInput(e.target.value))}
+              onWheel={(event) => event.currentTarget.blur()}
               className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
               placeholder="0.00"
             />
@@ -358,8 +419,8 @@ export default function SalesShiftBar() {
         open={mode === 'close'}
         onClose={() => setMode(null)}
         title="Close Sales"
-        subtitle="Record any cash payouts, then count the cash remaining in hand."
-        size="sm"
+        subtitle="Record shift payouts by payment method, then count the cash remaining in hand."
+        size="md"
         footer={
           <>
             <button
@@ -401,25 +462,21 @@ export default function SalesShiftBar() {
               </p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
-              <p className="text-muted-foreground">Cash sales</p>
-              <p className="mt-1 font-bold">
-                {formatMoney(paymentBreakdown.cash ?? cashSales, settings.currency)}
-              </p>
+              <p className="text-muted-foreground">Cash after payouts</p>
+              <p className="mt-1 font-bold">{formatMoney(netCashSales, settings.currency)}</p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
-              <p className="text-muted-foreground">Card payments</p>
-              <p className="mt-1 font-bold">
-                {formatMoney(paymentBreakdown.card ?? 0, settings.currency)}
-              </p>
+              <p className="text-muted-foreground">Card after payouts</p>
+              <p className="mt-1 font-bold">{formatMoney(netCardPayments, settings.currency)}</p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
-              <p className="text-muted-foreground">Transfer payments</p>
+              <p className="text-muted-foreground">Transfer after payouts</p>
               <p className="mt-1 font-bold">
-                {formatMoney(paymentBreakdown['bank-transfer'] ?? 0, settings.currency)}
+                {formatMoney(netTransferPayments, settings.currency)}
               </p>
             </div>
             <div className="rounded-lg border border-border p-2.5 sm:col-span-4">
-              <p className="text-muted-foreground">Other non-cash</p>
+              <p className="text-muted-foreground">Credit / other non-cash</p>
               <p className="mt-1 font-bold">
                 {formatMoney(
                   Math.max(
@@ -431,21 +488,27 @@ export default function SalesShiftBar() {
                   settings.currency
                 )}
               </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Credit or legacy non-cash payments that are not cash, card, or transfer.
+              </p>
             </div>
           </div>
           <div className="space-y-3 rounded-lg border border-border p-3">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-muted-foreground">Cash payouts</span>
+              <span className="text-xs font-medium text-muted-foreground">Shift payouts</span>
               <span className="text-xs text-muted-foreground">Optional</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Record cash given out during this shift. These payouts reduce the expected cash at
-              hand.
+              Record money given out during this shift and select the account it came from. Cash
+              payouts reduce cash at hand; transfer and card payouts reduce their matching totals.
             </p>
             <div className="space-y-2">
               {cashPayouts.map((payout, index) => (
-                <div key={index} className="flex items-end gap-2">
-                  <label className="min-w-0 flex-1 space-y-1">
+                <div
+                  key={index}
+                  className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem_9rem_auto] sm:items-end"
+                >
+                  <label className="min-w-0 space-y-1">
                     <span className="sr-only">Payout purpose {index + 1}</span>
                     <input
                       type="text"
@@ -462,20 +525,46 @@ export default function SalesShiftBar() {
                       maxLength={160}
                     />
                   </label>
-                  <label className="w-28 space-y-1 sm:w-36">
+                  <label className="min-w-0 space-y-1">
+                    <span className="sr-only">Payout method {index + 1}</span>
+                    <NiceSelect
+                      value={payout.method}
+                      options={payoutMethodOptions}
+                      onChange={(value) =>
+                        setCashPayouts((current) =>
+                          current.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, method: value } : item
+                          )
+                        )
+                      }
+                      className="w-full"
+                    />
+                  </label>
+                  <label className="min-w-0 space-y-1">
                     <span className="sr-only">Payout amount {index + 1}</span>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={payout.amount}
                       onChange={(event) =>
                         setCashPayouts((current) =>
                           current.map((item, itemIndex) =>
-                            itemIndex === index ? { ...item, amount: event.target.value } : item
+                            itemIndex === index
+                              ? { ...item, amount: cleanAmountInput(event.target.value) }
+                              : item
                           )
                         )
                       }
+                      onBlur={(event) =>
+                        setCashPayouts((current) =>
+                          current.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? { ...item, amount: formatAmountInput(event.target.value) }
+                              : item
+                          )
+                        )
+                      }
+                      onWheel={(event) => event.currentTarget.blur()}
                       className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
                       placeholder="Amount"
                     />
@@ -488,7 +577,7 @@ export default function SalesShiftBar() {
                           current.filter((_, itemIndex) => itemIndex !== index)
                         )
                       }
-                      className="mb-0.5 rounded-lg px-2 py-2 text-xs text-danger hover:bg-danger/10"
+                      className="rounded-lg px-2 py-2 text-xs text-danger hover:bg-danger/10 sm:mb-0.5"
                       aria-label={`Remove payout ${index + 1}`}
                     >
                       Remove
@@ -501,7 +590,10 @@ export default function SalesShiftBar() {
               <button
                 type="button"
                 onClick={() =>
-                  setCashPayouts((current) => [...current, { purpose: '', amount: '' }])
+                  setCashPayouts((current) => [
+                    ...current,
+                    { purpose: '', amount: '', method: 'cash' },
+                  ])
                 }
                 className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-primary"
               >
@@ -518,11 +610,12 @@ export default function SalesShiftBar() {
             </span>
             <input
               autoFocus
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={closingCash}
-              onChange={(e) => setClosingCash(e.target.value)}
+              onChange={(e) => setClosingCash(cleanAmountInput(e.target.value))}
+              onBlur={(e) => setClosingCash(formatAmountInput(e.target.value))}
+              onWheel={(event) => event.currentTarget.blur()}
               className={
                 'w-full rounded-lg border bg-background px-3 py-2.5 text-sm ' +
                 (closingCash !== '' && !balanced
@@ -552,8 +645,8 @@ export default function SalesShiftBar() {
           )}
           <p className="text-xs text-muted-foreground">
             Opening cash {formatMoney(shift?.openingCash ?? 0, settings.currency)} + cash sales{' '}
-            {formatMoney(cashSales, settings.currency)} - payouts{' '}
-            {formatMoney(payoutTotal, settings.currency)} = expected cash at hand.
+            {formatMoney(cashSales, settings.currency)} - cash payouts{' '}
+            {formatMoney(payoutTotalsByMethod.cash, settings.currency)} = expected cash at hand.
           </p>
         </div>
       </Modal>

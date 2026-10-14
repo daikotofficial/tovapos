@@ -24,17 +24,6 @@ function validId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9:_-]{8,160}$/.test(value);
 }
 
-function cashFromSale(data: Record<string, unknown>): number {
-  if (data.paymentMethod === 'cash') return collectedFromSale(data);
-  if (data.paymentMethod === 'split') {
-    const breakdown = data.paymentBreakdown;
-    return breakdown && typeof breakdown === 'object'
-      ? Number((breakdown as Record<string, unknown>).cash ?? 0)
-      : 0;
-  }
-  return 0;
-}
-
 function collectedFromSale(data: Record<string, unknown>): number {
   if (data.amountPaid !== undefined && data.amountPaid !== null) {
     const amountPaid = Number(data.amountPaid);
@@ -52,11 +41,13 @@ function normalizeCashPayouts(value: unknown, recordedBy: string) {
     const payout = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null;
     const purpose = typeof payout?.purpose === 'string' ? payout.purpose.trim() : '';
     const amount = Number(payout?.amount);
+    const method = payout?.method;
     if (
       !purpose ||
       purpose.length > 160 ||
       !Number.isFinite(amount) ||
       amount <= 0 ||
+      !['cash', 'card', 'bank-transfer'].includes(method as string) ||
       amount > 1_000_000_000_000 ||
       Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-8
     ) {
@@ -70,10 +61,25 @@ function normalizeCashPayouts(value: unknown, recordedBy: string) {
       id: randomUUID(),
       purpose,
       amount,
+      method: method as 'cash' | 'card' | 'bank-transfer',
       recordedAt: new Date().toISOString(),
       recordedBy,
     };
   });
+}
+
+function payoutTotals(value: unknown) {
+  const totals: Record<string, number> = { cash: 0, card: 0, 'bank-transfer': 0 };
+  if (!Array.isArray(value)) return totals;
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const payout = entry as Record<string, unknown>;
+    const method =
+      payout.method === 'card' || payout.method === 'bank-transfer' ? payout.method : 'cash';
+    const amount = Number(payout.amount ?? 0);
+    if (Number.isFinite(amount) && amount > 0) totals[method] += amount;
+  }
+  return totals;
 }
 
 export async function GET(request: NextRequest) {
@@ -127,10 +133,15 @@ export async function GET(request: NextRequest) {
     const totalSales = sales.rows.reduce((sum, row) => sum + Number(row.data?.grandTotal ?? 0), 0);
     const cashSales = paymentBreakdown.cash ?? 0;
     const cashPayouts = Array.isArray(shift.cashPayouts) ? shift.cashPayouts : [];
-    const payoutTotal = cashPayouts.reduce(
-      (sum, payout) => sum + Number((payout as Record<string, unknown>).amount ?? 0),
-      0
-    );
+    const payoutTotalByMethod = payoutTotals(cashPayouts);
+    const payoutTotal = Object.values(payoutTotalByMethod).reduce((sum, amount) => sum + amount, 0);
+    const netPaymentBreakdown = { ...paymentBreakdown };
+    for (const method of ['cash', 'card', 'bank-transfer']) {
+      netPaymentBreakdown[method] = Math.max(
+        0,
+        (paymentBreakdown[method] ?? 0) - (payoutTotalByMethod[method] ?? 0)
+      );
+    }
     return NextResponse.json({
       ...shift,
       totalSales,
@@ -138,7 +149,9 @@ export async function GET(request: NextRequest) {
       paymentBreakdown,
       cashPayouts,
       payoutTotal,
-      expectedCash: Number(shift.openingCash ?? 0) + cashSales - payoutTotal,
+      payoutTotalByMethod,
+      netPaymentBreakdown,
+      expectedCash: Number(shift.openingCash ?? 0) + cashSales - (payoutTotalByMethod.cash ?? 0),
     });
   } catch (error) {
     return errorResponse(error);
@@ -250,17 +263,53 @@ export async function POST(request: NextRequest) {
         (sum, row) => sum + Number(row.data?.grandTotal ?? 0),
         0
       );
-      const cashSales = sales.rows.reduce((sum, row) => sum + cashFromSale(row.data), 0);
-      const cashPayouts = normalizeCashPayouts(body.cashPayouts, auth.user.id);
-      const payoutTotal = cashPayouts.reduce((sum, payout) => sum + payout.amount, 0);
-      if (payoutTotal > Number(shift.openingCash ?? 0) + cashSales) {
-        throw new HttpError(
-          400,
-          'Cash payouts cannot be greater than the cash available in this shift',
-          'VALIDATION_ERROR'
-        );
+      const paymentBreakdown: Record<string, number> = {
+        cash: 0,
+        card: 0,
+        'bank-transfer': 0,
+        mobile: 0,
+        credit: 0,
+      };
+      for (const row of sales.rows) {
+        const data = row.data as Record<string, unknown>;
+        if (
+          data.paymentMethod === 'split' &&
+          data.paymentBreakdown &&
+          typeof data.paymentBreakdown === 'object'
+        ) {
+          for (const [method, amount] of Object.entries(
+            data.paymentBreakdown as Record<string, unknown>
+          )) {
+            paymentBreakdown[method] = (paymentBreakdown[method] ?? 0) + Number(amount ?? 0);
+          }
+        } else {
+          const method = typeof data.paymentMethod === 'string' ? data.paymentMethod : 'cash';
+          paymentBreakdown[method] = (paymentBreakdown[method] ?? 0) + collectedFromSale(data);
+        }
       }
-      const expectedCash = Number(shift.openingCash ?? 0) + cashSales - payoutTotal;
+      const cashSales = paymentBreakdown.cash ?? 0;
+      const cashPayouts = normalizeCashPayouts(body.cashPayouts, auth.user.id);
+      const payoutTotalByMethod = payoutTotals(cashPayouts);
+      const availableByMethod = {
+        cash: Number(shift.openingCash ?? 0) + cashSales,
+        card: paymentBreakdown.card ?? 0,
+        'bank-transfer': paymentBreakdown['bank-transfer'] ?? 0,
+      };
+      for (const method of ['cash', 'card', 'bank-transfer'] as const) {
+        if (payoutTotalByMethod[method] > availableByMethod[method]) {
+          throw new HttpError(
+            400,
+            `The ${method === 'bank-transfer' ? 'transfer' : method} payout is greater than the amount available`,
+            'VALIDATION_ERROR'
+          );
+        }
+      }
+      const payoutTotal = Object.values(payoutTotalByMethod).reduce(
+        (sum, amount) => sum + amount,
+        0
+      );
+      const expectedCash =
+        Number(shift.openingCash ?? 0) + cashSales - (payoutTotalByMethod.cash ?? 0);
       if (Math.abs(closingCash - expectedCash) > 0.005) {
         throw new HttpError(
           409,
@@ -272,8 +321,16 @@ export async function POST(request: NextRequest) {
         ...shift,
         totalSales,
         cashSales,
+        paymentBreakdown,
         cashPayouts,
         payoutTotal,
+        payoutTotalByMethod,
+        netPaymentBreakdown: Object.fromEntries(
+          Object.entries(paymentBreakdown).map(([method, amount]) => [
+            method,
+            Math.max(0, amount - (payoutTotalByMethod[method] ?? 0)),
+          ])
+        ),
         expectedCash,
         closingCash,
         cashVariance: 0,
