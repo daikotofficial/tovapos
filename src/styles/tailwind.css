@@ -211,6 +211,39 @@
   --info: #60a5fa;
 }
 
+/* Public marketing and authentication surfaces stay light even when the app workspace
+   is in dark mode. This also protects native form controls from inherited dark tokens. */
+.auth-page,
+.public-page {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --primary: #0d9488;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #475569;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #0d9488;
+  --success: #16a34a;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
+  color-scheme: light;
+}
+
+.auth-page input,
+.auth-page select,
+.auth-page textarea,
+.public-page input,
+.public-page select,
+.public-page textarea {
+  color-scheme: light;
+}
+
 @layer base {
   * {
     box-sizing: border-box;

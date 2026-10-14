@@ -8,6 +8,7 @@ import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { formatMoney } from '@/lib/pos/money';
 import {
   businessDate,
+  getOpenSalesShift,
   getSalesShift,
   saveSalesShift,
   type LocalSalesShift,
@@ -119,8 +120,8 @@ export default function SalesShiftBar() {
       return;
     }
     if (!currentUser) return;
-    if (getSalesShift(currentUser.id)) {
-      toast.error('Sales has already been opened or closed for today.');
+    if (getOpenSalesShift(currentUser.id)) {
+      toast.error('Sales is already open for today.');
       return;
     }
     const nextShift: LocalSalesShift = {
@@ -222,19 +223,19 @@ export default function SalesShiftBar() {
                   (todaySales.length === 1 ? '' : 's') +
                   ' today'
                 : shift
-                  ? 'This user has already closed sales for today.'
+                  ? 'This session is closed. Reopen sales to continue working.'
                   : 'Open sales before recording a transaction.'}
             </p>
           </div>
         </div>
         <div className="flex gap-2">
-          {!shift && (
+          {(!shift || shift.status === 'closed') && (
             <button
               type="button"
               onClick={() => setMode('open')}
               className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white"
             >
-              Open Sales
+              {shift ? 'Reopen Sales' : 'Open Sales'}
             </button>
           )}
           {shift?.status === 'open' && (
@@ -255,7 +256,7 @@ export default function SalesShiftBar() {
       <Modal
         open={mode === 'open'}
         onClose={() => setMode(null)}
-        title="Open Sales"
+        title={shift?.status === 'closed' ? 'Reopen Sales' : 'Open Sales'}
         subtitle="Record the cash handed over before you start selling."
         size="sm"
         footer={

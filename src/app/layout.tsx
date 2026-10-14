@@ -192,7 +192,24 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     (function () {
       try {
         var path = window.location.pathname || '';
+        var publicLightRoutes = [
+          '/',
+          '/sign-up-login',
+          '/forgot-password',
+          '/reset-password',
+          '/resend-verification',
+          '/verify-email',
+        ];
+        var isPublicLightRoute = publicLightRoutes.some(function (route) {
+          return path === route || (route !== '/' && path.indexOf(route + '/') === 0);
+        });
         var storageKey = path.indexOf('/admin') === 0 ? 'tovapos.adminTheme' : 'tovapos.themeMode';
+        if (isPublicLightRoute) {
+          document.documentElement.dataset.theme = 'light';
+          document.documentElement.style.colorScheme = 'light';
+          document.documentElement.style.backgroundColor = '#f8fafc';
+          return;
+        }
         var cookieEntry = document.cookie.split('; ').find(function (item) {
           return item.indexOf(storageKey + '=') === 0;
         });

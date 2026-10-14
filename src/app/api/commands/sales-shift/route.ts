@@ -122,7 +122,11 @@ export async function POST(request: NextRequest) {
     ) {
       throw new HttpError(400, 'Shift action or business date is invalid', 'VALIDATION_ERROR');
     }
-    const shiftId = `shift-${auth.user.id}-${businessDate}`;
+    const requestedShiftId = typeof body.shiftId === 'string' ? body.shiftId : '';
+    const shiftId =
+      action === 'close' && validId(requestedShiftId)
+        ? requestedShiftId
+        : `shift-${auth.user.id}-${businessDate}`;
     const client = await getPosPool().connect();
     try {
       await client.query('BEGIN');
@@ -133,14 +137,16 @@ export async function POST(request: NextRequest) {
         `SELECT record_id, data FROM pos_tenant_records
          WHERE tenant_id = $1 AND store_name = 'salesShifts'
            AND data->>'userId' = $2 AND data->>'businessDate' = $3
+         ORDER BY CASE WHEN data->>'status' = 'open' THEN 0 ELSE 1 END,
+                  data->>'openedAt' DESC, record_id DESC
          LIMIT 1 FOR UPDATE`,
         [auth.tenantId, auth.user.id, businessDate]
       );
       if (action === 'open') {
-        if (existing.rows[0])
+        if (existing.rows[0]?.data?.status === 'open')
           throw new HttpError(
             409,
-            'Sales has already been opened or closed for today',
+            'Sales is already open for today',
             'SHIFT_ALREADY_EXISTS'
           );
         const openingCash = Number(body.openingCash);
@@ -154,7 +160,9 @@ export async function POST(request: NextRequest) {
           );
         }
         const shift = {
-          id: shiftId,
+          id: existing.rows[0]
+            ? `shift-${auth.user.id}-${businessDate}-${randomUUID()}`
+            : shiftId,
           businessDate,
           userId: auth.user.id,
           userName: auth.user.name,
@@ -166,21 +174,19 @@ export async function POST(request: NextRequest) {
         await client.query(
           `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
            VALUES ($1, 'salesShifts', $2, $3::jsonb)`,
-          [auth.tenantId, shiftId, JSON.stringify(shift)]
+          [auth.tenantId, shift.id, JSON.stringify(shift)]
         );
         await client.query(
           `INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, after_data)
            VALUES ($1, $2, 'sales.opened', 'salesShift', $3, $4::jsonb)`,
-          [auth.tenantId, auth.user.id, shiftId, JSON.stringify(shift)]
+          [auth.tenantId, auth.user.id, shift.id, JSON.stringify(shift)]
         );
         await client.query('COMMIT');
         return NextResponse.json(shift, { status: 201 });
       }
 
       const shift = existing.rows[0]?.data as Record<string, unknown> | undefined;
-      if (shiftId !== `shift-${auth.user.id}-${businessDate}`)
-        throw new HttpError(409, 'Shift ownership is invalid', 'SHIFT_NOT_OPEN');
-      if (!shift || shift.userId !== auth.user.id || shift.status !== 'open') {
+      if (!shift || shift.id !== shiftId || shift.userId !== auth.user.id || shift.status !== 'open') {
         throw new HttpError(
           409,
           'This sales shift is not open for the signed-in user',

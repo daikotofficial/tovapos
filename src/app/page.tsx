@@ -100,7 +100,7 @@ const secondaryButton =
 
 export default function LandingPage() {
   return (
-    <main className="min-h-screen bg-[#f6f8f8] text-[#071412]">
+    <main className="public-page min-h-screen bg-[#f6f8f8] text-[#071412]">
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/20 bg-[#071412]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
           <Link href="#home" className="flex items-center gap-3 text-white">
