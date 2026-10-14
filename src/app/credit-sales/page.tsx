@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { CheckCircle2, CreditCard, Landmark, Search, Smartphone, Wallet } from 'lucide-react';
+import { CheckCircle2, CreditCard, Landmark, Search, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
@@ -16,7 +16,6 @@ import type { HospitalityReservation } from '@/lib/pos/types';
 const paymentMethods: { id: CreditPaymentMethod; label: string; icon: React.ElementType }[] = [
   { id: 'cash', label: 'Cash', icon: Wallet },
   { id: 'card', label: 'Card', icon: CreditCard },
-  { id: 'mobile', label: 'Mobile', icon: Smartphone },
   { id: 'bank-transfer', label: 'Transfer', icon: Landmark },
   { id: 'split', label: 'Split', icon: CreditCard },
 ];
@@ -234,7 +233,6 @@ export default function CreditSalesPage() {
                     >
                       <option value="cash">Cash</option>
                       <option value="card">Card</option>
-                      <option value="mobile">Mobile</option>
                       <option value="bank-transfer">Bank transfer</option>
                       <option value="split">Split payment</option>
                     </select>

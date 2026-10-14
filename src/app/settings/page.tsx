@@ -28,6 +28,7 @@ import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { BusinessSettings, BusinessMode } from '@/lib/pos/types';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
+import { brandForeground, normalizeBrandColor, tenantThemeModeKey } from '@/lib/pos/theme';
 import {
   getProductUsage,
   isOnPremiseDeployment,
@@ -44,7 +45,7 @@ export default function SettingsPage() {
 }
 
 function SettingsPageContent() {
-  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated, currentUser } =
+  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated, currentUser, tenant } =
     usePosStore();
   const [form, setForm] = useState<BusinessSettings>(settings);
   const [saved, setSaved] = useState(false);
@@ -94,21 +95,21 @@ function SettingsPageContent() {
     if (!isHydrated) return;
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
+    const appShell = document.querySelector<HTMLElement>('.pos-app-shell');
     const nextTheme = form.themeMode ?? 'light';
     root.dataset.theme = nextTheme;
-    window.localStorage.setItem('tovapos.themeMode', nextTheme);
-    document.cookie = `tovapos.themeMode=${encodeURIComponent(nextTheme)};path=/;max-age=31536000;samesite=lax`;
-    if (form.themeColor) {
-      root.style.setProperty('--primary', form.themeColor);
-      root.style.setProperty('--ring', form.themeColor);
-    }
-    if (form.fontFamily) {
-      root.style.setProperty(
+    if (tenant?.id) window.localStorage.setItem(tenantThemeModeKey(tenant.id), nextTheme);
+    if (appShell) {
+      const brandColor = normalizeBrandColor(form.themeColor);
+      appShell.style.setProperty('--primary', brandColor);
+      appShell.style.setProperty('--ring', brandColor);
+      appShell.style.setProperty('--primary-foreground', brandForeground(brandColor));
+      appShell.style.setProperty(
         '--font-sans',
-        `${form.fontFamily}, ui-sans-serif, system-ui, sans-serif`
+        `${form.fontFamily ?? 'Inter'}, ui-sans-serif, system-ui, sans-serif`
       );
     }
-  }, [form.fontFamily, form.themeColor, form.themeMode, isHydrated]);
+  }, [form.fontFamily, form.themeColor, form.themeMode, isHydrated, tenant?.id]);
 
   const save = async () => {
     try {

@@ -115,7 +115,7 @@ const reports: { id: ReportView; label: string; description: string; icon: React
   {
     id: 'payment-methods',
     label: 'Payment Methods',
-    description: 'Cash, card, transfer, mobile, split, and credit totals',
+    description: 'Cash, card, transfer, split, and credit totals',
     icon: Receipt,
   },
   {
@@ -233,7 +233,7 @@ function salePaymentStatus(sale: SaleTransaction): string {
 
 function paymentMethodLabel(
   method: string,
-  breakdown?: Partial<Record<'cash' | 'card' | 'mobile' | 'bank-transfer', number>>,
+  breakdown?: Partial<Record<'cash' | 'card' | 'bank-transfer', number>>,
   currency?: string
 ): string {
   if (method === 'credit') return 'Customer Credit';
@@ -241,11 +241,12 @@ function paymentMethodLabel(
     const parts = Object.entries(breakdown)
       .filter(([, amount]) => Number(amount) > 0)
       .map(
-        ([name, amount]) => `${name.replace('-', ' ')} ${formatMoney(Number(amount), currency)}`
+        ([name, amount]) => `${name === 'bank-transfer' ? 'Transfer' : name.replace('-', ' ')} ${formatMoney(Number(amount), currency)}`
       );
     return parts.length ? `Split: ${parts.join(' + ')}` : 'Split payment';
   }
-  return method.replace('-', ' ');
+  if (method === 'bank-transfer') return 'Transfer';
+  return method.charAt(0).toUpperCase() + method.slice(1);
 }
 
 function paymentAmountsForSale(sale: SaleTransaction): Record<string, number> {

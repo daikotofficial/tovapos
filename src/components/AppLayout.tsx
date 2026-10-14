@@ -9,6 +9,7 @@ import Topbar from './Topbar';
 import BrandLoader from './ui/BrandLoader';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission } from '@/lib/pos/types';
+import { brandForeground, normalizeBrandColor } from '@/lib/pos/theme';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -34,7 +35,8 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const { isHydrated, isAuthenticated, hasViewPermission, currentUser } = usePosStore();
+  const { isHydrated, isAuthenticated, hasViewPermission, currentUser, settings } = usePosStore();
+  const brandColor = normalizeBrandColor(settings.themeColor);
   const isViewOnly = Boolean(
     currentUser?.permissions.includes('view-only') &&
       currentUser.role !== 'owner' &&
@@ -54,7 +56,17 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
   }
 
   return (
-    <div className="pos-app-shell flex h-screen w-full max-w-full overflow-hidden bg-background text-foreground">
+    <div
+      className="pos-app-shell flex h-screen w-full max-w-full overflow-hidden bg-background text-foreground"
+      style={
+        {
+          '--primary': brandColor,
+          '--ring': brandColor,
+          '--primary-foreground': brandForeground(brandColor),
+          '--font-sans': `${settings.fontFamily ?? 'Inter'}, ui-sans-serif, system-ui, sans-serif`,
+        } as React.CSSProperties
+      }
+    >
       <div className="hidden lg:block">
         <Suspense fallback={<div className="h-screen w-60 border-r border-border bg-card" />}>
           <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />

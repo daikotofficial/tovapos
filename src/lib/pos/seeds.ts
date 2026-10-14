@@ -74,7 +74,7 @@ export const defaultSettings: BusinessSettings = {
     'Bank Charges',
     'Miscellaneous',
   ],
-  paymentMethods: ['cash', 'card', 'mobile', 'bank-transfer', 'split', 'credit'],
+  paymentMethods: ['cash', 'card', 'bank-transfer', 'split', 'credit'],
   loyaltyEnabled: true,
   loyaltyEarnPercent: 1,
   loyaltyRedemptionThreshold: 100,

@@ -115,7 +115,7 @@ export default function MySalesHistoryPage() {
     { label: 'Cash sales', value: summary.cash, className: 'text-emerald-700' },
     { label: 'Card sales', value: summary.card, className: 'text-blue-700' },
     { label: 'Transfer sales', value: summary.transfer, className: 'text-violet-700' },
-    { label: 'Other / mobile / credit', value: summary.other, className: 'text-amber-700' },
+    { label: 'Other / credit', value: summary.other, className: 'text-amber-700' },
   ];
 
   return <AppLayout title="My Sales History" subtitle="Review and reprint the sales recorded under your account">

@@ -74,7 +74,7 @@ export interface InventoryItem {
   updatedAt?: string;
 }
 
-export type PaymentMethod = 'cash' | 'card' | 'mobile' | 'bank-transfer' | 'split' | 'credit';
+export type PaymentMethod = 'cash' | 'card' | 'bank-transfer' | 'split' | 'credit';
 
 export type SplitPaymentMethod = Exclude<PaymentMethod, 'split' | 'credit'>;
 

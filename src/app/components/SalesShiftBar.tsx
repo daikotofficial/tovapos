@@ -319,7 +319,7 @@ export default function SalesShiftBar() {
         open={mode === 'close'}
         onClose={() => setMode(null)}
         title="Close Sales"
-        subtitle="Count the cash in hand. Card, transfer, mobile, and credit are excluded from the cash count."
+        subtitle="Count the cash in hand. Card, transfer, and credit are excluded from the cash count."
         size="sm"
         footer={
           <>
@@ -368,15 +368,18 @@ export default function SalesShiftBar() {
               </p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
-              <p className="text-muted-foreground">Card / transfer</p>
+              <p className="text-muted-foreground">Card payments</p>
               <p className="mt-1 font-bold">
-                {formatMoney(
-                  (paymentBreakdown.card ?? 0) + (paymentBreakdown['bank-transfer'] ?? 0),
-                  settings.currency
-                )}
+                {formatMoney(paymentBreakdown.card ?? 0, settings.currency)}
               </p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
+              <p className="text-muted-foreground">Transfer payments</p>
+              <p className="mt-1 font-bold">
+                {formatMoney(paymentBreakdown['bank-transfer'] ?? 0, settings.currency)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border p-2.5 sm:col-span-4">
               <p className="text-muted-foreground">Other non-cash</p>
               <p className="mt-1 font-bold">
                 {formatMoney(

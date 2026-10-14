@@ -515,7 +515,7 @@ export default function DashboardPage() {
               <div className="grid min-w-0 gap-4 p-4 lg:grid-cols-[1fr_420px] lg:p-6">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-[#19b8a6]/20 px-3 py-1 text-xs font-bold uppercase text-[#8ee8df]">
+                    <span className="rounded-md bg-primary/20 px-3 py-1 text-xs font-bold uppercase text-primary">
                       Summary
                     </span>
                     <span className="rounded-md bg-white/10 px-3 py-1 text-xs font-semibold text-white/70">
@@ -531,7 +531,7 @@ export default function DashboardPage() {
                   <div className="mt-4 space-y-3">
                     {[
                       ['Cash sales', data.cashSales, 'bg-success'],
-                      ['Card / mobile', data.nonCashSales, 'bg-primary'],
+                      ['Card / transfer', data.nonCashSales, 'bg-primary'],
                       ['Recorded expenses', data.expenseTotal, 'bg-danger'],
                     ].map(([label, amount, color]) => {
                       const value = Number(amount);

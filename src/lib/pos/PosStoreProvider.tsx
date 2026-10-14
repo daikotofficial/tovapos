@@ -28,6 +28,7 @@ import {
 } from './types';
 import { assertSellable, normalizeInventoryItem } from './stock';
 import { getSaleUnitPrice, getUnitsPerSale, hasPackPricing, type SaleUnit } from './sale-units';
+import { tenantThemeModeKey } from './theme';
 import { calculateSaleLine, calculateSaleTotals, money } from './sale-calculations';
 import { loyaltyEarnedForSale, loyaltyRedemption } from './loyalty';
 import {
@@ -935,21 +936,13 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     if (typeof document === 'undefined') return;
     if (window.location.pathname.startsWith('/admin')) return;
     const root = document.documentElement;
-    if (settings.themeColor) {
-      root.style.setProperty('--primary', settings.themeColor);
-      root.style.setProperty('--ring', settings.themeColor);
-    }
-    if (settings.fontFamily) {
-      root.style.setProperty(
-        '--font-sans',
-        `${settings.fontFamily}, ui-sans-serif, system-ui, sans-serif`
-      );
-    }
-    const themeMode = settings.themeMode ?? 'light';
+    root.style.removeProperty('--primary');
+    root.style.removeProperty('--ring');
+    root.style.removeProperty('--font-sans');
+    const themeMode = tenant?.id ? settings.themeMode ?? 'light' : 'light';
     root.dataset.theme = themeMode;
-    window.localStorage.setItem('tovapos.themeMode', themeMode);
-    document.cookie = `tovapos.themeMode=${encodeURIComponent(themeMode)};path=/;max-age=31536000;samesite=lax`;
-  }, [isHydrated, settings.fontFamily, settings.themeColor, settings.themeMode]);
+    if (tenant?.id) window.localStorage.setItem(tenantThemeModeKey(tenant.id), themeMode);
+  }, [isHydrated, settings.fontFamily, settings.themeColor, settings.themeMode, tenant?.id]);
 
   const setActiveUserId = useCallback(
     (userId: string) => {

@@ -183,7 +183,7 @@ export default function ReceiptModal({
   };
 
   const handleDirectPrint = async () => {
-    const payload = { businessName, businessAddress, businessPhone, transactionId: sale.transactionId, timestamp: sale.timestamp, cashier: sale.cashier, paymentMethod: sale.paymentMethod, customerName: sale.customerName, items: sale.items, subtotal: sale.subtotal, discountTotal: sale.discountTotal, taxAmount: sale.taxAmount, taxLabel, grandTotal: sale.grandTotal, amountPaid: sale.amountPaid, cashTendered: sale.cashTendered, changeGiven: sale.changeGiven, footer: receiptFooter, rawText: buildThermalReceiptText(sale, currency, businessName, businessAddress, businessPhone, receiptFooter, taxLabel) };
+    const payload = { businessName, businessAddress, businessPhone, transactionId: sale.transactionId, timestamp: sale.timestamp, cashier: sale.cashier, paymentMethod: sale.paymentMethod, paymentBreakdown: sale.paymentBreakdown, customerName: sale.customerName, items: sale.items, subtotal: sale.subtotal, discountTotal: sale.discountTotal, taxAmount: sale.taxAmount, taxLabel, grandTotal: sale.grandTotal, amountPaid: sale.amountPaid, cashTendered: sale.cashTendered, changeGiven: sale.changeGiven, footer: receiptFooter, rawText: buildThermalReceiptText(sale, currency, businessName, businessAddress, businessPhone, receiptFooter, taxLabel) };
     try {
       const response = await fetch('http://127.0.0.1:4318/print', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(4000), body: JSON.stringify(payload) });
       if (!response.ok) {

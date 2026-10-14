@@ -203,18 +203,20 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         var isPublicLightRoute = publicLightRoutes.some(function (route) {
           return path === route || (route !== '/' && path.indexOf(route + '/') === 0);
         });
-        var storageKey = path.indexOf('/admin') === 0 ? 'tovapos.adminTheme' : 'tovapos.themeMode';
         if (isPublicLightRoute) {
           document.documentElement.dataset.theme = 'light';
           document.documentElement.style.colorScheme = 'light';
           document.documentElement.style.backgroundColor = '#f8fafc';
           return;
         }
-        var cookieEntry = document.cookie.split('; ').find(function (item) {
-          return item.indexOf(storageKey + '=') === 0;
-        });
-        var cookieTheme = cookieEntry ? decodeURIComponent(cookieEntry.slice(storageKey.length + 1)) : null;
-        var theme = window.localStorage.getItem(storageKey) || cookieTheme;
+        var isAdminRoute = path.indexOf('/admin') === 0;
+        var tenantId = window.sessionStorage.getItem('tovapos.tabTenant');
+        var storageKey = isAdminRoute
+          ? 'tovapos.adminTheme'
+          : tenantId
+            ? 'tovapos.themeMode.' + encodeURIComponent(tenantId)
+            : null;
+        var theme = storageKey ? window.localStorage.getItem(storageKey) : null;
         if (theme !== 'dark' && theme !== 'light') theme = 'light';
         document.documentElement.dataset.theme = theme;
         document.documentElement.style.colorScheme = theme;

@@ -921,16 +921,41 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
     const result = await getPosPool().query(
       `
       ${SALES_SOURCE_CTE}
+      , payment_rows AS (
+        SELECT
+          sale_rows.*,
+          CASE
+            WHEN payment_method = 'split' THEN split_parts.key
+            ELSE payment_method
+          END AS method,
+          CASE
+            WHEN payment_method = 'split' THEN (split_parts.value)::float8
+            ELSE grand_total
+          END AS method_total,
+          CASE
+            WHEN payment_method = 'credit' THEN 0
+            WHEN payment_method = 'split' THEN (split_parts.value)::float8
+            ELSE grand_total
+          END AS method_collected,
+          CASE WHEN payment_method = 'credit' THEN amount_due ELSE 0 END AS method_receivable
+        FROM sale_rows
+        LEFT JOIN LATERAL jsonb_each_text(
+          CASE
+            WHEN payment_method = 'split' THEN coalesce(data->'paymentBreakdown', '{}'::jsonb)
+            ELSE jsonb_build_object(coalesce(nullif(payment_method, ''), 'cash'), grand_total)
+          END
+        ) AS split_parts(key, value) ON true
+      )
       SELECT
-        payment_method AS method,
+        method,
         count(*)::bigint AS count,
-        coalesce(sum(grand_total) FILTER (WHERE payment_method <> 'credit'), 0)::float8 AS collected,
-        coalesce(sum(amount_due), 0)::float8 AS receivable,
-        coalesce(sum(grand_total), 0)::float8 AS total
-      FROM sale_rows
+        coalesce(sum(method_collected), 0)::float8 AS collected,
+        coalesce(sum(method_receivable), 0)::float8 AS receivable,
+        coalesce(sum(method_total), 0)::float8 AS total
+      FROM payment_rows
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      GROUP BY payment_method
-      ORDER BY total DESC, payment_method ASC
+      GROUP BY method
+      ORDER BY total DESC, method ASC
       LIMIT $${values.length - 1} OFFSET $${values.length}
       `,
       values
@@ -1710,6 +1735,14 @@ export async function PUT(request: NextRequest) {
         ]);
       }
       if (storeName === 'settings') {
+        for (const record of records) {
+          if (
+            record.themeColor !== undefined &&
+            (typeof record.themeColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(record.themeColor))
+          ) {
+            throw new HttpError(400, 'Branding colour must be a six-digit hex value', 'VALIDATION_ERROR');
+          }
+        }
         const existing = await client.query(
           `SELECT data FROM pos_tenant_records
            WHERE tenant_id = $1 AND store_name = 'settings' AND record_id = 'settings' LIMIT 1`,

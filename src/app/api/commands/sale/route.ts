@@ -39,7 +39,7 @@ function parsePaymentBreakdown(
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new HttpError(400, 'Split payment amounts are required', 'VALIDATION_ERROR');
   }
-  const allowed = ['cash', 'card', 'mobile', 'bank-transfer'] as const;
+  const allowed = ['cash', 'card', 'bank-transfer'] as const;
   const breakdown: PaymentBreakdown = {};
   let count = 0;
   for (const method of allowed) {
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
     const cashTendered = Number(body.cashTendered ?? 0);
     const paymentBreakdown = parsePaymentBreakdown(body.paymentBreakdown, paymentMethod);
     if (
-      !['cash', 'card', 'mobile', 'bank-transfer', 'split', 'credit'].includes(paymentMethod) ||
+      !['cash', 'card', 'bank-transfer', 'split', 'credit'].includes(paymentMethod) ||
       !Number.isFinite(cashTendered) ||
       cashTendered < 0 ||
       Math.abs(cashTendered * 100 - Math.round(cashTendered * 100)) > 1e-8

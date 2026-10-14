@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       const nextDue = Number((due - amount).toFixed(2));
       const method =
         typeof body.method === 'string' &&
-        ['cash', 'card', 'mobile', 'bank-transfer', 'split'].includes(body.method)
+        ['cash', 'card', 'bank-transfer', 'split'].includes(body.method)
           ? (body.method as CreditPaymentMethod)
           : 'cash';
       const updated: SaleTransaction = {

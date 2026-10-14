@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import {
   CreditCard,
   Banknote,
-  Smartphone,
   User,
   ChevronDown,
   Percent,
@@ -84,7 +83,7 @@ export default function PaymentPanel({
     if (paymentMethod !== 'split') return;
     setSplitInputValues(
       Object.fromEntries(
-        (['cash', 'card', 'mobile', 'bank-transfer'] as SplitPaymentMethod[]).map((method) => [
+        (['cash', 'card', 'bank-transfer'] as SplitPaymentMethod[]).map((method) => [
           method,
           paymentBreakdown[method] && paymentBreakdown[method]! > 0 ? String(paymentBreakdown[method]) : '',
         ])
@@ -332,7 +331,6 @@ export default function PaymentPanel({
               [
                 { id: 'cash', label: 'Cash', icon: Banknote },
                 { id: 'card', label: 'Card', icon: CreditCard },
-                { id: 'mobile', label: 'Mobile', icon: Smartphone },
                 { id: 'bank-transfer', label: 'Transfer', icon: Landmark },
                 { id: 'split', label: 'Split', icon: Split },
                 { id: 'credit', label: 'Credit', icon: User },
@@ -427,7 +425,6 @@ export default function PaymentPanel({
             {([
               ['cash', 'Cash'],
               ['card', 'Card'],
-              ['mobile', 'Mobile'],
               ['bank-transfer', 'Transfer'],
             ] as [SplitPaymentMethod, string][]).map(([method, label]) => (
               <label key={method} className="flex items-center gap-2 text-xs">
@@ -463,8 +460,6 @@ export default function PaymentPanel({
             <div className="flex flex-col items-center gap-2 py-4 bg-muted/30 rounded-xl border border-dashed border-border">
               {paymentMethod === 'card' ? (
                 <CreditCard size={28} className="text-primary/50" />
-              ) : paymentMethod === 'mobile' ? (
-                <Smartphone size={28} className="text-primary/50" />
               ) : paymentMethod === 'bank-transfer' ? (
                 <Landmark size={28} className="text-primary/50" />
               ) : paymentMethod === 'split' ? (
@@ -475,9 +470,7 @@ export default function PaymentPanel({
               <p className="text-sm font-medium text-muted-foreground">
                 {paymentMethod === 'card'
                   ? 'Insert or tap card on terminal'
-                  : paymentMethod === 'mobile'
-                    ? 'Customer scans QR code'
-                    : paymentMethod === 'bank-transfer'
+                  : paymentMethod === 'bank-transfer'
                       ? 'Confirm transfer before completing sale'
                       : paymentMethod === 'split'
                         ? 'Record split tender at reconciliation'
