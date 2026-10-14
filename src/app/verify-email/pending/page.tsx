@@ -21,7 +21,7 @@ export default async function VerificationPendingPage({
       }
     >
       <div className="space-y-3 text-sm leading-6 text-muted-foreground">
-        <p>Open the email and follow the confirmation link. The link expires after 24 hours.</p>
+        <p>Open the email and follow the confirmation link.</p>
         <Link href="/resend-verification" className="font-semibold text-primary hover:underline">
           Resend confirmation email
         </Link>

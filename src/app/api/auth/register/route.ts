@@ -64,10 +64,10 @@ export async function POST(request: NextRequest) {
       throw new HttpError(400, 'Enter a valid referral code', 'VALIDATION_ERROR');
     }
     const businessMode = body.businessMode === 'hospitality' ? 'hospitality' : 'retail';
-    if (isNativeForm && body.confirmPassword !== password) {
+    if (body.confirmPassword !== password) {
       throw new HttpError(400, 'Passwords do not match', 'VALIDATION_ERROR');
     }
-    if (isNativeForm && body.agreeTerms !== 'on') {
+    if (body.agreeTerms !== true && body.agreeTerms !== 'on') {
       throw new HttpError(400, 'Accept the terms to continue', 'VALIDATION_ERROR');
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {

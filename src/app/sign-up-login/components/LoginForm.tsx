@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, Loader2, LogIn } from 'lucide-react';
-import { toast } from 'sonner';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 
 interface LoginFormData {
@@ -38,8 +37,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
 
   const onSubmit = async (data: LoginFormData) => {
     try {
-      const user = await signIn(data.email, data.password, data.remember);
-      toast.success(`Signed in as ${user.name}`);
+      await signIn(data.email, data.password, data.remember);
       window.location.assign('/dashboard');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to sign in';
@@ -51,12 +49,9 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
 
   return (
     <div className="fade-in">
-      <div className="mb-6">
-        <p className="text-xs font-bold uppercase text-[#128174]">Secure access</p>
-        <h2 className="mt-2 text-2xl font-bold leading-tight text-[#071412]">Sign in to TOVAPOS</h2>
-        <p className="mt-2 text-sm leading-6 text-[#66736f]">
-          Access your business sales, inventory, reports, and team controls.
-        </p>
+      <div className="mb-5">
+        <h2 className="text-2xl font-bold leading-tight text-[#071412]">Welcome back</h2>
+        <p className="mt-1 text-sm text-[#66736f]">Sign in to continue to your workspace.</p>
       </div>
 
       {initialError && (
@@ -69,12 +64,12 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
         action="/api/auth/login"
         method="post"
         onSubmit={handleSubmit(onSubmit)}
-        className="space-y-4"
+        className="space-y-3.5"
       >
         {/* Email or phone */}
         <div>
-          <label htmlFor="login-email" className={labelClass}>
-            Email or Phone Number
+            <label htmlFor="login-email" className={labelClass}>
+            Email or phone
           </label>
           <input
             id="login-email"
@@ -141,7 +136,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
         </div>
 
         {/* Remember me */}
-        <div className="flex items-start gap-2 rounded-md bg-[#eef5f3] px-3 py-2">
+        <div className="flex items-center gap-2 rounded-md bg-[#f5f9f8] px-3 py-2">
           <input
             id="remember"
             type="checkbox"
@@ -149,7 +144,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
             className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-primary"
           />
           <label htmlFor="remember" className="cursor-pointer text-sm leading-5 text-[#5f6f6a]">
-            Stay signed in for 14 days (otherwise, 8 hours)
+            Keep me signed in
           </label>
         </div>
 
@@ -164,20 +159,13 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
           ) : (
             <>
               <LogIn size={16} />
-              Sign In to TOVAPOS
+              Sign in
             </>
           )}
         </button>
       </form>
 
-      <p className="mt-3 text-center text-xs text-muted-foreground">
-        Email not confirmed?{' '}
-        <Link href="/resend-verification" className="font-medium text-primary hover:underline">
-          Resend confirmation
-        </Link>
-      </p>
-
-      <p className="mt-4 text-center text-xs text-muted-foreground">
+      <p className="mt-5 text-center text-xs text-muted-foreground">
         New business?{' '}
         <Link href="/sign-up-login?tab=signup" className="text-primary font-medium hover:underline">
           Register your account

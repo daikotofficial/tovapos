@@ -43,7 +43,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
 
   React.useEffect(() => {
     if (isHydrated && !isAuthenticated) {
-      router.replace('/sign-up-login?authError=session');
+      router.replace('/sign-up-login');
     }
   }, [isAuthenticated, isHydrated, router]);
 

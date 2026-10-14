@@ -67,7 +67,7 @@ export default function ResetPasswordForm({ token }: { token: string }) {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete="new-password"
-                className="h-12 w-full rounded-md border border-border bg-white px-3 pr-10 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="auth-light-input h-12 w-full rounded-md border border-border bg-white px-3 pr-10 text-sm text-[#071412] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
               <button
                 type="button"
@@ -88,7 +88,7 @@ export default function ResetPasswordForm({ token }: { token: string }) {
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               autoComplete="new-password"
-              className="h-12 w-full rounded-md border border-border bg-white px-3 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="auth-light-input h-12 w-full rounded-md border border-border bg-white px-3 text-sm text-[#071412] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </label>
           {error && <p className="text-sm text-danger">{error}</p>}

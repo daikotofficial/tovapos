@@ -331,11 +331,18 @@
     padding: 2px;
   }
 
+  .auth-page input:-webkit-autofill,
+  .auth-page input:-webkit-autofill:hover,
+  .auth-page input:-webkit-autofill:focus,
+  .auth-page input:-webkit-autofill:active,
   .auth-light-input:-webkit-autofill,
   .auth-light-input:-webkit-autofill:hover,
-  .auth-light-input:-webkit-autofill:focus {
-    -webkit-text-fill-color: #071412;
-    box-shadow: 0 0 0 1000px #ffffff inset;
+  .auth-light-input:-webkit-autofill:focus,
+  .auth-light-input:-webkit-autofill:active {
+    -webkit-text-fill-color: #071412 !important;
+    -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+    box-shadow: 0 0 0 1000px #ffffff inset !important;
+    background-color: #ffffff !important;
     caret-color: #071412;
     transition: background-color 9999s ease-in-out 0s;
   }

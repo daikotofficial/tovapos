@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, Loader2, CheckCircle2, Building2 } from 'lucide-react';
-import { toast } from 'sonner';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { BusinessMode } from '@/lib/pos/types';
 
@@ -62,10 +61,11 @@ export default function SignupForm({
         phone: data.phone,
         address: data.address,
         password: data.password,
+        confirmPassword: data.confirmPassword,
+        agreeTerms: data.agreeTerms,
         businessMode: data.businessMode,
       });
       setRegistrationResult(result);
-      toast.success('Registration completed. Confirm your email to continue.');
     } catch (error) {
       setError('root.serverError', {
         message: error instanceof Error ? error.message : 'Unable to register business',
@@ -74,7 +74,7 @@ export default function SignupForm({
   };
 
   const inputClass = (hasError: boolean) =>
-    `h-11 w-full rounded-md border bg-white px-3 text-sm transition-all duration-150 focus:outline-none focus:ring-2 ${
+    `auth-light-input h-11 w-full rounded-md border bg-white px-3 text-sm text-[#071412] caret-[#071412] placeholder:text-[#8b9a96] [color-scheme:light] transition-all duration-150 focus:outline-none focus:ring-2 ${
       hasError
         ? 'border-danger focus:ring-danger/30 focus:border-danger'
         : 'border-border focus:ring-primary/30 focus:border-primary'
@@ -123,14 +123,9 @@ export default function SignupForm({
 
   return (
     <div className="fade-in">
-      <div className="mb-6">
-        <p className="text-xs font-bold uppercase text-[#128174]">Business setup</p>
-        <h2 className="mt-2 text-2xl font-bold leading-tight text-[#071412]">
-          Register your business
-        </h2>
-        <p className="mt-2 text-sm leading-6 text-[#66736f]">
-          Create your business account for sales, stock, reports, and team access.
-        </p>
+      <div className="mb-5">
+        <h2 className="text-2xl font-bold leading-tight text-[#071412]">Create your account</h2>
+        <p className="mt-1 text-sm text-[#66736f]">Set up your business workspace.</p>
       </div>
 
       {initialError && (
@@ -148,7 +143,7 @@ export default function SignupForm({
         action="/api/auth/register"
         method="post"
         onSubmit={handleSubmit(onSubmit)}
-        className="space-y-4"
+        className="space-y-3.5"
       >
         {/* Section: Business Info */}
         <div className="space-y-3 rounded-md border border-[#dfe7e4] bg-[#f8fbfa] p-4">
@@ -208,9 +203,7 @@ export default function SignupForm({
               <label htmlFor="licenseNumber" className={labelClass}>
                 Registration / Tax ID
               </label>
-              <p className="mb-1 min-h-5 text-[10px] leading-5 text-muted-foreground">
-                Optional business registration reference
-              </p>
+              <p className="mb-1 min-h-5 text-[10px] leading-5 text-muted-foreground">Optional</p>
               <input
                 id="licenseNumber"
                 autoComplete="off"
@@ -313,10 +306,6 @@ export default function SignupForm({
             {errors.email && <p className={errorClass}>{errors.email.message}</p>}
           </div>
 
-          <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs leading-5 text-primary">
-            This first account is created as the business owner. You can add cashiers, inventory
-            users, managers, auditors, and expense clerks after signing in.
-          </div>
         </div>
 
         {/* Section: Password */}
@@ -327,9 +316,7 @@ export default function SignupForm({
             <label htmlFor="signup-password" className={labelClass}>
               Password <span className="text-danger">*</span>
             </label>
-            <p className="mb-1 text-[10px] leading-5 text-muted-foreground">
-              Minimum 10 characters with uppercase, number, and symbol
-            </p>
+            <p className="mb-1 text-[10px] leading-5 text-muted-foreground">10+ characters, upper/lowercase, number, symbol</p>
             <div className="relative">
               <input
                 id="signup-password"
@@ -397,16 +384,8 @@ export default function SignupForm({
               {...register('agreeTerms', { required: 'You must accept the terms to continue' })}
               className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-primary"
             />
-            <span className="text-xs text-muted-foreground leading-relaxed">
-              I agree to the{' '}
-              <button type="button" className="text-primary font-medium hover:underline">
-                Terms of Service
-              </button>{' '}
-              and{' '}
-              <button type="button" className="text-primary font-medium hover:underline">
-                Privacy Policy
-              </button>
-              . I confirm this business is authorized to operate and manage sales records.
+            <span className="text-xs leading-relaxed text-muted-foreground">
+              I agree to the Terms of Service and Privacy Policy.
             </span>
           </label>
           {errors.agreeTerms && <p className={errorClass}>{errors.agreeTerms.message}</p>}

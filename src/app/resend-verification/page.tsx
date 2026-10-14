@@ -19,7 +19,7 @@ export default async function ResendVerificationPage({
             type="email"
             name="email"
             autoComplete="email"
-            className="h-12 w-full rounded-md border border-border bg-white px-3 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+            className="auth-light-input h-12 w-full rounded-md border border-border bg-white px-3 text-sm text-[#071412] placeholder:text-[#8b9a96] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             placeholder="you@business.com"
           />
         </label>

@@ -52,8 +52,8 @@ export default function AuthScreen({
   const formWidth = tab === 'signup' ? 'max-w-[620px]' : 'max-w-[480px] lg:self-center';
   return (
     <main className="auth-page min-h-screen bg-[#f4f7f6] text-[#071412]">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-        <header className="flex h-14 shrink-0 items-center justify-between">
+      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-3 sm:px-6 lg:px-8 lg:py-4">
+        <header className="flex h-12 shrink-0 items-center justify-between">
           <Link href="/" className="flex items-center gap-3">
             <Image
               src="/assets/brand/tovapos-mark.svg"
@@ -64,22 +64,20 @@ export default function AuthScreen({
               unoptimized
               className="h-10 w-10"
             />
-            <div>
-              <p className="text-base font-bold leading-tight">TOVAPOS</p>
-              <p className="text-xs font-semibold text-[#66736f]">Your trusted sales agent...</p>
-            </div>
+            <p className="text-base font-bold leading-tight">TOVAPOS</p>
           </Link>
 
           <Link
             href="/"
             className="inline-flex h-9 items-center gap-2 rounded-md px-2 text-sm font-semibold text-[#66736f] transition-colors hover:bg-white hover:text-[#071412]"
           >
-            <ArrowLeft size={16} />
-            Home
+            <ArrowLeft size={15} />
+            <span className="hidden sm:inline">Back to home</span>
+            <span className="sm:hidden">Home</span>
           </Link>
         </header>
 
-        <div className="grid flex-1 items-center gap-6 py-6 lg:grid-cols-[0.95fr_1.05fr] lg:gap-10 lg:py-8">
+        <div className="grid flex-1 items-start gap-5 py-4 lg:items-center lg:grid-cols-[0.95fr_1.05fr] lg:gap-10 lg:py-8">
           <aside className="hidden lg:block">
             <div className="overflow-hidden rounded-xl border border-[#d7e2df] bg-[#071412] shadow-[0_24px_70px_rgba(7,20,18,0.18)]">
               <div className="border-b border-white/10 px-8 py-7">
@@ -128,17 +126,7 @@ export default function AuthScreen({
             <div
               className={`w-full ${formWidth} rounded-xl border border-[#d7e2df] bg-white p-4 shadow-[0_18px_60px_rgba(7,20,18,0.10)] sm:p-6 lg:p-8`}
             >
-              <div className="mb-5 lg:hidden">
-                <p className="text-xs font-bold uppercase text-[#128174]">Retail operations</p>
-                <h1 className="mt-2 text-2xl font-bold leading-tight">
-                  POS access for your store team.
-                </h1>
-                <p className="mt-2 text-sm leading-6 text-[#66736f]">
-                  Sign in or create the owner account to manage sales, stock, reports, and roles.
-                </p>
-              </div>
-
-              <div className="mb-6 grid grid-cols-2 gap-1 rounded-md bg-[#edf3f1] p-1">
+              <div className="mb-5 grid grid-cols-2 gap-1 rounded-md bg-[#edf3f1] p-1">
                 <Link
                   href="/sign-up-login?tab=login"
                   className={`h-11 rounded-md text-sm font-bold transition-colors ${
@@ -173,7 +161,7 @@ export default function AuthScreen({
           </section>
         </div>
 
-        <footer className="flex shrink-0 items-center justify-between border-t border-[#dbe5e2] py-4 text-xs text-[#66736f]">
+        <footer className="hidden shrink-0 items-center justify-between border-t border-[#dbe5e2] py-4 text-xs text-[#66736f] sm:flex">
           <span>&copy; 2026 TOVAPOS. All rights reserved.</span>
           <a
             href="https://daikot.com.ng"

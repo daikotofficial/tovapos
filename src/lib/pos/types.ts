@@ -364,6 +364,8 @@ export interface RegisterBusinessInput {
   phone: string;
   address?: string;
   password: string;
+  confirmPassword?: string;
+  agreeTerms?: boolean;
   businessMode?: BusinessMode;
   referralCode?: string;
 }

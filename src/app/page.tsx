@@ -113,10 +113,7 @@ export default function LandingPage() {
               unoptimized
               className="h-10 w-10"
             />
-            <div className="leading-tight">
-              <p className="text-base font-bold">TOVAPOS</p>
-              <p className="text-xs font-semibold text-white/70">Your trusted sales agent...</p>
-            </div>
+            <p className="text-base font-bold leading-tight">TOVAPOS</p>
           </Link>
 
           <nav className="hidden items-center gap-6 lg:flex">
@@ -171,16 +168,13 @@ export default function LandingPage() {
 
         <div className="relative mx-auto flex min-h-[78svh] max-w-7xl items-center px-4 pb-12 pt-24 sm:px-6 lg:px-8">
           <div className="max-w-2xl text-white">
-            <p className="text-xs font-bold uppercase text-[#19b8a6]">
-              Retail POS, inventory, teams, and support
-            </p>
+            <p className="text-xs font-bold uppercase text-[#19b8a6]">Retail POS for growing teams</p>
             <h1 className="mt-4 text-4xl font-bold leading-[1.05] sm:text-5xl">
               Run sales, stock, staff, and receipts from one serious retail system.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-white/75 sm:text-lg">
-              TOVAPOS gives supermarkets, pharmacies, mini-marts, boutiques, wholesalers, and
-              product-selling teams the daily controls they need: fast checkout, clean inventory,
-              VAT/discount accuracy, user permissions, reporting, and offline-aware sync.
+              Fast checkout, accurate inventory, clear reports, and secure access for supermarkets,
+              pharmacies, mini-marts, boutiques, and wholesalers.
             </p>
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
