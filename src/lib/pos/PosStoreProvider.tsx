@@ -100,6 +100,7 @@ interface PosStoreValue {
   };
   syncProgress: { isSyncing: boolean; total: number; completed: number; failed: number };
   pendingSyncCount: number;
+  failedSyncCount: number;
   retrySyncOperation: (operationId: string) => Promise<void>;
   resolveFailedInventorySync: (operationId: string) => Promise<void>;
   cancelFailedOfflineSale: (operationId: string) => Promise<void>;
@@ -145,6 +146,44 @@ const OFFLINE_SESSION_KEY = 'tovapos.offlineSession';
 const TAB_TENANT_KEY = 'tovapos.tabTenant';
 const OFFLINE_SINCE_KEY = 'tovapos.offlineSince';
 const OFFLINE_SALE_MAX_MS = 6 * 60 * 60 * 1000;
+const NETWORK_REQUEST_TIMEOUT_MS = 8_000;
+
+function isRetryableSyncError(message = ''): boolean {
+  const status = message.match(/^HTTP (\d{3})\b/);
+  if (status) {
+    const code = Number(status[1]);
+    return code === 408 || code === 425 || code === 429 || code >= 500;
+  }
+  return !/changed before|was deleted|would make quantity negative|SKU or barcode|shift.*not open|payment.*invalid|not allowed|permission|expired|below cost|no longer exists|subscription required|customer is required|cannot be sold/i.test(
+    message
+  );
+}
+
+function syncResponseError(
+  response: Response,
+  payload: { error?: string } | null,
+  fallback: string
+): Error {
+  return new Error(`HTTP ${response.status}: ${payload?.error ?? fallback}`);
+}
+
+function isTransientResponse(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  return error instanceof TypeError || (error instanceof Error && error.name === 'AbortError');
+}
+
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), NETWORK_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
 
 type CachedSession = {
   user: TovaUser;
@@ -574,10 +613,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       .filter(
         (item) =>
           item.status === 'pending' ||
-          (item.status === 'failed' &&
-            !/changed before|was deleted|would make quantity negative|SKU or barcode/i.test(
-              item.lastError ?? ''
-            ))
+          (item.status === 'failed' && isRetryableSyncError(item.lastError))
       )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     if (pending.length === 0) return;
@@ -601,7 +637,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               if (saleQueueItem) {
                 const payload = saleQueueItem.payload as { sale?: SaleTransaction };
                 if (!payload.sale) throw new Error('Offline sale payload is incomplete');
-                const response = await fetch('/api/commands/sale', {
+                const response = await fetchWithTimeout('/api/commands/sale', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -630,7 +666,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                   error?: string;
                 };
                 if (!response.ok || !result.sale) {
-                  throw new Error(result.error ?? 'Offline sale could not be synchronized');
+                  throw syncResponseError(
+                    response,
+                    result,
+                    'Offline sale could not be synchronized'
+                  );
                 }
                 await Promise.all([
                   cacheSalesLocally([result.sale]),
@@ -669,7 +709,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                 const movement = Array.isArray(movementPayload)
                   ? movementPayload[0]
                   : movementPayload;
-                const response = await fetch('/api/commands/stock-adjustment', {
+                const response = await fetchWithTimeout('/api/commands/stock-adjustment', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -688,7 +728,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                   error?: string;
                 };
                 if (!response.ok || !result.inventory) {
-                  throw new Error(result.error ?? 'Stock operation could not be synchronized');
+                  throw syncResponseError(
+                    response,
+                    result,
+                    'Stock operation could not be synchronized'
+                  );
                 }
                 await cacheInventoryLocally([result.inventory]);
                 setInventory((prev) =>
@@ -707,7 +751,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               } else {
                 for (const item of group) {
                   if (item.action === 'delete') {
-                    const response = await fetch(
+                    const response = await fetchWithTimeout(
                       `/api/pos-store?store=${apiStoreName(item.entity)}`,
                       {
                         method: 'DELETE',
@@ -719,7 +763,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                       error?: string;
                     } | null;
                     if (!response.ok)
-                      throw new Error(result?.error ?? 'Delete could not be synchronized');
+                      throw syncResponseError(response, result, 'Delete could not be synchronized');
                     if (item.entity === 'inventory') {
                       await deleteStoredInventory(item.entityId);
                       setInventory((prev) => prev.filter((entry) => entry.id !== item.entityId));
@@ -729,7 +773,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     if (item.entity === 'user') await deleteStoredUser(item.entityId);
                     continue;
                   }
-                  const response = await fetch(
+                  const response = await fetchWithTimeout(
                     `/api/pos-store?store=${apiStoreName(item.entity)}`,
                     {
                       method: 'PUT',
@@ -741,7 +785,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     error?: string;
                   } | null;
                   if (!response.ok)
-                    throw new Error(result?.error ?? 'Update could not be synchronized');
+                    throw syncResponseError(response, result, 'Update could not be synchronized');
                   if (item.entity === 'customer') await saveCustomer(item.payload as Customer);
                   if (item.entity === 'vendor') await saveVendor(item.payload as Vendor);
                   if (item.entity === 'expense') await saveExpense(item.payload as ExpenseRecord);
@@ -827,7 +871,15 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   }, [isHydrated, isOnline, syncQueue, syncWakeVersion]);
 
   const pendingSyncCount = useMemo(
-    () => syncQueue.filter((item) => item.status === 'pending' || item.status === 'failed').length,
+    () =>
+      new Set(syncQueue.filter((item) => item.status === 'pending').map((item) => item.operationId))
+        .size,
+    [syncQueue]
+  );
+  const failedSyncCount = useMemo(
+    () =>
+      new Set(syncQueue.filter((item) => item.status === 'failed').map((item) => item.operationId))
+        .size,
     [syncQueue]
   );
 
@@ -939,7 +991,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     root.style.removeProperty('--primary');
     root.style.removeProperty('--ring');
     root.style.removeProperty('--font-sans');
-    const themeMode = tenant?.id ? settings.themeMode ?? 'light' : 'light';
+    const themeMode = tenant?.id ? (settings.themeMode ?? 'light') : 'light';
     root.dataset.theme = themeMode;
     if (tenant?.id) window.localStorage.setItem(tenantThemeModeKey(tenant.id), themeMode);
   }, [isHydrated, settings.fontFamily, settings.themeColor, settings.themeMode, tenant?.id]);
@@ -1600,8 +1652,15 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           isOnline
         ) {
           let response: Response | undefined;
+          let onlinePayload: {
+            sale?: SaleTransaction;
+            inventory?: InventoryItem[];
+            stockMovements?: StockMovement[];
+            customer?: Customer | null;
+            error?: string;
+          } | null = null;
           try {
-            response = await fetch('/api/commands/sale', {
+            response = await fetchWithTimeout('/api/commands/sale', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1617,7 +1676,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               }),
             });
           } catch (error) {
-            if (!(error instanceof TypeError)) throw error;
+            if (!isTransientNetworkError(error)) throw error;
             setIsOnline(false);
           }
           if (response) {
@@ -1628,30 +1687,41 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               customer?: Customer | null;
               error?: string;
             } | null;
-            if (!response.ok || !payload?.sale) {
-              throw new Error(payload?.error ?? 'Unable to complete sale');
-            }
-            const inventoryUpdates = new Map(
-              (payload.inventory ?? []).map((item) => [item.id, item])
-            );
-            setInventory((prev) =>
-              sortInventory(prev.map((item) => inventoryUpdates.get(item.id) ?? item))
-            );
-            setStockMovements((prev) => [...(payload.stockMovements ?? []), ...prev]);
-            if (payload.customer) {
-              await cacheCustomersLocally([payload.customer]);
-              setCustomers((prev) =>
-                prev.map((customer) =>
-                  customer.id === payload.customer!.id ? payload.customer! : customer
-                )
+            if (!response.ok && isTransientResponse(response.status)) {
+              setIsOnline(false);
+              response = undefined;
+            } else {
+              if (!response.ok || !payload?.sale) {
+                throw new Error(payload?.error ?? 'Unable to complete sale');
+              }
+              const inventoryUpdates = new Map(
+                (payload.inventory ?? []).map((item) => [item.id, item])
               );
+              setInventory((prev) =>
+                sortInventory(prev.map((item) => inventoryUpdates.get(item.id) ?? item))
+              );
+              setStockMovements((prev) => [...(payload.stockMovements ?? []), ...prev]);
+              if (payload.customer) {
+                await cacheCustomersLocally([payload.customer]);
+                setCustomers((prev) =>
+                  prev.map((customer) =>
+                    customer.id === payload.customer!.id ? payload.customer! : customer
+                  )
+                );
+              }
+              setSales((prev) => [
+                payload.sale!,
+                ...prev.filter((sale) => sale.id !== payload.sale!.id),
+              ]);
+              return payload.sale;
             }
-            setSales((prev) => [
-              payload.sale!,
-              ...prev.filter((sale) => sale.id !== payload.sale!.id),
-            ]);
-            return payload.sale;
           }
+        }
+
+        if (!settings.allowOfflineSales) {
+          throw new Error(
+            'The connection was interrupted and offline sales are disabled for this business.'
+          );
         }
 
         const latestInventory = await loadInventoryByIds(
@@ -2222,6 +2292,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       connectivity,
       syncProgress,
       pendingSyncCount,
+      failedSyncCount,
       retrySyncOperation,
       resolveFailedInventorySync,
       cancelFailedOfflineSale,
@@ -2266,6 +2337,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       connectivity,
       syncProgress,
       pendingSyncCount,
+      failedSyncCount,
       retrySyncOperation,
       resolveFailedInventorySync,
       cancelFailedOfflineSale,

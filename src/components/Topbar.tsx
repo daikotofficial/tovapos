@@ -24,8 +24,16 @@ interface TopbarProps {
 }
 
 export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
-  const { isOnline, connectivity, syncProgress, pendingSyncCount, currentUser, inventory, tenant } =
-    usePosStore();
+  const {
+    isOnline,
+    connectivity,
+    syncProgress,
+    pendingSyncCount,
+    failedSyncCount,
+    currentUser,
+    inventory,
+    tenant,
+  } = usePosStore();
   const [showNotifs, setShowNotifs] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
@@ -61,6 +69,14 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
         time: isOnline ? 'Updating' : 'Internet unavailable',
       });
     }
+    if (failedSyncCount > 0) {
+      stockAlerts.push({
+        id: 'sync-failed',
+        type: 'danger',
+        message: `${failedSyncCount} synchronization ${failedSyncCount === 1 ? 'operation needs' : 'operations need'} attention`,
+        time: 'Open Sync Logs',
+      });
+    }
 
     const platformAlerts = appNotifications.slice(0, 5).map((notice) => ({
       id: notice.id,
@@ -71,7 +87,7 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
     }));
 
     return [...platformAlerts, ...stockAlerts];
-  }, [appNotifications, inventory, isOnline, pendingSyncCount]);
+  }, [appNotifications, failedSyncCount, inventory, isOnline, pendingSyncCount]);
   const unread = notifications.filter(
     (n) => ('platform' in n || n.type === 'warning' || n.type === 'danger') && !readIds.has(n.id)
   ).length;
@@ -79,7 +95,11 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
   useEffect(() => {
     const raw = window.localStorage.getItem(readStorageKey);
     if (raw) {
-      try { setReadIds(new Set(JSON.parse(raw) as string[])); } catch { setReadIds(new Set()); }
+      try {
+        setReadIds(new Set(JSON.parse(raw) as string[]));
+      } catch {
+        setReadIds(new Set());
+      }
     } else setReadIds(new Set());
   }, [readStorageKey]);
 
@@ -97,7 +117,9 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
       }
     };
     void loadNotifications();
-    const refreshOnFocus = () => { if (document.visibilityState === 'visible') void loadNotifications(); };
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'visible') void loadNotifications();
+    };
     window.addEventListener('focus', refreshOnFocus);
     document.addEventListener('visibilitychange', refreshOnFocus);
     const interval = window.setInterval(loadNotifications, 60_000);
@@ -117,7 +139,10 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
   useEffect(() => {
     if (!showNotifs) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (notificationPanelRef.current && !notificationPanelRef.current.contains(event.target as Node)) {
+      if (
+        notificationPanelRef.current &&
+        !notificationPanelRef.current.contains(event.target as Node)
+      ) {
         setShowNotifs(false);
       }
     };
@@ -243,12 +268,21 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
 
           <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground lg:flex">
             <Cloud size={12} />
-            <span className="font-tabular" title={syncProgress.failed > 0 ? `${syncProgress.failed} synchronization group(s) need retry` : undefined}>
+            <span
+              className="font-tabular"
+              title={
+                syncProgress.failed > 0
+                  ? `${syncProgress.failed} synchronization group(s) need retry`
+                  : undefined
+              }
+            >
               {syncProgress.isSyncing
                 ? `Sending ${syncProgress.completed}/${syncProgress.total}`
-                : syncProgress.failed > 0 && pendingSyncCount > 0
-                  ? `${syncProgress.failed} sync retr${syncProgress.failed === 1 ? 'y' : 'ies'} pending`
-                  : `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting`}
+                : failedSyncCount > 0 && pendingSyncCount > 0
+                  ? `${pendingSyncCount} waiting · ${failedSyncCount} need attention`
+                  : failedSyncCount > 0
+                    ? `${failedSyncCount} need attention`
+                    : `${pendingSyncCount} update${pendingSyncCount === 1 ? '' : 's'} waiting`}
             </span>
           </div>
 
