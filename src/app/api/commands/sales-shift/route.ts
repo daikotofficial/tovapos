@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import {
-  assertPermission,
   assertWritePermission,
   assertSameOrigin,
   assertTenantActive,
@@ -42,6 +41,39 @@ function collectedFromSale(data: Record<string, unknown>): number {
     if (Number.isFinite(amountPaid) && amountPaid >= 0) return amountPaid;
   }
   return Number(data.grandTotal ?? 0);
+}
+
+function normalizeCashPayouts(value: unknown, recordedBy: string) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new HttpError(400, 'Cash payouts are invalid', 'VALIDATION_ERROR');
+  }
+  return value.map((entry) => {
+    const payout = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null;
+    const purpose = typeof payout?.purpose === 'string' ? payout.purpose.trim() : '';
+    const amount = Number(payout?.amount);
+    if (
+      !purpose ||
+      purpose.length > 160 ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      amount > 1_000_000_000_000 ||
+      Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-8
+    ) {
+      throw new HttpError(
+        400,
+        'Each cash payout needs a purpose and an amount greater than zero',
+        'VALIDATION_ERROR'
+      );
+    }
+    return {
+      id: randomUUID(),
+      purpose,
+      amount,
+      recordedAt: new Date().toISOString(),
+      recordedBy,
+    };
+  });
 }
 
 export async function GET(request: NextRequest) {
@@ -94,12 +126,19 @@ export async function GET(request: NextRequest) {
     }
     const totalSales = sales.rows.reduce((sum, row) => sum + Number(row.data?.grandTotal ?? 0), 0);
     const cashSales = paymentBreakdown.cash ?? 0;
+    const cashPayouts = Array.isArray(shift.cashPayouts) ? shift.cashPayouts : [];
+    const payoutTotal = cashPayouts.reduce(
+      (sum, payout) => sum + Number((payout as Record<string, unknown>).amount ?? 0),
+      0
+    );
     return NextResponse.json({
       ...shift,
       totalSales,
       cashSales,
       paymentBreakdown,
-      expectedCash: Number(shift.openingCash ?? 0) + cashSales,
+      cashPayouts,
+      payoutTotal,
+      expectedCash: Number(shift.openingCash ?? 0) + cashSales - payoutTotal,
     });
   } catch (error) {
     return errorResponse(error);
@@ -144,11 +183,7 @@ export async function POST(request: NextRequest) {
       );
       if (action === 'open') {
         if (existing.rows[0]?.data?.status === 'open')
-          throw new HttpError(
-            409,
-            'Sales is already open for today',
-            'SHIFT_ALREADY_EXISTS'
-          );
+          throw new HttpError(409, 'Sales is already open for today', 'SHIFT_ALREADY_EXISTS');
         const openingCash = Number(body.openingCash);
         const openingPurpose =
           typeof body.openingPurpose === 'string' ? body.openingPurpose.trim() : '';
@@ -160,9 +195,7 @@ export async function POST(request: NextRequest) {
           );
         }
         const shift = {
-          id: existing.rows[0]
-            ? `shift-${auth.user.id}-${businessDate}-${randomUUID()}`
-            : shiftId,
+          id: existing.rows[0] ? `shift-${auth.user.id}-${businessDate}-${randomUUID()}` : shiftId,
           businessDate,
           userId: auth.user.id,
           userName: auth.user.name,
@@ -186,7 +219,16 @@ export async function POST(request: NextRequest) {
       }
 
       const shift = existing.rows[0]?.data as Record<string, unknown> | undefined;
-      if (!shift || shift.id !== shiftId || shift.userId !== auth.user.id || shift.status !== 'open') {
+      if (shift?.id === shiftId && shift.userId === auth.user.id && shift.status === 'closed') {
+        await client.query('COMMIT');
+        return NextResponse.json(shift);
+      }
+      if (
+        !shift ||
+        shift.id !== shiftId ||
+        shift.userId !== auth.user.id ||
+        shift.status !== 'open'
+      ) {
         throw new HttpError(
           409,
           'This sales shift is not open for the signed-in user',
@@ -209,7 +251,16 @@ export async function POST(request: NextRequest) {
         0
       );
       const cashSales = sales.rows.reduce((sum, row) => sum + cashFromSale(row.data), 0);
-      const expectedCash = Number(shift.openingCash ?? 0) + cashSales;
+      const cashPayouts = normalizeCashPayouts(body.cashPayouts, auth.user.id);
+      const payoutTotal = cashPayouts.reduce((sum, payout) => sum + payout.amount, 0);
+      if (payoutTotal > Number(shift.openingCash ?? 0) + cashSales) {
+        throw new HttpError(
+          400,
+          'Cash payouts cannot be greater than the cash available in this shift',
+          'VALIDATION_ERROR'
+        );
+      }
+      const expectedCash = Number(shift.openingCash ?? 0) + cashSales - payoutTotal;
       if (Math.abs(closingCash - expectedCash) > 0.005) {
         throw new HttpError(
           409,
@@ -221,6 +272,8 @@ export async function POST(request: NextRequest) {
         ...shift,
         totalSales,
         cashSales,
+        cashPayouts,
+        payoutTotal,
         expectedCash,
         closingCash,
         cashVariance: 0,

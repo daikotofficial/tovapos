@@ -823,14 +823,21 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
         const totalSales = Number(row.liveTotalSales ?? 0);
         const cashSales = Number(row.liveCashSales ?? 0);
         const openingCash = Number(shift.openingCash ?? 0);
+        const cashPayouts = Array.isArray(shift.cashPayouts) ? shift.cashPayouts : [];
+        const payoutTotal = cashPayouts.reduce(
+          (sum, payout) => sum + Number((payout as Record<string, unknown>).amount ?? 0),
+          0
+        );
         return {
           ...shift,
           totalSales,
           cashSales,
-          expectedCash: openingCash + cashSales,
+          cashPayouts,
+          payoutTotal,
+          expectedCash: openingCash + cashSales - payoutTotal,
           cashVariance:
             shift.status === 'closed'
-              ? Number(shift.closingCash ?? 0) - (openingCash + cashSales)
+              ? Number(shift.closingCash ?? 0) - (openingCash + cashSales - payoutTotal)
               : undefined,
         };
       }),

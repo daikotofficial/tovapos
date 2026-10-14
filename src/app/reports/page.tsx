@@ -95,6 +95,8 @@ interface SalesShiftReportRow {
   totalSales: number;
   cashSales: number;
   expectedCash: number;
+  payoutTotal?: number;
+  cashPayouts?: { purpose: string; amount: number }[];
   closingCash?: number;
   cashVariance?: number;
   closedAt?: string;
@@ -1806,6 +1808,7 @@ function ReportsContent() {
           'Opening Cash',
           'Total Sales',
           'Cash Sales',
+          'Cash Payouts',
           'Expected Cash',
           'Closing Cash',
           'Variance',
@@ -1817,6 +1820,7 @@ function ReportsContent() {
           Number(shift.openingCash).toFixed(2),
           Number(shift.totalSales).toFixed(2),
           Number(shift.cashSales).toFixed(2),
+          Number(shift.payoutTotal ?? 0).toFixed(2),
           Number(shift.expectedCash).toFixed(2),
           shift.closingCash === undefined ? '' : Number(shift.closingCash).toFixed(2),
           shift.cashVariance === undefined ? '' : Number(shift.cashVariance).toFixed(2),
@@ -3045,6 +3049,7 @@ function ReportsContent() {
                   'Opening Cash',
                   'Total Sales',
                   'Cash Sales',
+                  'Cash Payouts',
                   'Expected Cash',
                   'Closing Cash',
                   'Variance',
@@ -3057,6 +3062,7 @@ function ReportsContent() {
                   formatMoney(shift.openingCash, settings.currency),
                   formatMoney(shift.totalSales, settings.currency),
                   formatMoney(shift.cashSales, settings.currency),
+                  formatMoney(shift.payoutTotal ?? 0, settings.currency),
                   formatMoney(shift.expectedCash, settings.currency),
                   shift.closingCash === undefined
                     ? '—'

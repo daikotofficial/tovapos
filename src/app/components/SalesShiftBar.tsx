@@ -11,6 +11,7 @@ import {
   getOpenSalesShift,
   getSalesShift,
   saveSalesShift,
+  type CashPayout,
   type LocalSalesShift,
 } from '@/lib/pos/sales-shift';
 
@@ -32,6 +33,9 @@ export default function SalesShiftBar() {
   const [openingCash, setOpeningCash] = useState('');
   const [openingPurpose, setOpeningPurpose] = useState('');
   const [closingCash, setClosingCash] = useState('');
+  const [cashPayouts, setCashPayouts] = useState<Array<{ purpose: string; amount: string }>>([
+    { purpose: '', amount: '' },
+  ]);
   const [dontRemindToday, setDontRemindToday] = useState(false);
   const reminderKey = currentUser
     ? 'tovapos.sales-reminder.' +
@@ -102,7 +106,12 @@ export default function SalesShiftBar() {
   const localCashSales = todaySales.reduce((sum, sale) => sum + cashCollectedForSale(sale), 0);
   const totalSales = shift?.totalSales ?? localTotalSales;
   const cashSales = shift?.cashSales ?? localCashSales;
-  const expectedCash = (shift?.openingCash ?? 0) + cashSales;
+  const payoutTotal = cashPayouts.reduce((sum, payout) => {
+    const amount = Number(payout.amount);
+    return sum + (Number.isFinite(amount) && amount > 0 ? amount : 0);
+  }, 0);
+  const expectedCashBeforePayouts = (shift?.openingCash ?? 0) + cashSales;
+  const expectedCash = expectedCashBeforePayouts - payoutTotal;
   const paymentBreakdown = shift?.paymentBreakdown ?? {};
   const nonCashSales = Math.max(0, totalSales - cashSales);
   const countedCash = Number(closingCash);
@@ -157,6 +166,33 @@ export default function SalesShiftBar() {
 
   const close = async () => {
     if (!shift || shift.status !== 'open' || !balanced) return;
+    const normalizedPayouts: CashPayout[] = [];
+    for (const payout of cashPayouts) {
+      const purpose = payout.purpose.trim();
+      const amount = Number(payout.amount);
+      if (!purpose && !payout.amount) continue;
+      if (!purpose || !Number.isFinite(amount) || amount <= 0) {
+        toast.error('Each cash payout needs a purpose and an amount greater than zero.');
+        return;
+      }
+      if (amount > 1_000_000_000_000 || Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-8) {
+        toast.error('Each cash payout must use a valid amount with no more than two decimals.');
+        return;
+      }
+      normalizedPayouts.push({
+        id: crypto.randomUUID(),
+        purpose,
+        amount,
+        recordedAt: new Date().toISOString(),
+        recordedBy: currentUser?.id ?? '',
+      });
+    }
+    if (
+      normalizedPayouts.reduce((sum, payout) => sum + payout.amount, 0) > expectedCashBeforePayouts
+    ) {
+      toast.error('Cash payouts cannot be greater than the cash available in this shift.');
+      return;
+    }
     if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' && !navigator.onLine) {
       toast.error(
         'Reconnect before closing sales so the server can finalize the authoritative shift.'
@@ -172,6 +208,7 @@ export default function SalesShiftBar() {
           shiftId: shift.id,
           businessDate: shift.businessDate,
           closingCash: countedCash,
+          cashPayouts: normalizedPayouts,
         }),
       });
       const payload = await response.json().catch(() => null);
@@ -186,10 +223,12 @@ export default function SalesShiftBar() {
         closedAt: new Date().toISOString(),
         closingCash: countedCash,
         expectedCash,
+        cashPayouts: normalizedPayouts,
         cashVariance: variance,
         status: 'closed',
       });
     setClosingCash('');
+    setCashPayouts([{ purpose: '', amount: '' }]);
     setMode(null);
     toast.success('Sales closed and cash balanced.');
   };
@@ -310,7 +349,7 @@ export default function SalesShiftBar() {
               onChange={(e) => setDontRemindToday(e.target.checked)}
               className="h-4 w-4 rounded border-border text-primary"
             />
-            Don't remind me again today
+            Do not remind me again today
           </label>
         </div>
       </Modal>
@@ -319,7 +358,7 @@ export default function SalesShiftBar() {
         open={mode === 'close'}
         onClose={() => setMode(null)}
         title="Close Sales"
-        subtitle="Count the cash in hand. Card, transfer, and credit are excluded from the cash count."
+        subtitle="Record any cash payouts, then count the cash remaining in hand."
         size="sm"
         footer={
           <>
@@ -394,9 +433,88 @@ export default function SalesShiftBar() {
               </p>
             </div>
           </div>
+          <div className="space-y-3 rounded-lg border border-border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-muted-foreground">Cash payouts</span>
+              <span className="text-xs text-muted-foreground">Optional</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Record cash given out during this shift. These payouts reduce the expected cash at
+              hand.
+            </p>
+            <div className="space-y-2">
+              {cashPayouts.map((payout, index) => (
+                <div key={index} className="flex items-end gap-2">
+                  <label className="min-w-0 flex-1 space-y-1">
+                    <span className="sr-only">Payout purpose {index + 1}</span>
+                    <input
+                      type="text"
+                      value={payout.purpose}
+                      onChange={(event) =>
+                        setCashPayouts((current) =>
+                          current.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, purpose: event.target.value } : item
+                          )
+                        )
+                      }
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+                      placeholder="Purpose, e.g. delivery"
+                      maxLength={160}
+                    />
+                  </label>
+                  <label className="w-28 space-y-1 sm:w-36">
+                    <span className="sr-only">Payout amount {index + 1}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={payout.amount}
+                      onChange={(event) =>
+                        setCashPayouts((current) =>
+                          current.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, amount: event.target.value } : item
+                          )
+                        )
+                      }
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+                      placeholder="Amount"
+                    />
+                  </label>
+                  {cashPayouts.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCashPayouts((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index)
+                        )
+                      }
+                      className="mb-0.5 rounded-lg px-2 py-2 text-xs text-danger hover:bg-danger/10"
+                      aria-label={`Remove payout ${index + 1}`}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setCashPayouts((current) => [...current, { purpose: '', amount: '' }])
+                }
+                className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-primary"
+              >
+                + Add payout
+              </button>
+              <span className="text-xs font-semibold text-foreground">
+                Total payouts: {formatMoney(payoutTotal, settings.currency)}
+              </span>
+            </div>
+          </div>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-muted-foreground">
-              Cash sales amount counted
+              Actual cash counted after payouts
             </span>
             <input
               autoFocus
@@ -434,7 +552,8 @@ export default function SalesShiftBar() {
           )}
           <p className="text-xs text-muted-foreground">
             Opening cash {formatMoney(shift?.openingCash ?? 0, settings.currency)} + cash sales{' '}
-            {formatMoney(cashSales, settings.currency)} = expected cash.
+            {formatMoney(cashSales, settings.currency)} - payouts{' '}
+            {formatMoney(payoutTotal, settings.currency)} = expected cash at hand.
           </p>
         </div>
       </Modal>

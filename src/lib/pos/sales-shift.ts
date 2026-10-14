@@ -13,7 +13,16 @@ export interface LocalSalesShift {
   totalSales?: number;
   cashSales?: number;
   paymentBreakdown?: Record<string, number>;
+  cashPayouts?: CashPayout[];
   status: 'open' | 'closed';
+}
+
+export interface CashPayout {
+  id: string;
+  purpose: string;
+  amount: number;
+  recordedAt: string;
+  recordedBy: string;
 }
 
 export function businessDate(date = new Date()): string {
@@ -33,7 +42,11 @@ export function getSalesShift(userId: string): LocalSalesShift | null {
   if (typeof window === 'undefined') return null;
   const raw = window.localStorage.getItem(shiftKey(userId));
   if (!raw) return null;
-  try { return JSON.parse(raw) as LocalSalesShift; } catch { return null; }
+  try {
+    return JSON.parse(raw) as LocalSalesShift;
+  } catch {
+    return null;
+  }
 }
 
 export function getOpenSalesShift(userId: string): LocalSalesShift | null {
