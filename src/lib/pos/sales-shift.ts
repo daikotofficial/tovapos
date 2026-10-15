@@ -16,6 +16,11 @@ export interface LocalSalesShift {
   netPaymentBreakdown?: Record<string, number>;
   payoutTotalByMethod?: Record<string, number>;
   cashPayouts?: CashPayout[];
+  closingPeriodFrom?: string;
+  closingPeriodTo?: string;
+  periodComplete?: boolean;
+  periodSalesCount?: number;
+  shiftSalesCount?: number;
   status: 'open' | 'closed';
 }
 

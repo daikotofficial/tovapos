@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, LockKeyhole, LockOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import Modal from '@/components/ui/Modal';
 import NiceSelect from '@/components/ui/NiceSelect';
+import DatePicker from '@/components/ui/DatePicker';
+import TimePicker from '@/components/ui/TimePicker';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { formatMoney } from '@/lib/pos/money';
+import type { SaleTransaction } from '@/lib/pos/types';
 import {
   businessDate,
   getOpenSalesShift,
@@ -54,6 +57,49 @@ function cleanAmountInput(value: string): string {
   return value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
 }
 
+function posDateTimeParts(value: string): { date: string; time: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(value));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    date: `${values.year}-${values.month}-${values.day}`,
+    time: `${values.hour}:${values.minute}`,
+  };
+}
+
+function posDateTimeKey(value: string): string {
+  const parts = posDateTimeParts(value);
+  return `${parts.date}T${parts.time}`;
+}
+
+function salesPaymentBreakdown(rows: SaleTransaction[]): Record<string, number> {
+  const breakdown: Record<string, number> = {
+    cash: 0,
+    card: 0,
+    'bank-transfer': 0,
+    credit: 0,
+  };
+  for (const sale of rows) {
+    if (sale.paymentMethod === 'split' && sale.paymentBreakdown) {
+      for (const [method, value] of Object.entries(sale.paymentBreakdown)) {
+        breakdown[method] = (breakdown[method] ?? 0) + Number(value ?? 0);
+      }
+    } else {
+      const method = sale.paymentMethod;
+      breakdown[method] = (breakdown[method] ?? 0) + cashCollectedForSale(sale);
+      if (method !== 'cash') breakdown[method] += Number(sale.grandTotal ?? 0) - cashCollectedForSale(sale);
+    }
+  }
+  return breakdown;
+}
+
 export default function SalesShiftBar() {
   const { currentUser, sales, settings } = usePosStore();
   const [shift, setShift] = useState<LocalSalesShift | null>(null);
@@ -64,6 +110,12 @@ export default function SalesShiftBar() {
   const [cashPayouts, setCashPayouts] = useState<
     Array<{ purpose: string; amount: string; method: PayoutMethod }>
   >([{ purpose: '', amount: '', method: 'cash' }]);
+  const [closingPeriodFromDate, setClosingPeriodFromDate] = useState('');
+  const [closingPeriodFromTime, setClosingPeriodFromTime] = useState('');
+  const [closingPeriodToDate, setClosingPeriodToDate] = useState('');
+  const [closingPeriodToTime, setClosingPeriodToTime] = useState('');
+  const [closingPeriodLoading, setClosingPeriodLoading] = useState(false);
+  const [closingPeriodError, setClosingPeriodError] = useState('');
   const [dontRemindToday, setDontRemindToday] = useState(false);
   const reminderKey = currentUser
     ? 'tovapos.sales-reminder.' +
@@ -75,38 +127,39 @@ export default function SalesShiftBar() {
     : '';
 
   const refresh = () => setShift(currentUser ? getSalesShift(currentUser.id) : null);
-  const refreshAuthoritativeShift = async () => {
-    if (!currentUser || process.env.NEXT_PUBLIC_STORAGE_DRIVER !== 'postgres') return;
+  const refreshAuthoritativeShift = useCallback(async (from?: string, to?: string) => {
+    if (!currentUser || process.env.NEXT_PUBLIC_STORAGE_DRIVER !== 'postgres') return null;
     try {
-      const response = await fetch('/api/commands/sales-shift?businessDate=' + businessDate(), {
+      const params = new URLSearchParams({ businessDate: businessDate() });
+      if (from && to) {
+        params.set('from', from);
+        params.set('to', to);
+      }
+      const response = await fetch(`/api/commands/sales-shift?${params.toString()}`, {
         cache: 'no-store',
       });
-      if (!response.ok) return;
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Unable to calculate the selected closing period.');
       const serverShift = await response.json();
       if (serverShift) {
-        saveSalesShift(serverShift as LocalSalesShift);
+        if (!from && !to) saveSalesShift(serverShift as LocalSalesShift);
         setShift(serverShift as LocalSalesShift);
+        return serverShift as LocalSalesShift;
       }
+      return null;
     } catch {
-      // The close action itself will require connectivity and revalidate on the server.
+      throw new Error('Unable to calculate the selected closing period. Reconnect and try again.');
     }
-  };
+  }, [currentUser]);
   useEffect(() => {
     if (!currentUser) return;
     const localShift = getSalesShift(currentUser.id);
     setShift(localShift);
     if (!localShift && !window.sessionStorage.getItem(reminderKey)) setMode('open');
     if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres') {
-      void fetch('/api/commands/sales-shift?businessDate=' + businessDate(), { cache: 'no-store' })
-        .then((response) => (response.ok ? response.json() : null))
+      void refreshAuthoritativeShift()
         .then((serverShift) => {
-          if (serverShift) {
-            saveSalesShift(serverShift as LocalSalesShift);
-            setShift(serverShift as LocalSalesShift);
-            setMode(null);
-          } else {
-            // The server is authoritative. Remove a stale browser shift after a reset
-            // or after this user has no shift for the current business date.
+          if (serverShift) setMode(null);
+          else {
             window.localStorage.removeItem(
               'tovapos.sales-shift.' + currentUser.id + '.' + businessDate()
             );
@@ -117,7 +170,7 @@ export default function SalesShiftBar() {
     }
     window.addEventListener('tovapos:sales-shift', refresh);
     return () => window.removeEventListener('tovapos:sales-shift', refresh);
-  }, [currentUser?.id, currentUser?.lastLogin, currentUser?.updatedAt, reminderKey]);
+  }, [currentUser?.id, currentUser?.lastLogin, currentUser?.updatedAt, refreshAuthoritativeShift, reminderKey]);
 
   const todaySales = useMemo(
     () =>
@@ -130,10 +183,43 @@ export default function SalesShiftBar() {
       ),
     [currentUser?.id, sales, shift]
   );
-  const localTotalSales = todaySales.reduce((sum, sale) => sum + sale.grandTotal, 0);
-  const localCashSales = todaySales.reduce((sum, sale) => sum + cashCollectedForSale(sale), 0);
-  const totalSales = shift?.totalSales ?? localTotalSales;
-  const cashSales = shift?.cashSales ?? localCashSales;
+  const closingPeriodFrom =
+    closingPeriodFromDate && closingPeriodFromTime
+      ? `${closingPeriodFromDate}T${closingPeriodFromTime}`
+      : '';
+  const closingPeriodTo =
+    closingPeriodToDate && closingPeriodToTime ? `${closingPeriodToDate}T${closingPeriodToTime}` : '';
+  const periodSales = useMemo(() => {
+    if (!closingPeriodFrom || !closingPeriodTo) return todaySales;
+    return sales.filter((sale) => {
+      if (
+        sale.status !== 'completed' ||
+        sale.cashierId !== currentUser?.id ||
+        (shift && sale.shiftId !== shift.id)
+      ) {
+        return false;
+      }
+      const timestamp = posDateTimeKey(sale.timestamp);
+      return timestamp >= closingPeriodFrom && timestamp < closingPeriodTo;
+    });
+  }, [closingPeriodFrom, closingPeriodTo, currentUser?.id, sales, shift, todaySales]);
+  const localPeriodPaymentBreakdown = useMemo(
+    () => salesPaymentBreakdown(periodSales),
+    [periodSales]
+  );
+  const authoritativePeriodMatches = Boolean(
+    process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' &&
+      shift?.closingPeriodFrom === closingPeriodFrom &&
+      shift?.closingPeriodTo === closingPeriodTo
+  );
+  const periodPaymentBreakdown = authoritativePeriodMatches
+    ? shift?.paymentBreakdown ?? {}
+    : localPeriodPaymentBreakdown;
+  const periodTotalSales = periodSales.reduce((sum, sale) => sum + Number(sale.grandTotal || 0), 0);
+  const periodCashSales = Number(periodPaymentBreakdown.cash ?? 0);
+  const localPeriodComplete = periodSales.length === todaySales.length;
+  const totalSales = authoritativePeriodMatches ? shift?.totalSales ?? 0 : periodTotalSales;
+  const cashSales = authoritativePeriodMatches ? shift?.cashSales ?? 0 : periodCashSales;
   const payoutTotalsByMethod = cashPayouts.reduce<Record<PayoutMethod, number>>(
     (totals, payout) => {
       const amount = parseAmount(payout.amount);
@@ -144,7 +230,7 @@ export default function SalesShiftBar() {
   );
   const payoutTotal = Object.values(payoutTotalsByMethod).reduce((sum, amount) => sum + amount, 0);
   const expectedCashBeforePayouts = (shift?.openingCash ?? 0) + cashSales;
-  const paymentBreakdown = shift?.paymentBreakdown ?? {};
+  const paymentBreakdown = periodPaymentBreakdown;
   const netCashSales = Math.max(
     0,
     Number(paymentBreakdown.cash ?? cashSales) - payoutTotalsByMethod.cash
@@ -162,6 +248,51 @@ export default function SalesShiftBar() {
   const countedCash = Number(closingCash);
   const variance = Number.isFinite(countedCash) ? countedCash - expectedCash : 0;
   const balanced = closingCash !== '' && Math.abs(variance) < 0.005;
+  const periodReady = Boolean(
+    closingPeriodFrom &&
+      closingPeriodTo &&
+      !closingPeriodError &&
+      (process.env.NEXT_PUBLIC_STORAGE_DRIVER !== 'postgres' ||
+        (authoritativePeriodMatches && shift?.periodComplete))
+  );
+
+  const initializeClosingPeriod = (source: LocalSalesShift | null) => {
+    const start = posDateTimeParts(source?.openedAt ?? new Date().toISOString());
+    const end = posDateTimeParts(new Date().toISOString());
+    setClosingPeriodFromDate(start.date);
+    setClosingPeriodFromTime(start.time);
+    setClosingPeriodToDate(end.date);
+    setClosingPeriodToTime(end.time);
+    setClosingPeriodError('');
+  };
+
+  useEffect(() => {
+    if (mode !== 'close' || !closingPeriodFrom || !closingPeriodTo) return;
+    let cancelled = false;
+    if (process.env.NEXT_PUBLIC_STORAGE_DRIVER !== 'postgres') return;
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      setClosingPeriodLoading(true);
+      setClosingPeriodError('');
+      void refreshAuthoritativeShift(closingPeriodFrom, closingPeriodTo)
+        .catch((error) => {
+          if (!cancelled) {
+            setClosingPeriodError(
+              error instanceof Error
+                ? error.message
+                : 'Unable to calculate the selected closing period.'
+            );
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setClosingPeriodLoading(false);
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [closingPeriodFrom, closingPeriodTo, mode, refreshAuthoritativeShift]);
 
   const open = async () => {
     const amount = parseAmount(openingCash);
@@ -211,6 +342,7 @@ export default function SalesShiftBar() {
 
   const close = async () => {
     if (!shift || shift.status !== 'open' || !balanced) return;
+    if (!periodReady) return;
     const normalizedPayouts: CashPayout[] = [];
     for (const payout of cashPayouts) {
       const purpose = payout.purpose.trim();
@@ -267,6 +399,8 @@ export default function SalesShiftBar() {
           action: 'close',
           shiftId: shift.id,
           businessDate: shift.businessDate,
+          periodFrom: closingPeriodFrom,
+          periodTo: closingPeriodTo,
           closingCash: countedCash,
           cashPayouts: normalizedPayouts,
         }),
@@ -282,6 +416,11 @@ export default function SalesShiftBar() {
         ...shift,
         closedAt: new Date().toISOString(),
         closingCash: countedCash,
+        closingPeriodFrom,
+        closingPeriodTo,
+        periodComplete: true,
+        periodSalesCount: periodSales.length,
+        shiftSalesCount: periodSales.length,
         expectedCash,
         cashPayouts: normalizedPayouts,
         cashVariance: variance,
@@ -341,8 +480,13 @@ export default function SalesShiftBar() {
             <button
               type="button"
               onClick={async () => {
-                await refreshAuthoritativeShift();
-                setMode('close');
+                try {
+                  const authoritativeShift = await refreshAuthoritativeShift();
+                  initializeClosingPeriod(authoritativeShift ?? shift);
+                  setMode('close');
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : 'Unable to open the closing period.');
+                }
               }}
               className="rounded-lg border border-primary px-3 py-2 text-sm font-semibold text-primary"
             >
@@ -420,7 +564,7 @@ export default function SalesShiftBar() {
         onClose={() => setMode(null)}
         title="Close Sales"
         subtitle="Record shift payouts by payment method, then count the cash remaining in hand."
-        size="md"
+        size="lg"
         footer={
           <>
             <button
@@ -432,7 +576,7 @@ export default function SalesShiftBar() {
             </button>
             <button
               type="button"
-              disabled={!balanced}
+              disabled={!balanced || !periodReady || closingPeriodLoading}
               onClick={close}
               className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -442,6 +586,61 @@ export default function SalesShiftBar() {
         }
       >
         <div className="space-y-4">
+          <section className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Closing period</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Select the exact period to include. The server will verify that every sale in this
+                shift is covered before closing.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="min-w-0 space-y-1">
+                <span className="text-xs font-medium text-muted-foreground">From date</span>
+                <DatePicker
+                  value={closingPeriodFromDate}
+                  onChange={setClosingPeriodFromDate}
+                  placeholder="Select start date"
+                />
+              </label>
+              <label className="min-w-0 space-y-1">
+                <span className="text-xs font-medium text-muted-foreground">From time</span>
+                <TimePicker
+                  value={closingPeriodFromTime}
+                  onChange={setClosingPeriodFromTime}
+                  placeholder="Select start time"
+                />
+              </label>
+              <label className="min-w-0 space-y-1">
+                <span className="text-xs font-medium text-muted-foreground">To date</span>
+                <DatePicker
+                  value={closingPeriodToDate}
+                  onChange={setClosingPeriodToDate}
+                  placeholder="Select end date"
+                />
+              </label>
+              <label className="min-w-0 space-y-1">
+                <span className="text-xs font-medium text-muted-foreground">To time</span>
+                <TimePicker
+                  value={closingPeriodToTime}
+                  onChange={setClosingPeriodToTime}
+                  placeholder="Select end time"
+                />
+              </label>
+            </div>
+            {closingPeriodLoading && (
+              <p className="text-xs text-muted-foreground">Checking this period against the server…</p>
+            )}
+            {closingPeriodError && <p className="text-xs font-medium text-danger">{closingPeriodError}</p>}
+            {((process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' && shift?.periodComplete === false) ||
+              (process.env.NEXT_PUBLIC_STORAGE_DRIVER !== 'postgres' && !localPeriodComplete)) &&
+              !closingPeriodError && (
+              <p className="text-xs font-medium text-danger">
+                This period does not include every sale in the current shift. Extend the period
+                before closing.
+              </p>
+            )}
+          </section>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg bg-muted/40 p-3">
               <p className="text-xs text-muted-foreground">Total sales</p>

@@ -24,6 +24,68 @@ function validId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9:_-]{8,160}$/.test(value);
 }
 
+type PeriodBoundary = { value: string; dateOnly: boolean };
+
+function validPeriodBoundary(value: unknown, label: string): PeriodBoundary | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') {
+    throw new HttpError(400, `${label} is invalid`, 'VALIDATION_ERROR');
+  }
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) {
+    throw new HttpError(400, `${label} must use YYYY-MM-DDTHH:mm`, 'VALIDATION_ERROR');
+  }
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText ?? 0);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    throw new HttpError(400, `${label} is invalid`, 'VALIDATION_ERROR');
+  }
+  return {
+    value: `${yearText}-${monthText}-${dayText}T${hourText}:${minuteText}:${secondText ?? '00'}`,
+    dateOnly: false,
+  };
+}
+
+function assertPeriod(from: PeriodBoundary | null, to: PeriodBoundary | null): void {
+  if (!from || !to) {
+    throw new HttpError(400, 'Closing period start and end are required', 'VALIDATION_ERROR');
+  }
+  if (from.value >= to.value) {
+    throw new HttpError(400, 'Closing period start must be before its end', 'VALIDATION_ERROR');
+  }
+}
+
+function appendPeriodFilter(
+  values: unknown[],
+  where: string[],
+  from: PeriodBoundary,
+  to: PeriodBoundary,
+  column = 'timestamp'
+): void {
+  const timezone = process.env.POS_TIMEZONE ?? 'Africa/Lagos';
+  values.push(from.value);
+  const fromParam = `$${values.length}`;
+  values.push(timezone);
+  where.push(`${column} >= (${fromParam}::timestamp AT TIME ZONE $${values.length})`);
+  values.push(to.value);
+  const toParam = `$${values.length}`;
+  values.push(timezone);
+  where.push(`${column} < (${toParam}::timestamp AT TIME ZONE $${values.length})`);
+}
+
 function collectedFromSale(data: Record<string, unknown>): number {
   if (data.amountPaid !== undefined && data.amountPaid !== null) {
     const amountPaid = Number(data.amountPaid);
@@ -99,13 +161,46 @@ export async function GET(request: NextRequest) {
     );
     const shift = result.rows[0]?.data as Record<string, unknown> | undefined;
     if (!shift) return NextResponse.json(null);
+    const periodFrom = validPeriodBoundary(
+      request.nextUrl.searchParams.get('from'),
+      'Period start'
+    );
+    const periodTo = validPeriodBoundary(request.nextUrl.searchParams.get('to'), 'Period end');
+    if (periodFrom || periodTo) assertPeriod(periodFrom, periodTo);
+    if (periodTo) {
+      const future = await getPosPool().query(
+        `SELECT ($1::timestamp AT TIME ZONE $2) > now() AS is_future`,
+        [periodTo.value, process.env.POS_TIMEZONE ?? 'Africa/Lagos']
+      );
+      if (future.rows[0]?.is_future) {
+        throw new HttpError(400, 'The closing period cannot end in the future', 'VALIDATION_ERROR');
+      }
+    }
+    const values: unknown[] = [auth.tenantId, auth.user.id, shift.id];
+    const salesWhere = [
+      'tenant_id = $1',
+      "status = 'completed'",
+      "data->>'cashierId' = $2",
+      "data->>'shiftId' = $3",
+    ];
+    if (periodFrom && periodTo) appendPeriodFilter(values, salesWhere, periodFrom, periodTo);
     const sales = await getPosPool().query(
       `SELECT data FROM pos_tenant_sales
-       WHERE tenant_id = $1 AND status = 'completed'
-         AND data->>'cashierId' = $2
-         AND data->>'shiftId' = $3`,
-      [auth.tenantId, auth.user.id, shift.id]
+       WHERE ${salesWhere.join(' AND ')}`,
+      values
     );
+    const shiftSalesCount = periodFrom
+      ? Number(
+          (
+            await getPosPool().query(
+              `SELECT count(*)::bigint AS count FROM pos_tenant_sales
+               WHERE tenant_id = $1 AND status = 'completed'
+                 AND data->>'cashierId' = $2 AND data->>'shiftId' = $3`,
+              [auth.tenantId, auth.user.id, shift.id]
+            )
+          ).rows[0]?.count ?? 0
+        )
+      : sales.rows.length;
     const paymentBreakdown: Record<string, number> = {
       cash: 0,
       card: 0,
@@ -144,6 +239,11 @@ export async function GET(request: NextRequest) {
     }
     return NextResponse.json({
       ...shift,
+      closingPeriodFrom: periodFrom?.value,
+      closingPeriodTo: periodTo?.value,
+      periodComplete: sales.rows.length === shiftSalesCount,
+      periodSalesCount: sales.rows.length,
+      shiftSalesCount,
       totalSales,
       cashSales,
       paymentBreakdown,
@@ -252,13 +352,51 @@ export async function POST(request: NextRequest) {
       if (!Number.isFinite(closingCash) || closingCash < 0) {
         throw new HttpError(400, 'Closing cash is invalid', 'VALIDATION_ERROR');
       }
+      const periodFrom = validPeriodBoundary(body.periodFrom, 'Closing period start');
+      const periodTo = validPeriodBoundary(body.periodTo, 'Closing period end');
+      assertPeriod(periodFrom, periodTo);
+      if (!periodFrom || !periodTo) {
+        throw new HttpError(400, 'Closing period is required', 'VALIDATION_ERROR');
+      }
+      const future = await client.query(
+        `SELECT ($1::timestamp AT TIME ZONE $2) > now() AS is_future`,
+        [periodTo.value, process.env.POS_TIMEZONE ?? 'Africa/Lagos']
+      );
+      if (future.rows[0]?.is_future) {
+        throw new HttpError(400, 'The closing period cannot end in the future', 'VALIDATION_ERROR');
+      }
       const sales = await client.query(
         `SELECT data FROM pos_tenant_sales
          WHERE tenant_id = $1 AND status = 'completed'
-           AND data->>'cashierId' = $2
-           AND data->>'shiftId' = $3`,
-        [auth.tenantId, auth.user.id, shiftId]
+           AND data->>'cashierId' = $2 AND data->>'shiftId' = $3
+           AND timestamp >= ($4::timestamp AT TIME ZONE $5)
+           AND timestamp < ($6::timestamp AT TIME ZONE $5)`,
+        [
+          auth.tenantId,
+          auth.user.id,
+          shiftId,
+          periodFrom.value,
+          process.env.POS_TIMEZONE ?? 'Africa/Lagos',
+          periodTo.value,
+        ]
       );
+      const shiftSalesCount = Number(
+        (
+          await client.query(
+            `SELECT count(*)::bigint AS count FROM pos_tenant_sales
+             WHERE tenant_id = $1 AND status = 'completed'
+               AND data->>'cashierId' = $2 AND data->>'shiftId' = $3`,
+            [auth.tenantId, auth.user.id, shiftId]
+          )
+        ).rows[0]?.count ?? 0
+      );
+      if (sales.rows.length !== shiftSalesCount) {
+        throw new HttpError(
+          409,
+          'The selected closing period does not include every sale in this shift.',
+          'INCOMPLETE_CLOSING_PERIOD'
+        );
+      }
       const totalSales = sales.rows.reduce(
         (sum, row) => sum + Number(row.data?.grandTotal ?? 0),
         0
@@ -319,6 +457,11 @@ export async function POST(request: NextRequest) {
       }
       const closed = {
         ...shift,
+        closingPeriodFrom: periodFrom.value,
+        closingPeriodTo: periodTo.value,
+        periodComplete: true,
+        periodSalesCount: sales.rows.length,
+        shiftSalesCount,
         totalSales,
         cashSales,
         paymentBreakdown,
