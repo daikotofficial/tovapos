@@ -47,11 +47,14 @@ export default function NiceSelect<T extends string = string>({
           }
           setOpen((current) => !current);
         }}
-        className="flex h-10 w-full min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 text-left text-sm font-semibold text-foreground shadow-sm transition-colors hover:border-primary/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
+        className="flex min-h-10 w-full min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-background px-3 py-2 text-left text-sm font-semibold text-foreground shadow-sm transition-colors hover:border-primary/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className={selected ? 'truncate' : 'truncate text-muted-foreground'}>
+        <span
+          title={selected?.label ?? placeholder}
+          className={selected ? 'min-w-0 break-words' : 'min-w-0 break-words text-muted-foreground'}
+        >
           {selected?.label ?? placeholder}
         </span>
         <ChevronDown
@@ -83,7 +86,9 @@ export default function NiceSelect<T extends string = string>({
                     : 'text-foreground hover:bg-muted'
                 }`}
               >
-                <span className="truncate">{option.label}</span>
+                <span title={option.label} className="min-w-0 break-words">
+                  {option.label}
+                </span>
                 {active && <Check size={15} className="shrink-0 text-primary" />}
               </button>
             );

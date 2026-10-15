@@ -16,6 +16,26 @@ import { toast } from 'sonner';
 
 const paymentMethods: ExpensePaymentMethod[] = ['cash', 'card', 'bank-transfer', 'mobile'];
 
+function cleanAmountInput(value: string): string {
+  return value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
+}
+
+function parseAmountInput(value: string): number {
+  const amount = Number(value.replace(/,/g, ''));
+  return Number.isFinite(amount) && amount >= 0 ? amount : 0;
+}
+
+function formatAmountInput(value: string): string {
+  const raw = value.replace(/,/g, '').trim();
+  if (!raw || raw === '.') return raw;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount)) return value;
+  return new Intl.NumberFormat(undefined, {
+    useGrouping: true,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -56,6 +76,7 @@ export default function ExpensesPage() {
   const [form, setForm] = useState<RecordExpenseInput>(
     emptyExpense(currentUser?.name ?? 'Unknown user')
   );
+  const [amountInput, setAmountInput] = useState('');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<ExpenseCategory | 'all'>('all');
   const [saving, setSaving] = useState(false);
@@ -104,6 +125,7 @@ export default function ExpensesPage() {
 
   const openCreate = () => {
     setForm(emptyExpense(currentUser?.name ?? 'Unknown user', categories[0] ?? 'Miscellaneous'));
+    setAmountInput('');
     setShowAddCategory(false);
     setNewCategory('');
     setOpen(true);
@@ -316,6 +338,7 @@ export default function ExpensesPage() {
           onClose={() => setOpen(false)}
           title="Record Expense"
           subtitle="Captured expenses reduce net profit on the dashboard and reports."
+          size="lg"
           footer={
             <>
               <button
@@ -345,7 +368,7 @@ export default function ExpensesPage() {
                 placeholder="e.g. Generator fuel, rent, staff lunch"
               />
             </label>
-            <label className="space-y-1">
+            <label className="space-y-1 md:col-span-2">
               <span className="text-xs text-muted-foreground">Category</span>
               <div className="flex items-start gap-2">
                 <NiceSelect
@@ -399,11 +422,18 @@ export default function ExpensesPage() {
             <label className="space-y-1">
               <span className="text-xs text-muted-foreground">Amount</span>
               <input
-                type="number"
-                min={0}
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
+                type="text"
+                inputMode="decimal"
+                value={amountInput}
+                onChange={(event) => {
+                  const value = cleanAmountInput(event.target.value);
+                  setAmountInput(value);
+                  setForm({ ...form, amount: parseAmountInput(value) });
+                }}
+                onBlur={() => setAmountInput((current) => formatAmountInput(current))}
+                onWheel={(event) => event.currentTarget.blur()}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                placeholder="0.00"
               />
             </label>
             <label className="space-y-1">
