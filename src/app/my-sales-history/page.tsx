@@ -54,19 +54,23 @@ export default function MySalesHistoryPage() {
   const [sales, setSales] = useState<SaleTransaction[]>([]);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [fromTime, setFromTime] = useState('');
+  const [toTime, setToTime] = useState('');
   const [draftFrom, setDraftFrom] = useState('');
   const [draftTo, setDraftTo] = useState('');
+  const [draftFromTime, setDraftFromTime] = useState('');
+  const [draftToTime, setDraftToTime] = useState('');
   const [sort, setSort] = useState<SortMode>('newest');
   const [selectedSale, setSelectedSale] = useState<SaleTransaction | null>(null);
   const [summary, setSummary] = useState<SalesSummary>(emptySummary);
   const [loading, setLoading] = useState(false);
 
-  const loadSales = useCallback(async (start: string, end: string) => {
+  const loadSales = useCallback(async (start: string, end: string, startTime: string, endTime: string) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (start) params.set('from', start);
-      if (end) params.set('to', end);
+      if (start) params.set('from', `${start}${startTime ? `T${startTime}` : ''}`);
+      if (end) params.set('to', `${end}${endTime ? `T${endTime}` : ''}`);
       const response = await fetch(`/api/my-sales-history?${params}`, { cache: 'no-store' });
       const payload = (await response.json()) as {
         rows?: SaleTransaction[];
@@ -84,8 +88,8 @@ export default function MySalesHistoryPage() {
   }, []);
 
   useEffect(() => {
-    void loadSales(from, to);
-  }, [from, loadSales, to]);
+    void loadSales(from, to, fromTime, toTime);
+  }, [from, fromTime, loadSales, to, toTime]);
 
   const visibleSales = useMemo(() => [...sales].sort((a, b) => {
     if (sort === 'highest') return b.grandTotal - a.grandTotal;
@@ -94,13 +98,23 @@ export default function MySalesHistoryPage() {
     return sort === 'oldest' ? difference : -difference;
   }), [sales, sort]);
 
-  const draftRangeInvalid = Boolean(draftFrom && draftTo && draftFrom > draftTo);
-  const draftHasChanges = draftFrom !== from || draftTo !== to;
+  const draftStartBoundary = draftFrom ? `${draftFrom}T${draftFromTime || '00:00'}` : '';
+  const draftEndBoundary = draftTo ? `${draftTo}T${draftToTime || '23:59:59'}` : '';
+  const draftTimeWithoutDate = Boolean((draftFromTime && !draftFrom) || (draftToTime && !draftTo));
+  const draftRangeInvalid =
+    draftTimeWithoutDate ||
+    Boolean(draftStartBoundary && draftEndBoundary && draftStartBoundary >= draftEndBoundary);
+  const draftHasChanges =
+    draftFrom !== from || draftTo !== to || draftFromTime !== fromTime || draftToTime !== toTime;
   const clearPeriod = () => {
     setDraftFrom('');
     setDraftTo('');
+    setDraftFromTime('');
+    setDraftToTime('');
     setFrom('');
     setTo('');
+    setFromTime('');
+    setToTime('');
   };
   const applyPeriod = () => {
     if (draftRangeInvalid) {
@@ -109,6 +123,8 @@ export default function MySalesHistoryPage() {
     }
     setFrom(draftFrom);
     setTo(draftTo);
+    setFromTime(draftFromTime);
+    setToTime(draftToTime);
   };
   const cards = [
     { label: 'Total sales', value: summary.total, className: 'text-foreground' },
@@ -121,16 +137,18 @@ export default function MySalesHistoryPage() {
   return <AppLayout title="My Sales History" subtitle="Review and reprint the sales recorded under your account">
     <PermissionGate permission="checkout"><div className="space-y-4 p-3 sm:p-6">
       <section className="rounded-xl border border-border bg-card p-4 shadow-card sm:p-5">
-        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center"><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">POS / Sales</p><h2 className="mt-1 text-lg font-bold">My Sales History</h2><p className="mt-1 text-sm text-muted-foreground">Only transactions recorded by your signed-in account are shown.</p></div><button type="button" onClick={() => void loadSales(from, to)} disabled={loading} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-60"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Refresh</button></div>
-        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_15rem_auto_auto] lg:items-end">
+        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center"><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">POS / Sales</p><h2 className="mt-1 text-lg font-bold">My Sales History</h2><p className="mt-1 text-sm text-muted-foreground">Only transactions recorded by your signed-in account are shown.</p></div><button type="button" onClick={() => void loadSales(from, to, fromTime, toTime)} disabled={loading} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-60"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Refresh</button></div>
+        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_9rem_15rem_auto_auto] lg:items-end">
           <label><span className="mb-1.5 block text-xs font-semibold text-muted-foreground">From date</span><DatePicker value={draftFrom} onChange={setDraftFrom} placeholder="From date" /></label>
+          <label><span className="mb-1.5 block text-xs font-semibold text-muted-foreground">From time</span><input type="time" step="60" value={draftFromTime} onChange={(event) => setDraftFromTime(event.target.value)} className={inputClass} /></label>
           <label><span className="mb-1.5 block text-xs font-semibold text-muted-foreground">To date</span><DatePicker value={draftTo} onChange={setDraftTo} placeholder="To date" /></label>
+          <label><span className="mb-1.5 block text-xs font-semibold text-muted-foreground">To time</span><input type="time" step="60" value={draftToTime} onChange={(event) => setDraftToTime(event.target.value)} className={inputClass} /></label>
           <label><span className="mb-1.5 block text-xs font-semibold text-muted-foreground">Sort history</span><NiceSelect value={sort} onChange={setSort} options={[{ value: 'newest', label: 'Newest first' }, { value: 'oldest', label: 'Oldest first' }, { value: 'highest', label: 'Highest amount' }, { value: 'lowest', label: 'Lowest amount' }]} /></label>
           <button type="button" onClick={applyPeriod} disabled={!draftHasChanges || draftRangeInvalid || loading} className="h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50">Apply period</button>
-          <button type="button" onClick={clearPeriod} disabled={(!from && !to && !draftFrom && !draftTo) || loading} className="h-10 rounded-lg border border-border px-4 text-sm font-semibold text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">Clear</button>
+          <button type="button" onClick={clearPeriod} disabled={(!from && !to && !fromTime && !toTime && !draftFrom && !draftTo && !draftFromTime && !draftToTime) || loading} className="h-10 rounded-lg border border-border px-4 text-sm font-semibold text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">Clear</button>
         </div>
-        {draftRangeInvalid && <p className="mt-2 text-xs font-medium text-danger">The start date cannot be after the end date.</p>}
-        <p className="mt-3 text-xs text-muted-foreground">Choose a period, then select Apply period to refresh the totals and transaction list.</p>
+        {draftRangeInvalid && <p className="mt-2 text-xs font-medium text-danger">{draftTimeWithoutDate ? 'Choose a date before setting its time.' : 'The start of the period must be before the end. Date-only values include the full selected day.'}</p>}
+        <p className="mt-3 text-xs text-muted-foreground">Choose dates and optional times, then select Apply period. The transaction list and summary cards use the exact same period.</p>
       </section>
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">{cards.map((card) => <div key={card.label} className="rounded-xl border border-border bg-card p-4 shadow-card"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">{card.label}</p><p className={`mt-1 text-2xl font-bold tabular-nums ${card.className}`}>{formatMoney(card.value, settings.currency)}</p></div>)}</section>
       <section className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">Cash + card + transfer + other = <span className="font-bold text-foreground">{formatMoney(summary.cash + summary.card + summary.transfer + summary.other, settings.currency)}</span> · Total sales = <span className="font-bold text-foreground">{formatMoney(summary.total, settings.currency)}</span></section>

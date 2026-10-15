@@ -10,12 +10,39 @@ import {
   requireAuth,
 } from '@/lib/server/security';
 
-function validDate(value: string | null, label: string): string | null {
+type DateBoundary = { value: string; dateOnly: boolean };
+
+function validDateBoundary(value: string | null, label: string): DateBoundary | null {
   if (!value) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new HttpError(400, `${label} must be a valid date`, 'INVALID_DATE');
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) {
+    throw new HttpError(400, `${label} must be a valid date and time`, 'INVALID_DATE');
   }
-  return value;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText ?? 0);
+  const minute = Number(minuteText ?? 0);
+  const second = Number(secondText ?? 0);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59 ||
+    second < 0 ||
+    second > 59
+  ) {
+    throw new HttpError(400, `${label} must be a valid date and time`, 'INVALID_DATE');
+  }
+  return {
+    value: `${yearText}-${monthText}-${dayText}${hourText ? `T${hourText}:${minuteText}:${secondText ?? '00'}` : ''}`,
+    dateOnly: !hourText,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -26,24 +53,45 @@ export async function GET(request: NextRequest) {
     await assertTenantPlanPermission(auth.tenantId, 'checkout');
 
     const params = request.nextUrl.searchParams;
-    const from = validDate(params.get('from'), 'Start date');
-    const to = validDate(params.get('to'), 'End date');
-    if (from && to && from > to) {
+    const from = validDateBoundary(params.get('from'), 'Start date');
+    const to = validDateBoundary(params.get('to'), 'End date');
+    const comparableBoundary = (boundary: DateBoundary, end: boolean) => {
+      if (!boundary.dateOnly || !end) return boundary.value;
+      const date = new Date(`${boundary.value}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + 1);
+      return `${date.toISOString().slice(0, 10)}T00:00:00`;
+    };
+    if (from && to && comparableBoundary(from, false) >= comparableBoundary(to, true)) {
       throw new HttpError(400, 'Start date cannot be after end date', 'INVALID_DATE_RANGE');
     }
 
     const values: unknown[] = [auth.tenantId, auth.user.id, auth.user.name];
+    const reportTimezone = process.env.POS_TIMEZONE ?? 'Africa/Lagos';
     const where = [
       'tenant_id = $1',
       "(data->>'cashierId' = $2 OR (data->>'cashierId' IS NULL AND data->>'cashier' = $3))",
     ];
     if (from) {
-      values.push(from);
-      where.push(`timestamp >= $${values.length}::date`);
+      values.push(from.value);
+      const fromParam = `$${values.length}`;
+      values.push(reportTimezone);
+      if (from.dateOnly) {
+        where.push(`timestamp >= (${fromParam}::date::timestamp AT TIME ZONE $${values.length})`);
+      } else {
+        where.push(`timestamp >= (${fromParam}::timestamp AT TIME ZONE $${values.length})`);
+      }
     }
     if (to) {
-      values.push(to);
-      where.push(`timestamp < ($${values.length}::date + interval '1 day')`);
+      values.push(to.value);
+      const toParam = `$${values.length}`;
+      values.push(reportTimezone);
+      if (to.dateOnly) {
+        where.push(
+          `timestamp < ((${toParam}::date + 1)::timestamp AT TIME ZONE $${values.length})`
+        );
+      } else {
+        where.push(`timestamp < (${toParam}::timestamp AT TIME ZONE $${values.length})`);
+      }
     }
     const summaryResult = await getPosPool().query(
       `SELECT
@@ -73,7 +121,7 @@ export async function GET(request: NextRequest) {
          END), 0)::numeric AS other
        FROM pos_tenant_sales
        WHERE ${where.join(' AND ')}`,
-      values,
+      values
     );
 
     values.push(500);
@@ -83,7 +131,7 @@ export async function GET(request: NextRequest) {
        WHERE ${where.join(' AND ')}
        ORDER BY timestamp DESC, id DESC
        LIMIT $${values.length}`,
-      values,
+      values
     );
 
     const summary = summaryResult.rows[0] ?? {};
