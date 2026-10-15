@@ -12,6 +12,7 @@ import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { ExpenseCategory, ExpensePaymentMethod, RecordExpenseInput } from '@/lib/pos/types';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import ListPagination from '@/components/ui/ListPagination';
+import { toast } from 'sonner';
 
 const paymentMethods: ExpensePaymentMethod[] = ['cash', 'card', 'bank-transfer', 'mobile'];
 
@@ -36,9 +37,17 @@ function emptyExpense(
 }
 
 export default function ExpensesPage() {
-  const { expenses, settings, recordExpense, currentUser, hasPermission, pendingSyncCount } =
-    usePosStore();
+  const {
+    expenses,
+    settings,
+    recordExpense,
+    updateSettings,
+    currentUser,
+    hasPermission,
+    pendingSyncCount,
+  } = usePosStore();
   const canRecordExpenses = hasPermission('expenses');
+  const canManageExpenseHeads = hasPermission('expense-heads');
   const categories: ExpenseCategory[] = useMemo(
     () => (settings.expenseCategories?.length ? settings.expenseCategories : ['Miscellaneous']),
     [settings.expenseCategories]
@@ -50,6 +59,9 @@ export default function ExpensesPage() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<ExpenseCategory | 'all'>('all');
   const [saving, setSaving] = useState(false);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
+  const [savingCategory, setSavingCategory] = useState(false);
   const [rowsPerPage] = useRowsPerPage();
   const [page, setPage] = useState(1);
 
@@ -66,8 +78,11 @@ export default function ExpensesPage() {
     [activeExpenses, categoryFilter, search]
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
-  const visibleExpenses = filtered.slice((page - 1) * rowsPerPage, page * rowsPerPage);
-  React.useEffect(() => setPage(1), [categoryFilter, rowsPerPage, search, filtered.length]);
+  const currentPage = Math.min(page, totalPages);
+  const visibleExpenses = filtered.slice(
+    (currentPage - 1) * rowsPerPage,
+    currentPage * rowsPerPage
+  );
 
   const totals = useMemo(() => {
     const total = activeExpenses.reduce((sum, expense) => sum + expense.amount, 0);
@@ -89,7 +104,40 @@ export default function ExpensesPage() {
 
   const openCreate = () => {
     setForm(emptyExpense(currentUser?.name ?? 'Unknown user', categories[0] ?? 'Miscellaneous'));
+    setShowAddCategory(false);
+    setNewCategory('');
     setOpen(true);
+  };
+
+  const addCategory = async () => {
+    const category = newCategory.trim().replace(/\s+/g, ' ');
+    if (!category) return;
+    const duplicate = categories.some((item) => item.toLowerCase() === category.toLowerCase());
+    if (duplicate) {
+      setForm((current) => ({
+        ...current,
+        category:
+          categories.find((item) => item.toLowerCase() === category.toLowerCase()) ?? category,
+      }));
+      setShowAddCategory(false);
+      setNewCategory('');
+      return;
+    }
+    setSavingCategory(true);
+    try {
+      const nextCategories = [...categories, category].sort((left, right) =>
+        left.localeCompare(right)
+      );
+      await updateSettings({ ...settings, expenseCategories: nextCategories });
+      setForm((current) => ({ ...current, category }));
+      setNewCategory('');
+      setShowAddCategory(false);
+      toast.success('Expense head added and selected.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to add expense head.');
+    } finally {
+      setSavingCategory(false);
+    }
   };
 
   const save = async () => {
@@ -299,11 +347,54 @@ export default function ExpensesPage() {
             </label>
             <label className="space-y-1">
               <span className="text-xs text-muted-foreground">Category</span>
-              <NiceSelect
-                value={form.category}
-                onChange={(category) => setForm({ ...form, category: category as ExpenseCategory })}
-                options={categories.map((category) => ({ value: category, label: category }))}
-              />
+              <div className="flex items-start gap-2">
+                <NiceSelect
+                  value={form.category}
+                  onChange={(category) =>
+                    setForm({ ...form, category: category as ExpenseCategory })
+                  }
+                  options={categories.map((category) => ({ value: category, label: category }))}
+                  className="min-w-0 flex-1"
+                />
+                {canManageExpenseHeads && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCategory((current) => !current)}
+                    className="inline-flex h-10 shrink-0 items-center gap-1 rounded-lg border border-primary/30 px-2.5 text-xs font-semibold text-primary hover:bg-primary/10"
+                  >
+                    <Plus size={13} />
+                    Add new
+                  </button>
+                )}
+              </div>
+              {showAddCategory && canManageExpenseHeads && (
+                <div className="mt-2 rounded-lg border border-primary/20 bg-primary/5 p-2">
+                  <div className="flex gap-2">
+                    <input
+                      autoFocus
+                      value={newCategory}
+                      onChange={(event) => setNewCategory(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void addCategory();
+                        }
+                      }}
+                      maxLength={80}
+                      placeholder="e.g. Security"
+                      className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void addCategory()}
+                      disabled={savingCategory || !newCategory.trim()}
+                      className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {savingCategory ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </label>
             <label className="space-y-1">
               <span className="text-xs text-muted-foreground">Amount</span>

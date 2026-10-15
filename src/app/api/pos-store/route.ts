@@ -1556,12 +1556,19 @@ export async function PUT(request: NextRequest) {
       records.length === 1 &&
       records[0]?.id === auth.user.id &&
       !records[0]?.newPassword;
+    const expenseHeadsOnly =
+      storeName === 'settings' &&
+      !auth.user.permissions.includes('settings') &&
+      auth.user.permissions.includes('expense-heads');
     // Every authenticated user may update their own profile name. This is
     // deliberately limited to a single self-profile request; role,
     // permissions, status, and password changes remain protected below.
-    if (permission && !selfProfileRequest) {
+    if (permission && !selfProfileRequest && !expenseHeadsOnly) {
       assertWritePermission(auth, permission);
       await assertTenantPlanPermission(auth.tenantId, permission);
+    }
+    if (expenseHeadsOnly) {
+      await assertTenantPlanPermission(auth.tenantId, 'expense-heads');
     }
 
     if (storeName === 'inputVat') {
@@ -1897,6 +1904,39 @@ export async function PUT(request: NextRequest) {
           [auth.tenantId]
         );
         const currentSettings = existing.rows[0]?.data;
+        if (expenseHeadsOnly) {
+          const allowedKeys = new Set(['id', 'expenseCategories', 'updatedAt']);
+          for (const record of records) {
+            const changedOutsideExpenseHeads = Object.keys(record).some((key) => {
+              if (allowedKeys.has(key)) return false;
+              return JSON.stringify(record[key]) !== JSON.stringify(currentSettings?.[key]);
+            });
+            const categories = record.expenseCategories;
+            const normalizedCategories = Array.isArray(categories)
+              ? categories.map((category) =>
+                  typeof category === 'string' ? category.trim().toLowerCase() : ''
+                )
+              : [];
+            if (
+              changedOutsideExpenseHeads ||
+              !Array.isArray(categories) ||
+              categories.length > 200 ||
+              categories.some(
+                (category) =>
+                  typeof category !== 'string' ||
+                  category.trim().length < 1 ||
+                  category.trim().length > 80
+              ) ||
+              new Set(normalizedCategories).size !== normalizedCategories.length
+            ) {
+              throw new HttpError(
+                403,
+                'This account can only manage valid expense heads.',
+                'EXPENSE_HEAD_PERMISSION_REQUIRED'
+              );
+            }
+          }
+        }
         records = records.map((record) => ({
           ...record,
           subscriptionPlanId:

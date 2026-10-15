@@ -1532,8 +1532,23 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
 
   const updateSettings = useCallback(
     async (nextSettings: BusinessSettings) => {
-      if (!hasPermission('settings')) {
+      const canManageSettings = hasPermission('settings');
+      const canManageExpenseHeads = hasPermission('expense-heads');
+      if (!canManageSettings && !canManageExpenseHeads) {
         throw new Error('Your role is not allowed to change business settings.');
+      }
+      if (!canManageSettings) {
+        const allowedKeys = new Set(['id', 'expenseCategories', 'updatedAt']);
+        const changedOutsideExpenseHeads = Object.keys(nextSettings).some((key) => {
+          if (allowedKeys.has(key)) return false;
+          return (
+            JSON.stringify(nextSettings[key as keyof BusinessSettings]) !==
+            JSON.stringify(settings[key as keyof BusinessSettings])
+          );
+        });
+        if (changedOutsideExpenseHeads) {
+          throw new Error('Your role can only manage expense heads.');
+        }
       }
       const saved = {
         ...nextSettings,
@@ -1602,7 +1617,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       setSyncQueue((prev) => [queueItem, ...prev]);
       return saved;
     },
-    [hasPermission, isOnline]
+    [hasPermission, isOnline, settings]
   );
 
   const completeSale = useCallback(
