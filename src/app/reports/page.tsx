@@ -37,6 +37,7 @@ import {
 } from '@/lib/pos/local-store';
 import { defaultSettings } from '@/lib/pos/seeds';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
+import { isExpired, isExpiringSoon } from '@/lib/pos/stock';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import RowsPerPageSelect from '@/components/ui/RowsPerPageSelect';
 import type {
@@ -1702,7 +1703,11 @@ function ReportsContent() {
         filename: `${activeView}-products-report`,
         headers: ['Product', 'SKU', 'Batch', 'Expiry', 'Qty'],
         rows: displayInventoryRows
-          .filter((item) => item.stockStatus === wantedStatus)
+          .filter((item) =>
+            wantedStatus === 'expiring-soon'
+              ? isExpiringSoon(item.expiryDate, Math.max(0, Number(settings.expiryAlertDays) || 30))
+              : isExpired(item.expiryDate)
+          )
           .map((item) => [
             item.name,
             item.sku,
@@ -2891,7 +2896,9 @@ function ReportsContent() {
                 headers={['Product', 'SKU', 'Batch', 'Expiry', 'Qty']}
                 empty="No expiring products."
                 rows={displayInventoryRows
-                  .filter((item) => item.stockStatus === 'expiring-soon')
+                  .filter((item) =>
+                    isExpiringSoon(item.expiryDate, Math.max(0, Number(settings.expiryAlertDays) || 30))
+                  )
                   .map((item) => [
                     item.name,
                     item.sku,
@@ -2909,7 +2916,7 @@ function ReportsContent() {
                 headers={['Product', 'SKU', 'Batch', 'Expiry', 'Qty']}
                 empty="No expired products."
                 rows={displayInventoryRows
-                  .filter((item) => item.stockStatus === 'expired')
+                  .filter((item) => isExpired(item.expiryDate))
                   .map((item) => [
                     item.name,
                     item.sku,

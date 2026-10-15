@@ -12,6 +12,19 @@ export function getDaysUntilExpiry(expiryDate: string, todayIso = getTodayIso())
   return Math.floor((expiry.getTime() - today.getTime()) / DAY_IN_MS);
 }
 
+export function isExpired(expiryDate: string, todayIso = getTodayIso()): boolean {
+  return getDaysUntilExpiry(expiryDate, todayIso) < 0;
+}
+
+export function isExpiringSoon(
+  expiryDate: string,
+  expiryAlertDays = 30,
+  todayIso = getTodayIso()
+): boolean {
+  const daysUntilExpiry = getDaysUntilExpiry(expiryDate, todayIso);
+  return daysUntilExpiry >= 0 && daysUntilExpiry <= Math.max(0, expiryAlertDays);
+}
+
 export function computeStockStatus(
   qty: number,
   reorderLevel: number,
@@ -93,7 +106,7 @@ export function roundBulkUnitCost(value: number): number {
   return Math.ceil(value / step) * step;
 }
 
-export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
+export function normalizeInventoryItem(item: InventoryItem, expiryAlertDays = 30): InventoryItem {
   const currentQty = Number(item.currentQty) || 0;
   const reorderLevel = Number(item.reorderLevel) || 1;
   const unitCost = Number(item.unitCost) || 0;
@@ -131,7 +144,7 @@ export function normalizeInventoryItem(item: InventoryItem): InventoryItem {
     unitOfMeasurement: item.unitOfMeasurement ?? 'unit',
     productStatus: item.productStatus ?? 'active',
     createdAt: item.createdAt ?? item.updatedAt ?? new Date().toISOString(),
-    stockStatus: computeStockStatus(currentQty, reorderLevel, item.expiryDate),
+    stockStatus: computeStockStatus(currentQty, reorderLevel, item.expiryDate, expiryAlertDays),
     updatedAt: item.updatedAt ?? new Date().toISOString(),
   };
 }

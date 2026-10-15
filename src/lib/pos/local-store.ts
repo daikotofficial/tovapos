@@ -13,7 +13,7 @@ import {
   HospitalityReservation,
   HospitalityGuest,
 } from './types';
-import { normalizeInventoryItem } from './stock';
+import { isExpiringSoon, normalizeInventoryItem } from './stock';
 import { defaultSettings } from './seeds';
 import { reportDateKey } from './report-date';
 
@@ -556,7 +556,9 @@ export async function loadInventoryPage(
       );
       return {
         ...result,
-        items: result.items.map(normalizeInventoryItem),
+        items: result.items.map((item) =>
+          normalizeInventoryItem(item, input.expiryAlertDays ?? 30)
+        ),
       };
     } catch (error) {
       if (input.signal?.aborted) throw error;
@@ -564,8 +566,9 @@ export async function loadInventoryPage(
     }
   }
 
+  const expiryAlertDays = Math.max(0, Number(input.expiryAlertDays) || 30);
   const allItems = (await getAllFromBrowser<InventoryItem>('inventory'))
-    .map(normalizeInventoryItem)
+    .map((item) => normalizeInventoryItem(item, expiryAlertDays))
     .filter((item) => item.productStatus !== 'inactive');
   const q = input.q?.trim().toLowerCase();
   const filtered = allItems
@@ -606,8 +609,8 @@ export async function loadInventoryMetrics(
     });
   }
 
-  const allItems = (await getAllFromBrowser<InventoryItem>('inventory')).map(
-    normalizeInventoryItem
+  const allItems = (await getAllFromBrowser<InventoryItem>('inventory')).map((item) =>
+    normalizeInventoryItem(item, expiryAlertDays)
   );
   return {
     totalProducts: allItems.length,
@@ -619,11 +622,7 @@ export async function loadInventoryMetrics(
     outOfStock: allItems.filter((item) => item.stockStatus === 'out').length,
     expired: allItems.filter((item) => item.stockStatus === 'expired').length,
     expiringSoon: allItems.filter((item) => {
-      const days = Math.floor(
-        (new Date(item.expiryDate).getTime() - new Date().setHours(0, 0, 0, 0)) /
-          (1000 * 60 * 60 * 24)
-      );
-      return days >= 0 && days <= expiryAlertDays;
+      return isExpiringSoon(item.expiryDate, expiryAlertDays);
     }).length,
     totalValue: allItems.reduce((sum, item) => sum + item.currentQty * item.unitCost, 0),
     potentialProfit: allItems.reduce(

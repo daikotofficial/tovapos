@@ -29,6 +29,7 @@ import {
 } from '@/lib/pos/local-store';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { isReservationLive, isRoom } from '@/lib/pos/hospitality';
+import { isExpired, isExpiringSoon } from '@/lib/pos/stock';
 
 function NairaIcon({ size = 18 }: { size?: number }) {
   return (
@@ -370,10 +371,17 @@ export default function DashboardPage() {
       0
     );
     const potentialMargin = retailStockValue - stockValue;
-    const stockAlerts = inventory.filter((item) =>
-      ['low', 'critical', 'out', 'expired'].includes(item.stockStatus)
+    const expiryAlertDays = Math.max(0, Number(settings.expiryAlertDays) || 30);
+    const expiringSoonItems = inventory.filter((item) =>
+      isExpiringSoon(item.expiryDate, expiryAlertDays)
     );
-    const expiredItems = inventory.filter((item) => item.stockStatus === 'expired');
+    const stockAlerts = inventory.filter(
+      (item) =>
+        ['low', 'critical', 'out'].includes(item.stockStatus) ||
+        isExpired(item.expiryDate) ||
+        isExpiringSoon(item.expiryDate, expiryAlertDays)
+    );
+    const expiredItems = inventory.filter((item) => isExpired(item.expiryDate));
     const cashSales = completedSales
       .filter((sale) => sale.paymentMethod === 'cash')
       .reduce((sum, sale) => sum + sale.grandTotal, 0);
@@ -441,8 +449,12 @@ export default function DashboardPage() {
       retailStockValue,
       potentialMargin: metricPotentialMargin,
       stockAlerts,
-      stockAlertCount: inventoryMetrics ? inventoryMetrics.lowStock + inventoryMetrics.outOfStock + inventoryMetrics.expired : stockAlerts.length,
+      stockAlertCount: inventoryMetrics
+        ? inventoryMetrics.lowStock + inventoryMetrics.outOfStock + inventoryMetrics.expired + inventoryMetrics.expiringSoon
+        : stockAlerts.length,
       expiredCount: inventoryMetrics?.expired ?? expiredItems.length,
+      expiringSoonCount: inventoryMetrics?.expiringSoon ?? expiringSoonItems.length,
+      expiringSoonItems,
       expiredItems,
       cashSales: monthMetrics?.cashSales ?? salesMetrics?.cashSales ?? cashSales,
       nonCashSales: monthMetrics?.nonCashSales ?? salesMetrics?.nonCashSales ?? nonCashSales,
@@ -455,7 +467,7 @@ export default function DashboardPage() {
       expenseCategories: metricExpenseCategories,
       totalProducts: inventoryMetrics?.totalProducts ?? inventory.length,
     };
-  }, [expenses, inventory, inventoryMetrics, monthMetrics, sales, salesMetrics, todayMetrics]);
+  }, [expenses, inventory, inventoryMetrics, monthMetrics, sales, salesMetrics, settings, todayMetrics]);
 
   const kpis = [
     {
@@ -664,12 +676,18 @@ export default function DashboardPage() {
                         {data.expiredCount}
                       </p>
                     </div>
+                    <div className="rounded-md bg-warning/10 p-3 text-warning">
+                      <p className="text-[10px] font-bold uppercase">About to expire</p>
+                      <p className="mt-1 text-2xl font-bold font-tabular">
+                        {data.expiringSoonCount}
+                      </p>
+                    </div>
                     <div className="rounded-md bg-success/10 p-3 text-success">
                       <p className="text-[10px] font-bold uppercase">SKUs</p>
                       <p className="mt-1 text-2xl font-bold font-tabular">{data.totalProducts}</p>
                     </div>
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <Link
                       href="/inventory-management?status=alerts"
                       className="rounded-md border border-border px-3 py-2 text-center text-xs font-semibold text-warning hover:bg-warning/10"
@@ -681,6 +699,12 @@ export default function DashboardPage() {
                       className="rounded-md border border-border px-3 py-2 text-center text-xs font-semibold text-danger hover:bg-danger/10"
                     >
                       View expired
+                    </Link>
+                    <Link
+                      href="/inventory-management?status=expiring-soon"
+                      className="rounded-md border border-border px-3 py-2 text-center text-xs font-semibold text-warning hover:bg-warning/10"
+                    >
+                      View about to expire
                     </Link>
                   </div>
                   <div className="mt-4 divide-y divide-border">

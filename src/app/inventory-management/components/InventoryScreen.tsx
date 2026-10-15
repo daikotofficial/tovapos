@@ -56,6 +56,7 @@ export default function InventoryScreen() {
     const status = searchParams.get('status');
     if (status === 'alerts') setStatusFilter('alerts');
     if (status === 'expired') setStatusFilter('expired');
+    if (status === 'expiring-soon') setStatusFilter('expiring-soon');
   }, [searchParams]);
 
   useEffect(() => {

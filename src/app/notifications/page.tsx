@@ -49,7 +49,7 @@ export default function NotificationsPage() {
                 : `${days} day${days === 1 ? '' : 's'} remaining. Batch ${item.batchLot}.`,
             tone: days < 0 ? 'danger' : 'warning',
             status: item.stockStatus,
-            targetStatus: days < 0 ? 'expired' : 'alerts',
+            targetStatus: days < 0 ? 'expired' : 'expiring-soon',
           });
         }
         return rows;
