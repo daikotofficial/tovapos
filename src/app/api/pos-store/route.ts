@@ -1905,27 +1905,22 @@ export async function PUT(request: NextRequest) {
         );
         const currentSettings = existing.rows[0]?.data;
         if (expenseHeadsOnly) {
-          const allowedKeys = new Set(['id', 'expenseCategories', 'updatedAt']);
+          let expenseCategories: string[] | undefined;
           for (const record of records) {
-            const changedOutsideExpenseHeads = Object.keys(record).some((key) => {
-              if (allowedKeys.has(key)) return false;
-              return JSON.stringify(record[key]) !== JSON.stringify(currentSettings?.[key]);
-            });
             const categories = record.expenseCategories;
-            const normalizedCategories = Array.isArray(categories)
+            const cleanedCategories = Array.isArray(categories)
               ? categories.map((category) =>
-                  typeof category === 'string' ? category.trim().toLowerCase() : ''
+                  typeof category === 'string' ? category.trim().replace(/\s+/g, ' ') : ''
                 )
               : [];
+            const normalizedCategories = cleanedCategories.map((category) =>
+              category.toLowerCase()
+            );
             if (
-              changedOutsideExpenseHeads ||
               !Array.isArray(categories) ||
               categories.length > 200 ||
-              categories.some(
-                (category) =>
-                  typeof category !== 'string' ||
-                  category.trim().length < 1 ||
-                  category.trim().length > 80
+              cleanedCategories.some(
+                (category) => category.trim().length < 1 || category.trim().length > 80
               ) ||
               new Set(normalizedCategories).size !== normalizedCategories.length
             ) {
@@ -1935,7 +1930,14 @@ export async function PUT(request: NextRequest) {
                 'EXPENSE_HEAD_PERMISSION_REQUIRED'
               );
             }
+            expenseCategories = cleanedCategories;
           }
+          records = records.map((record) => ({
+            ...(currentSettings ?? {}),
+            id: 'settings',
+            expenseCategories,
+            updatedAt: record.updatedAt,
+          }));
         }
         records = records.map((record) => ({
           ...record,

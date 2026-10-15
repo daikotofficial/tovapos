@@ -1537,24 +1537,19 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       if (!canManageSettings && !canManageExpenseHeads) {
         throw new Error('Your role is not allowed to change business settings.');
       }
-      if (!canManageSettings) {
-        const allowedKeys = new Set(['id', 'expenseCategories', 'updatedAt']);
-        const changedOutsideExpenseHeads = Object.keys(nextSettings).some((key) => {
-          if (allowedKeys.has(key)) return false;
-          return (
-            JSON.stringify(nextSettings[key as keyof BusinessSettings]) !==
-            JSON.stringify(settings[key as keyof BusinessSettings])
-          );
-        });
-        if (changedOutsideExpenseHeads) {
-          throw new Error('Your role can only manage expense heads.');
-        }
-      }
       const saved = {
-        ...nextSettings,
+        ...(canManageSettings ? nextSettings : settings),
+        ...(canManageSettings ? {} : { expenseCategories: nextSettings.expenseCategories }),
         id: 'settings' as const,
         updatedAt: new Date().toISOString(),
       };
+      const apiPayload = canManageSettings
+        ? saved
+        : {
+            id: saved.id,
+            expenseCategories: saved.expenseCategories,
+            updatedAt: saved.updatedAt,
+          };
       const queueItem = createSyncQueueItem({
         entity: 'settings',
         entityId: saved.id,
@@ -1572,7 +1567,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           response = await fetch('/api/pos-store?store=settings', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(saved),
+            body: JSON.stringify(apiPayload),
           });
         } catch (error) {
           if (!(error instanceof TypeError)) throw error;
