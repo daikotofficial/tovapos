@@ -35,6 +35,13 @@ const starterPermissions: Permission[] = [
   'hospitality-rooms',
   'hospitality-guests',
   'hospitality-payments',
+  'warehouse-view',
+  'warehouse-receive',
+  'warehouse-process',
+  'warehouse-dispatch',
+  'warehouse-approve',
+  'warehouse-receive-transfer',
+  'warehouse-adjust',
 ];
 
 const proPermissions: Permission[] = [

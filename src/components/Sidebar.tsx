@@ -29,6 +29,7 @@ import {
   BedDouble,
   CalendarCheck,
   ReceiptText,
+  Warehouse,
 } from 'lucide-react';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission } from '@/lib/pos/types';
@@ -72,7 +73,15 @@ const navItems: NavItem[] = [
     permission: 'checkout',
     order: 1,
   },
-  { id: 'nav-my-sales-history', label: 'My Sales History', href: '/my-sales-history', icon: History, group: 'Operations', permission: 'checkout', order: 2 },
+  {
+    id: 'nav-my-sales-history',
+    label: 'My Sales History',
+    href: '/my-sales-history',
+    icon: History,
+    group: 'Operations',
+    permission: 'checkout',
+    order: 2,
+  },
   {
     id: 'nav-inventory',
     label: 'Products & Inventory',
@@ -92,6 +101,15 @@ const navItems: NavItem[] = [
     group: 'Operations',
     permission: ['add-product', 'adjust-stock'],
     order: 3,
+  },
+  {
+    id: 'nav-warehouse',
+    label: 'Inventory House',
+    href: '/warehouse',
+    icon: Warehouse,
+    group: 'Operations',
+    permission: 'warehouse-view',
+    order: 3.5,
   },
   {
     id: 'nav-reservations',
@@ -284,8 +302,8 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
     usePosStore();
   const isViewOnly = Boolean(
     currentUser?.permissions.includes('view-only') &&
-      currentUser.role !== 'owner' &&
-      currentUser.role !== 'super-admin'
+    currentUser.role !== 'owner' &&
+    currentUser.role !== 'super-admin'
   );
   const canUseHospitality = activeBusinessMode === 'hospitality';
   const visibleNavItems = navItems.filter((item) => {
@@ -409,7 +427,9 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
                   {!collapsed && reportsOpen && (
                     <div className="ml-6 mt-1 space-y-1 border-l border-border pl-2">
                       {reportItems
-                        .filter((report) => !report.permission || hasViewPermission(report.permission))
+                        .filter(
+                          (report) => !report.permission || hasViewPermission(report.permission)
+                        )
                         .map((report) => {
                           const isReportActive =
                             pathname === '/reports' && report.href.includes(`view=${activeReport}`);

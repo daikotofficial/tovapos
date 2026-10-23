@@ -1641,6 +1641,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       if (!isOnline && !settings.allowOfflineSales) {
         throw new Error('Offline sales are disabled for this business.');
       }
+      if (!isOnline && currentUser?.branch && currentUser.branch !== 'Main Store') {
+        throw new Error(
+          'Offline sales are temporarily unavailable for branch-scoped stock. Reconnect before selling.'
+        );
+      }
       if (!isOnline) {
         const offlineSince = window.localStorage.getItem(OFFLINE_SINCE_KEY);
         const offlineSinceMs = offlineSince ? Date.parse(offlineSince) : NaN;

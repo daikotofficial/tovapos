@@ -41,6 +41,13 @@ const permissions: Permission[] = [
   'notifications',
   'categories',
   'expense-heads',
+  'warehouse-view',
+  'warehouse-receive',
+  'warehouse-process',
+  'warehouse-dispatch',
+  'warehouse-approve',
+  'warehouse-receive-transfer',
+  'warehouse-adjust',
 ];
 
 const permissionGroups: { title: string; items: Permission[] }[] = [
@@ -65,6 +72,18 @@ const permissionGroups: { title: string; items: Permission[] }[] = [
     ],
   },
   { title: 'People & Suppliers', items: ['customers', 'vendors', 'users', 'branches'] },
+  {
+    title: 'Inventory House',
+    items: [
+      'warehouse-view',
+      'warehouse-receive',
+      'warehouse-process',
+      'warehouse-dispatch',
+      'warehouse-approve',
+      'warehouse-receive-transfer',
+      'warehouse-adjust',
+    ],
+  },
   {
     title: 'Money & Reports',
     items: [
@@ -159,6 +178,13 @@ const defaultPermissionsByRole: Record<UserRole, Permission[]> = {
     'expiry-alerts',
     'notifications',
     'categories',
+    'warehouse-view',
+    'warehouse-receive',
+    'warehouse-process',
+    'warehouse-dispatch',
+    'warehouse-approve',
+    'warehouse-receive-transfer',
+    'warehouse-adjust',
   ],
   cashier: ['dashboard', 'checkout', 'customers', 'give-discount'],
   inventory: [
@@ -171,6 +197,12 @@ const defaultPermissionsByRole: Record<UserRole, Permission[]> = {
     'reports',
     'expiry-alerts',
     'categories',
+    'warehouse-view',
+    'warehouse-receive',
+    'warehouse-process',
+    'warehouse-dispatch',
+    'warehouse-receive-transfer',
+    'warehouse-adjust',
   ],
   accountant: [
     'dashboard',
@@ -252,6 +284,13 @@ const permissionLabels: Record<Permission, string> = {
   'hospitality-rooms': 'Manage rooms and services',
   'hospitality-guests': 'Manage guests',
   'hospitality-payments': 'Record guest payments',
+  'warehouse-view': 'View Inventory House',
+  'warehouse-receive': 'Receive goods into warehouse',
+  'warehouse-process': 'Process and repackage goods',
+  'warehouse-dispatch': 'Create and dispatch transfers',
+  'warehouse-approve': 'Approve warehouse operations',
+  'warehouse-receive-transfer': 'Receive store transfers',
+  'warehouse-adjust': 'Adjust warehouse stock',
 };
 
 function emptyUser(): TovaUser {
@@ -294,7 +333,10 @@ export default function UsersPage() {
   );
   const totalPages = Math.max(1, Math.ceil(users.length / rowsPerPage));
   const visibleUsers = users.slice((page - 1) * rowsPerPage, page * rowsPerPage);
-  React.useEffect(() => setPage(1), [rowsPerPage]);
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setPage(1), 0);
+    return () => window.clearTimeout(timer);
+  }, [rowsPerPage]);
 
   const openCreate = () => {
     const user = emptyUser();
@@ -507,7 +549,9 @@ export default function UsersPage() {
               />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Email (optional if phone is provided)</span>
+              <span className="text-xs text-muted-foreground">
+                Email (optional if phone is provided)
+              </span>
               <input
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -561,7 +605,12 @@ export default function UsersPage() {
                   className="w-full px-3 py-2 pr-10 rounded-lg border border-border bg-background"
                   placeholder="Minimum 10 characters"
                 />
-                <button type="button" onClick={() => setShowLoginPassword((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground" aria-label={showLoginPassword ? 'Hide login password' : 'Show login password'}>
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPassword((value) => !value)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  aria-label={showLoginPassword ? 'Hide login password' : 'Show login password'}
+                >
                   {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>

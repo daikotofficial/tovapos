@@ -277,21 +277,25 @@ async function getInventoryMetrics(request: NextRequest, auth: AuthContext) {
     `
     SELECT
       count(*)::bigint AS total_products,
-      coalesce(sum(current_qty), 0)::float8 AS total_units,
-      count(*) FILTER (WHERE stock_status IN ('low', 'critical'))::bigint AS low_stock,
-      count(*) FILTER (WHERE stock_status = 'critical')::bigint AS critical_stock,
-      count(*) FILTER (WHERE stock_status = 'out')::bigint AS out_of_stock,
-      count(*) FILTER (WHERE stock_status = 'expired' OR expiry_date < current_date)::bigint AS expired,
+      coalesce(sum(CASE WHEN $3 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END), 0)::float8 AS total_units,
+      count(*) FILTER (WHERE inventory.stock_status IN ('low', 'critical'))::bigint AS low_stock,
+      count(*) FILTER (WHERE inventory.stock_status = 'critical')::bigint AS critical_stock,
+      count(*) FILTER (WHERE inventory.stock_status = 'out')::bigint AS out_of_stock,
+      count(*) FILTER (WHERE inventory.stock_status = 'expired' OR inventory.expiry_date < current_date)::bigint AS expired,
       count(*) FILTER (
-        WHERE expiry_date >= current_date
-          AND expiry_date <= current_date + ($1::int * interval '1 day')
+        WHERE inventory.expiry_date >= current_date
+          AND inventory.expiry_date <= current_date + ($1::int * interval '1 day')
       )::bigint AS expiring_soon,
-      coalesce(sum(current_qty * unit_cost), 0)::float8 AS total_value,
-      coalesce(sum(current_qty * (selling_price - unit_cost)), 0)::float8 AS potential_profit
-    FROM pos_tenant_inventory
-    WHERE tenant_id = $2 AND product_status = 'active'
+      coalesce(sum(CASE WHEN $3 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END * coalesce(branch.unit_cost, inventory.unit_cost)), 0)::float8 AS total_value,
+      coalesce(sum(CASE WHEN $3 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END * (coalesce(branch.selling_price, inventory.selling_price) - coalesce(branch.unit_cost, inventory.unit_cost))), 0)::float8 AS potential_profit
+    FROM pos_tenant_inventory inventory
+    LEFT JOIN pos_branch_inventory branch
+      ON branch.tenant_id = inventory.tenant_id
+     AND branch.inventory_item_id = inventory.id
+     AND branch.branch = $3
+    WHERE inventory.tenant_id = $2 AND inventory.product_status = 'active'
     `,
-    [expiryAlertDays, auth.tenantId]
+    [expiryAlertDays, auth.tenantId, auth.user.branch?.trim() || 'Main Store']
   );
   const row = result.rows[0] ?? {};
 
@@ -309,6 +313,40 @@ async function getInventoryMetrics(request: NextRequest, auth: AuthContext) {
     potentialProfit: authAllowsReportFinancials(auth, 'view-profit')
       ? Number(row.potential_profit ?? 0)
       : 0,
+  });
+}
+
+async function overlayBranchInventory(
+  auth: AuthContext,
+  rows: Record<string, unknown>[]
+): Promise<Record<string, unknown>[]> {
+  if (!rows.length) return rows;
+  const branch = auth.user.branch?.trim() || 'Main Store';
+  const branchScoped = branch !== 'Main Store';
+  const ids = rows.map((row) => String(row.id ?? row.inventoryItemId ?? '')).filter(Boolean);
+  const result = await getPosPool().query(
+    `SELECT inventory_item_id, current_qty, unit_cost, selling_price, data
+     FROM pos_branch_inventory
+     WHERE tenant_id=$1 AND branch=$2 AND inventory_item_id = ANY($3::text[])`,
+    [auth.tenantId, branch, ids]
+  );
+  const byId = new Map(result.rows.map((row) => [String(row.inventory_item_id), row]));
+  return rows.map((data) => {
+    const branchRow = byId.get(String(data.id ?? data.inventoryItemId ?? ''));
+    if (!branchRow) {
+      if (!branchScoped) return data;
+      return {
+        ...data,
+        currentQty: 0,
+      };
+    }
+    return {
+      ...data,
+      ...(branchRow.data as Record<string, unknown>),
+      currentQty: Number(branchRow.current_qty),
+      unitCost: Number(branchRow.unit_cost),
+      sellingPrice: Number(branchRow.selling_price),
+    };
   });
 }
 
@@ -430,8 +468,12 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
        LIMIT $2 OFFSET $3`,
       values
     );
+    const rows = await overlayBranchInventory(
+      auth,
+      result.rows.map((row) => row.data as Record<string, unknown>)
+    );
     return NextResponse.json({
-      rows: result.rows.map((row) => protectInventoryFinancials(row.data, auth)),
+      rows: rows.map((row) => protectInventoryFinancials(row, auth)),
       limit,
       offset,
     });
@@ -1295,8 +1337,12 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
       [auth.tenantId, scan]
     );
 
+    const rows = await overlayBranchInventory(
+      auth,
+      result.rows[0]?.data ? [result.rows[0].data as Record<string, unknown>] : []
+    );
     return NextResponse.json({
-      item: result.rows[0]?.data ? protectInventoryFinancials(result.rows[0].data, auth) : null,
+      item: rows[0] ? protectInventoryFinancials(rows[0], auth) : null,
     });
   }
 
@@ -1317,7 +1363,11 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
       [auth.tenantId, inventoryIds]
     );
 
-    return NextResponse.json(result.rows.map((row) => protectInventoryFinancials(row.data, auth)));
+    const rows = await overlayBranchInventory(
+      auth,
+      result.rows.map((row) => row.data as Record<string, unknown>)
+    );
+    return NextResponse.json(rows.map((row) => protectInventoryFinancials(row, auth)));
   }
 
   const limit = clampLimit(params.get('limit'));
@@ -1432,8 +1482,12 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
         )
       : undefined;
 
+  const overlaidRows = await overlayBranchInventory(
+    auth,
+    rows.map((row) => row.data as Record<string, unknown>)
+  );
   return NextResponse.json({
-    items: rows.map((row) => protectInventoryFinancials(row.data, auth)),
+    items: overlaidRows.map((row) => protectInventoryFinancials(row, auth)),
     nextCursor:
       result.rows.length > limit && last
         ? encodeCursor({ name: last.cursor_name, id: last.id })

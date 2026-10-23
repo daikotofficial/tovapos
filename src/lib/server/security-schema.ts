@@ -320,6 +320,129 @@ export async function ensureSecuritySchema(): Promise<void> {
         CREATE INDEX IF NOT EXISTS pos_tenant_records_store_idx
           ON pos_tenant_records (tenant_id, store_name, updated_at DESC);
 
+        CREATE TABLE IF NOT EXISTS pos_warehouse_locations (
+          tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
+          id text NOT NULL,
+          name text NOT NULL,
+          kind text NOT NULL CHECK (kind IN ('warehouse', 'store')),
+          branch text,
+          active boolean NOT NULL DEFAULT true,
+          created_by text NOT NULL,
+          created_by_name text NOT NULL DEFAULT '',
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          PRIMARY KEY (tenant_id, id)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS pos_warehouse_locations_name_idx
+          ON pos_warehouse_locations (tenant_id, lower(name));
+
+        CREATE TABLE IF NOT EXISTS pos_warehouse_stock (
+          tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
+          id text NOT NULL,
+          location_id text NOT NULL,
+          product_id text NOT NULL,
+          product_name text NOT NULL,
+          sku text NOT NULL DEFAULT '',
+          batch_lot text NOT NULL DEFAULT '',
+          quantity numeric NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+          unit text NOT NULL DEFAULT 'unit',
+          unit_cost numeric NOT NULL DEFAULT 0 CHECK (unit_cost >= 0),
+          selling_price numeric CHECK (selling_price IS NULL OR selling_price >= 0),
+          expiry_date date,
+          state text NOT NULL DEFAULT 'available' CHECK (state IN ('available', 'reserved', 'in-transit', 'quarantined')),
+          version bigint NOT NULL DEFAULT 1,
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          PRIMARY KEY (tenant_id, id),
+          FOREIGN KEY (tenant_id, location_id) REFERENCES pos_warehouse_locations(tenant_id, id)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS pos_warehouse_stock_key_idx
+          ON pos_warehouse_stock (tenant_id, location_id, product_id, batch_lot, state);
+        CREATE INDEX IF NOT EXISTS pos_warehouse_stock_location_idx
+          ON pos_warehouse_stock (tenant_id, location_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS pos_branch_inventory (
+          tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
+          branch text NOT NULL,
+          inventory_item_id text NOT NULL,
+          current_qty numeric NOT NULL DEFAULT 0 CHECK (current_qty >= 0),
+          unit_cost numeric NOT NULL DEFAULT 0 CHECK (unit_cost >= 0),
+          selling_price numeric NOT NULL DEFAULT 0 CHECK (selling_price >= 0),
+          data jsonb NOT NULL,
+          version bigint NOT NULL DEFAULT 1,
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          PRIMARY KEY (tenant_id, branch, inventory_item_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS pos_branch_inventory_branch_idx
+          ON pos_branch_inventory (tenant_id, branch, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS pos_warehouse_transfers (
+          tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
+          id text NOT NULL,
+          transfer_number text NOT NULL,
+          from_location_id text NOT NULL,
+          to_location_id text NOT NULL,
+          status text NOT NULL CHECK (status IN ('draft', 'requested', 'approved', 'dispatched', 'partially-received', 'received', 'cancelled')),
+          data jsonb NOT NULL,
+          requested_by text NOT NULL,
+          requested_by_name text NOT NULL DEFAULT '',
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now(),
+          PRIMARY KEY (tenant_id, id),
+          UNIQUE (tenant_id, transfer_number),
+          FOREIGN KEY (tenant_id, from_location_id) REFERENCES pos_warehouse_locations(tenant_id, id),
+          FOREIGN KEY (tenant_id, to_location_id) REFERENCES pos_warehouse_locations(tenant_id, id)
+        );
+
+        CREATE INDEX IF NOT EXISTS pos_warehouse_transfers_destination_idx
+          ON pos_warehouse_transfers (tenant_id, to_location_id, status, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS pos_warehouse_ledger (
+          tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
+          id bigserial PRIMARY KEY,
+          operation_id text NOT NULL,
+          reference_id text NOT NULL,
+          location_id text NOT NULL,
+          product_id text NOT NULL,
+          product_name text NOT NULL,
+          sku text NOT NULL DEFAULT '',
+          batch_lot text NOT NULL DEFAULT '',
+          entry_type text NOT NULL,
+          quantity_delta numeric NOT NULL,
+          balance_after numeric NOT NULL CHECK (balance_after >= 0),
+          unit text NOT NULL DEFAULT 'unit',
+          unit_cost numeric NOT NULL DEFAULT 0 CHECK (unit_cost >= 0),
+          performed_by text NOT NULL,
+          performed_by_name text NOT NULL DEFAULT '',
+          performed_by_role text NOT NULL DEFAULT '',
+          reason text NOT NULL DEFAULT '',
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          FOREIGN KEY (tenant_id, location_id) REFERENCES pos_warehouse_locations(tenant_id, id)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS pos_warehouse_ledger_operation_idx
+          ON pos_warehouse_ledger (tenant_id, operation_id, location_id, product_id, batch_lot, entry_type);
+        CREATE INDEX IF NOT EXISTS pos_warehouse_ledger_history_idx
+          ON pos_warehouse_ledger (tenant_id, created_at DESC);
+
+        CREATE OR REPLACE FUNCTION pos_prevent_warehouse_ledger_mutation()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $warehouse_ledger_guard$
+        BEGIN
+          RAISE EXCEPTION 'Warehouse ledger entries are append-only';
+        END;
+        $warehouse_ledger_guard$;
+
+        DROP TRIGGER IF EXISTS pos_warehouse_ledger_append_only
+          ON pos_warehouse_ledger;
+        CREATE TRIGGER pos_warehouse_ledger_append_only
+          BEFORE UPDATE OR DELETE ON pos_warehouse_ledger
+          FOR EACH ROW EXECUTE FUNCTION pos_prevent_warehouse_ledger_mutation();
+
         CREATE TABLE IF NOT EXISTS pos_tenant_inventory (
           tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,
           id text NOT NULL,
@@ -358,6 +481,20 @@ export async function ensureSecuritySchema(): Promise<void> {
             to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(generic_name, '') || ' ' ||
               coalesce(sku, '') || ' ' || coalesce(barcode, '') || ' ' || coalesce(batch_lot, ''))
           );
+
+        DO $branch_inventory_fk$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'pos_branch_inventory_product_fk'
+          ) THEN
+            ALTER TABLE pos_branch_inventory
+              ADD CONSTRAINT pos_branch_inventory_product_fk
+              FOREIGN KEY (tenant_id, inventory_item_id)
+              REFERENCES pos_tenant_inventory(tenant_id, id);
+          END IF;
+        END
+        $branch_inventory_fk$;
 
         CREATE TABLE IF NOT EXISTS pos_tenant_sales (
           tenant_id text NOT NULL REFERENCES pos_tenants(id) ON DELETE CASCADE,

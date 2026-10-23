@@ -321,7 +321,121 @@ export type Permission =
   | 'hospitality-reservations'
   | 'hospitality-rooms'
   | 'hospitality-guests'
-  | 'hospitality-payments';
+  | 'hospitality-payments'
+  | 'warehouse-view'
+  | 'warehouse-receive'
+  | 'warehouse-process'
+  | 'warehouse-dispatch'
+  | 'warehouse-approve'
+  | 'warehouse-receive-transfer'
+  | 'warehouse-adjust';
+
+export type WarehouseLocationKind = 'warehouse' | 'store';
+export type WarehouseStockState = 'available' | 'reserved' | 'in-transit' | 'quarantined';
+export type WarehouseTransferStatus =
+  | 'draft'
+  | 'requested'
+  | 'approved'
+  | 'dispatched'
+  | 'partially-received'
+  | 'received'
+  | 'cancelled';
+
+export interface WarehouseLocation {
+  id: string;
+  name: string;
+  kind: WarehouseLocationKind;
+  branch?: string;
+  active: boolean;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface WarehouseStock {
+  id: string;
+  locationId: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  batchLot: string;
+  quantity: number;
+  unit: string;
+  unitCost: number;
+  sellingPrice?: number;
+  expiryDate?: string;
+  state: WarehouseStockState;
+  updatedAt: string;
+}
+
+export interface WarehouseTransferLine {
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  batchLot: string;
+  quantityRequested: number;
+  quantityDispatched: number;
+  quantityReceived: number;
+  quantityRejected: number;
+  unit: string;
+  unitCost: number;
+  sellingPrice?: number;
+  expiryDate?: string;
+  notes?: string;
+}
+
+export interface WarehouseTransfer {
+  id: string;
+  transferNumber: string;
+  fromLocationId: string;
+  toLocationId: string;
+  status: WarehouseTransferStatus;
+  lines: WarehouseTransferLine[];
+  requestedBy: string;
+  requestedAt: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  dispatchedBy?: string;
+  dispatchedAt?: string;
+  receivedBy?: string;
+  receivedAt?: string;
+  notes?: string;
+}
+
+export type WarehouseLedgerEntryType =
+  | 'receipt'
+  | 'processing-input'
+  | 'processing-output'
+  | 'processing-loss'
+  | 'reserve'
+  | 'release'
+  | 'dispatch'
+  | 'transfer-receipt'
+  | 'rejection'
+  | 'adjustment'
+  | 'reversal';
+
+export interface WarehouseLedgerEntry {
+  id: string;
+  operationId: string;
+  referenceId: string;
+  locationId: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  batchLot: string;
+  type: WarehouseLedgerEntryType;
+  quantityDelta: number;
+  balanceAfter: number;
+  unit: string;
+  unitCost: number;
+  performedBy: string;
+  performedByUserId: string;
+  performedByRole: UserRole;
+  reason: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
 
 export type UserRole =
   | 'super-admin'

@@ -9,10 +9,10 @@ import type {
   StockMovement,
 } from '@/lib/pos/types';
 import { calculateSaleLine, money } from '@/lib/pos/sale-calculations';
+import { calculateBranchSaleBalance } from '@/lib/pos/warehouse-rules.mjs';
 import { loyaltyEarnedForSale, loyaltyRedemption } from '@/lib/pos/loyalty';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
-  assertPermission,
   assertWritePermission,
   assertTenantActive,
   assertTenantPlanPermission,
@@ -236,6 +236,34 @@ export async function POST(request: NextRequest) {
       if (inventoryResult.rows.length !== new Set(items.map((item) => item.inventoryItemId)).size) {
         throw new HttpError(409, 'One or more products no longer exist', 'INVENTORY_CONFLICT');
       }
+      const branchName = auth.user.branch?.trim() || 'Main Store';
+      const branchScoped = branchName !== 'Main Store';
+      const branchResult = await client.query(
+        `SELECT * FROM pos_branch_inventory
+         WHERE tenant_id = $1 AND branch = $2 AND inventory_item_id = ANY($3::text[])
+         ORDER BY inventory_item_id FOR UPDATE`,
+        [auth.tenantId, branchName, items.map((item) => item.inventoryItemId)]
+      );
+      const branchInventoryById = new Map(
+        branchResult.rows.map((row) => [row.inventory_item_id as string, row])
+      );
+      for (const row of inventoryResult.rows) {
+        const branchRow = branchInventoryById.get(row.id as string);
+        if (!branchRow) {
+          if (branchScoped) row.current_qty = 0;
+          continue;
+        }
+        row.current_qty = branchRow.current_qty;
+        row.unit_cost = branchRow.unit_cost;
+        row.selling_price = branchRow.selling_price;
+        row.data = {
+          ...(row.data as Record<string, unknown>),
+          ...(branchRow.data as Record<string, unknown>),
+          currentQty: Number(branchRow.current_qty),
+          unitCost: Number(branchRow.unit_cost),
+          sellingPrice: Number(branchRow.selling_price),
+        };
+      }
       const inventoryById = new Map(inventoryResult.rows.map((row) => [row.id as string, row]));
       const now = new Date().toISOString();
       let subtotal = 0;
@@ -292,7 +320,10 @@ export async function POST(request: NextRequest) {
           throw new HttpError(403, 'The selected unit price is no longer valid', 'PRICE_MISMATCH');
         }
         const stockQuantity = requested.quantity * unitsPerSale;
-        if (Number(row.current_qty) < stockQuantity) {
+        let nextQuantity: number;
+        try {
+          nextQuantity = calculateBranchSaleBalance(Number(row.current_qty), stockQuantity);
+        } catch {
           throw new HttpError(409, `${row.name} has insufficient stock`, 'INSUFFICIENT_STOCK');
         }
         const defaultTaxRate = Math.max(0, Number(settings.taxRate) || 0);
@@ -311,7 +342,6 @@ export async function POST(request: NextRequest) {
         discountTotal = money(discountTotal + calculated.discountAmount);
         taxAmount = money(taxAmount + calculated.taxAmount);
         exclusiveTaxAmount = money(exclusiveTaxAmount + calculated.exclusiveTaxAmount);
-        const nextQuantity = Number(row.current_qty) - stockQuantity;
         updatedInventory.push({
           ...productData,
           currentQty: nextQuantity,
@@ -548,14 +578,53 @@ export async function POST(request: NextRequest) {
       }
 
       for (const updated of updatedInventory) {
-        await client.query(
-          `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
-           VALUES ($1, 'inventory', $2, $3::jsonb)
-           ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET
-             data = EXCLUDED.data, version = pos_tenant_records.version + 1, updated_at = now()`,
-          [auth.tenantId, updated.id, JSON.stringify(updated)]
-        );
-        await upsertTenantInventoryIndex(client, auth.tenantId, { ...updated });
+        if (branchInventoryById.has(updated.id)) {
+          await client.query(
+            `UPDATE pos_branch_inventory
+             SET current_qty=$1, unit_cost=$2, selling_price=$3, data=$4::jsonb,
+                 version=version+1, updated_at=now()
+             WHERE tenant_id=$5 AND branch=$6 AND inventory_item_id=$7`,
+            [
+              updated.currentQty,
+              updated.unitCost,
+              updated.sellingPrice,
+              JSON.stringify(updated),
+              auth.tenantId,
+              branchName,
+              updated.id,
+            ]
+          );
+        }
+        if (!branchInventoryById.has(updated.id) && branchScoped) {
+          await client.query(
+            `INSERT INTO pos_branch_inventory
+               (tenant_id,branch,inventory_item_id,current_qty,unit_cost,selling_price,data)
+             VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
+             ON CONFLICT (tenant_id,branch,inventory_item_id) DO UPDATE SET
+               current_qty=EXCLUDED.current_qty,unit_cost=EXCLUDED.unit_cost,
+               selling_price=EXCLUDED.selling_price,data=EXCLUDED.data,
+               version=pos_branch_inventory.version+1,updated_at=now()`,
+            [
+              auth.tenantId,
+              branchName,
+              updated.id,
+              updated.currentQty,
+              updated.unitCost,
+              updated.sellingPrice,
+              JSON.stringify(updated),
+            ]
+          );
+        }
+        if (!branchScoped || branchName === 'Main Store') {
+          await client.query(
+            `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+             VALUES ($1, 'inventory', $2, $3::jsonb)
+             ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET
+               data = EXCLUDED.data, version = pos_tenant_records.version + 1, updated_at = now()`,
+            [auth.tenantId, updated.id, JSON.stringify(updated)]
+          );
+          await upsertTenantInventoryIndex(client, auth.tenantId, { ...updated });
+        }
       }
       await client.query(
         `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
