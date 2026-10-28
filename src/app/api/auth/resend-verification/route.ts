@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { issueEmailVerification } from '@/lib/server/email-verification';
+import {
+  ensureEmailVerificationSchema,
+  issueEmailVerification,
+} from '@/lib/server/email-verification';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertSameOrigin,
@@ -20,6 +23,7 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     await ensureSecuritySchema();
+    await ensureEmailVerificationSchema();
     const body = isNativeForm
       ? Object.fromEntries((await request.formData()).entries())
       : ((await request.json()) as Record<string, unknown>);

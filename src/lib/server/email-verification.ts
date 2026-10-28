@@ -2,6 +2,30 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { sendEmailVerification } from './email';
 import { getPosPool } from './pos-db';
 
+export async function ensureEmailVerificationSchema(): Promise<void> {
+  await getPosPool().query(`
+    ALTER TABLE pos_app_users
+      ADD COLUMN IF NOT EXISTS email_verified_at timestamptz DEFAULT now();
+
+    CREATE TABLE IF NOT EXISTS pos_email_verification_tokens (
+      id text PRIMARY KEY,
+      tenant_id text NOT NULL,
+      user_id text NOT NULL,
+      token_hash text NOT NULL UNIQUE,
+      expires_at timestamptz NOT NULL,
+      used_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      FOREIGN KEY (tenant_id, user_id)
+        REFERENCES pos_app_users(tenant_id, id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS pos_email_verification_tokens_user_idx
+      ON pos_email_verification_tokens (tenant_id, user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS pos_email_verification_tokens_expiry_idx
+      ON pos_email_verification_tokens (expires_at);
+  `);
+}
+
 export async function issueEmailVerification(input: {
   tenantId: string;
   userId: string;
