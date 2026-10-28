@@ -23,7 +23,16 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     await ensureSecuritySchema();
-    await ensureEmailVerificationSchema();
+    try {
+      await ensureEmailVerificationSchema();
+    } catch (error) {
+      console.error('Unable to prepare email verification schema', error);
+      throw new HttpError(
+        503,
+        'Confirmation service is temporarily unavailable. Please try again shortly.',
+        'VERIFICATION_SCHEMA_UNAVAILABLE'
+      );
+    }
     const body = isNativeForm
       ? Object.fromEntries((await request.formData()).entries())
       : ((await request.json()) as Record<string, unknown>);
@@ -33,26 +42,46 @@ export async function POST(request: NextRequest) {
     }
     const address = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
     const key = createHash('sha256').update(`verify|${address}|${email}`).digest('hex');
-    const rate = await getPosPool().query(
-      `INSERT INTO pos_auth_attempts (attempt_key, failures, blocked_until, last_attempt_at)
-       VALUES ($1, 1, NULL, now())
-       ON CONFLICT (attempt_key) DO UPDATE SET
-         failures = CASE WHEN last_attempt_at < now() - interval '15 minutes' THEN 1 ELSE failures + 1 END,
-         blocked_until = CASE WHEN last_attempt_at >= now() - interval '15 minutes' AND failures + 1 > 3 THEN now() + interval '15 minutes' ELSE blocked_until END,
-         last_attempt_at = now()
-       RETURNING failures, blocked_until`,
-      [key]
-    );
+    let rate;
+    try {
+      rate = await getPosPool().query(
+        `INSERT INTO pos_auth_attempts (attempt_key, failures, blocked_until, last_attempt_at)
+         VALUES ($1, 1, NULL, now())
+         ON CONFLICT (attempt_key) DO UPDATE SET
+           failures = CASE WHEN last_attempt_at < now() - interval '15 minutes' THEN 1 ELSE failures + 1 END,
+           blocked_until = CASE WHEN last_attempt_at >= now() - interval '15 minutes' AND failures + 1 > 3 THEN now() + interval '15 minutes' ELSE blocked_until END,
+           last_attempt_at = now()
+         RETURNING failures, blocked_until`,
+        [key]
+      );
+    } catch (error) {
+      console.error('Unable to rate-limit verification resend', error);
+      throw new HttpError(
+        503,
+        'Confirmation service is temporarily unavailable. Please try again shortly.',
+        'RESEND_RATE_LIMIT_UNAVAILABLE'
+      );
+    }
     if (Number(rate.rows[0]?.failures ?? 0) > 3) {
       throw new HttpError(429, 'Too many requests. Try again later.', 'RATE_LIMITED');
     }
-    const accounts = await getPosPool().query(
-      `SELECT u.tenant_id, u.id AS user_id, u.name, u.email, t.name AS business_name
-       FROM pos_app_users u JOIN pos_tenants t ON t.id = u.tenant_id
-       WHERE lower(u.email) = $1 AND u.email_verified_at IS NULL
-         AND u.status = 'active' AND t.status = 'active' LIMIT 2`,
-      [email]
-    );
+    let accounts;
+    try {
+      accounts = await getPosPool().query(
+        `SELECT u.tenant_id, u.id AS user_id, u.name, u.email, t.name AS business_name
+         FROM pos_app_users u JOIN pos_tenants t ON t.id = u.tenant_id
+         WHERE lower(u.email) = $1 AND u.email_verified_at IS NULL
+           AND u.status = 'active' AND t.status = 'active' LIMIT 2`,
+        [email]
+      );
+    } catch (error) {
+      console.error('Unable to look up verification resend account', error);
+      throw new HttpError(
+        503,
+        'Confirmation service is temporarily unavailable. Please try again shortly.',
+        'RESEND_ACCOUNT_LOOKUP_UNAVAILABLE'
+      );
+    }
     const uniqueAccount = accounts.rows.length === 1 ? accounts.rows : [];
     for (const account of uniqueAccount) {
       try {
