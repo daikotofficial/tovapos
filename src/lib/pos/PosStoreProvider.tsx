@@ -1016,9 +1016,14 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       user?: TovaUser;
       tenant?: { id: string; slug: string; name: string };
       error?: string;
+      code?: string;
     } | null;
     if (!response.ok || !payload?.user) {
-      throw new Error(payload?.error ?? 'Unable to sign in');
+      const error = new Error(payload?.error ?? 'Unable to sign in') as Error & {
+        code?: string;
+      };
+      error.code = payload?.code;
+      throw error;
     }
     setInventory([]);
     setStockMovements([]);

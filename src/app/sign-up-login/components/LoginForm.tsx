@@ -23,6 +23,8 @@ const inputClass =
 export default function LoginForm({ initialError = '' }: LoginFormProps) {
   const { signIn } = usePosStore();
   const [showPassword, setShowPassword] = useState(false);
+  const [showResendLink, setShowResendLink] = useState(false);
+  const [resendEmail, setResendEmail] = useState('');
 
   const {
     register,
@@ -41,6 +43,13 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
       window.location.assign('/dashboard');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to sign in';
+      const code = error instanceof Error ? (error as Error & { code?: string }).code : undefined;
+      if (code === 'EMAIL_NOT_VERIFIED') {
+        setResendEmail(data.email.trim());
+        setShowResendLink(true);
+      } else {
+        setShowResendLink(false);
+      }
       setError('email', {
         message,
       });
@@ -68,7 +77,7 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
       >
         {/* Email or phone */}
         <div>
-            <label htmlFor="login-email" className={labelClass}>
+          <label htmlFor="login-email" className={labelClass}>
             Email or phone
           </label>
           <input
@@ -86,9 +95,19 @@ export default function LoginForm({ initialError = '' }: LoginFormProps) {
             autoComplete="username"
           />
           {errors.email && (
-            <p className="text-[11px] text-danger mt-1.5 flex items-start gap-1">
-              {errors.email.message}
-            </p>
+            <div className="mt-1.5 space-y-1.5">
+              <p className="flex items-start gap-1 text-[11px] text-danger">
+                {errors.email.message}
+              </p>
+              {showResendLink && resendEmail.includes('@') && (
+                <Link
+                  href={`/resend-verification?email=${encodeURIComponent(resendEmail)}`}
+                  className="inline-flex text-xs font-semibold text-primary hover:underline"
+                >
+                  Resend confirmation email
+                </Link>
+              )}
+            </div>
           )}
         </div>
 

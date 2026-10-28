@@ -3,9 +3,10 @@ import PasswordPageShell from '@/components/auth/PasswordPageShell';
 export default async function ResendVerificationPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ error?: string }>;
+  searchParams?: Promise<{ error?: string; email?: string }>;
 }) {
   const params = await searchParams;
+  const email = typeof params?.email === 'string' ? params.email : '';
   return (
     <PasswordPageShell
       title="Resend confirmation email"
@@ -21,6 +22,7 @@ export default async function ResendVerificationPage({
             autoComplete="email"
             className="auth-light-input h-12 w-full rounded-md border border-border bg-white px-3 text-sm text-[#071412] placeholder:text-[#8b9a96] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
             placeholder="you@business.com"
+            defaultValue={email}
           />
         </label>
         {params?.error && (
