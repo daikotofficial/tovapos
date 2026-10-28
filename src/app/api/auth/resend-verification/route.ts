@@ -61,7 +61,15 @@ export async function POST(request: NextRequest) {
           requestOrigin: request.headers.get('origin') || request.nextUrl.origin,
         });
       } catch (error) {
-        console.error('Unable to resend verification email', error);
+        console.error('Unable to resend verification email', {
+          code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
+          message: error instanceof Error ? error.message : String(error),
+        });
+        throw new HttpError(
+          503,
+          'Confirmation email delivery is temporarily unavailable. Please try again shortly.',
+          'EMAIL_DELIVERY_UNAVAILABLE'
+        );
       }
     }
     return isNativeForm
