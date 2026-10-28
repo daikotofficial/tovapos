@@ -48,8 +48,16 @@ export async function POST(request: NextRequest) {
         `INSERT INTO pos_auth_attempts (attempt_key, failures, blocked_until, last_attempt_at)
          VALUES ($1, 1, NULL, now())
          ON CONFLICT (attempt_key) DO UPDATE SET
-           failures = CASE WHEN last_attempt_at < now() - interval '15 minutes' THEN 1 ELSE failures + 1 END,
-           blocked_until = CASE WHEN last_attempt_at >= now() - interval '15 minutes' AND failures + 1 > 3 THEN now() + interval '15 minutes' ELSE blocked_until END,
+           failures = CASE
+             WHEN pos_auth_attempts.last_attempt_at < now() - interval '15 minutes' THEN 1
+             ELSE pos_auth_attempts.failures + 1
+           END,
+           blocked_until = CASE
+             WHEN pos_auth_attempts.last_attempt_at >= now() - interval '15 minutes'
+               AND pos_auth_attempts.failures + 1 > 3
+             THEN now() + interval '15 minutes'
+             ELSE pos_auth_attempts.blocked_until
+           END,
            last_attempt_at = now()
          RETURNING failures, blocked_until`,
         [key]
