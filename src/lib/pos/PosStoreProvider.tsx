@@ -232,6 +232,18 @@ const API_STORE_NAMES: Record<SyncQueueItem['entity'], string> = {
   hospitalityGuest: 'hospitalityGuests',
 };
 
+const PUBLIC_AUTH_PATHS = [
+  '/sign-up-login',
+  '/forgot-password',
+  '/reset-password',
+  '/resend-verification',
+  '/verify-email',
+];
+
+function isPublicAuthPath(pathname: string): boolean {
+  return PUBLIC_AUTH_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
 function apiStoreName(entity: SyncQueueItem['entity']): string {
   const storeName = API_STORE_NAMES[entity];
   if (!storeName) throw new Error(`Unsupported sync entity: ${entity}`);
@@ -405,6 +417,13 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       let sessionResponse: Response | undefined;
       let timeout: number | undefined;
       try {
+        if (isPublicAuthPath(window.location.pathname)) {
+          if (cancelled) return;
+          setActiveUserIdState('');
+          setIsAuthenticated(false);
+          setIsHydrated(true);
+          return;
+        }
         const controller = new AbortController();
         timeout = window.setTimeout(() => controller.abort(), 8_000);
         sessionResponse = await fetch('/api/auth/session', {
