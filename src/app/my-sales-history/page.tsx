@@ -64,6 +64,8 @@ function summarizeSales(rows: SaleTransaction[]): SalesSummary {
   }
   return {
     total: amount(summary.total),
+    collected: amount(summary.collected),
+    creditDue: amount(summary.creditDue),
     cash: amount(summary.cash),
     card: amount(summary.card),
     transfer: amount(summary.transfer),
