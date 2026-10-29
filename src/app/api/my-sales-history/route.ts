@@ -97,17 +97,22 @@ export async function GET(request: NextRequest) {
       `SELECT
          COALESCE(SUM(COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)), 0)::numeric AS total,
          COALESCE(SUM(CASE
-           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'cash' THEN COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'credit' THEN 0
+           ELSE COALESCE(NULLIF(data->>'amountPaid', '')::numeric, COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total))
+         END), 0)::numeric AS collected,
+         COALESCE(SUM(COALESCE(NULLIF(data->>'amountDue', '')::numeric, amount_due)), 0)::numeric AS credit_due,
+         COALESCE(SUM(CASE
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'cash' THEN COALESCE(NULLIF(data->>'amountPaid', '')::numeric, COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total))
            WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE((data->'paymentBreakdown'->>'cash')::numeric, 0)
            ELSE 0
          END), 0)::numeric AS cash,
          COALESCE(SUM(CASE
-           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'card' THEN COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'card' THEN COALESCE(NULLIF(data->>'amountPaid', '')::numeric, COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total))
            WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE((data->'paymentBreakdown'->>'card')::numeric, 0)
            ELSE 0
          END), 0)::numeric AS card,
          COALESCE(SUM(CASE
-           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'bank-transfer' THEN COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'bank-transfer' THEN COALESCE(NULLIF(data->>'amountPaid', '')::numeric, COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total))
            WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE((data->'paymentBreakdown'->>'bank-transfer')::numeric, 0)
            ELSE 0
          END), 0)::numeric AS transfer,
@@ -117,7 +122,8 @@ export async function GET(request: NextRequest) {
              - COALESCE((data->'paymentBreakdown'->>'card')::numeric, 0)
              - COALESCE((data->'paymentBreakdown'->>'bank-transfer')::numeric, 0)
            WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) IN ('cash', 'card', 'bank-transfer') THEN 0
-           ELSE COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'credit' THEN 0
+           ELSE COALESCE(NULLIF(data->>'amountPaid', '')::numeric, COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total))
          END), 0)::numeric AS other
        FROM pos_tenant_sales
        WHERE ${where.join(' AND ')}`,
@@ -140,6 +146,8 @@ export async function GET(request: NextRequest) {
       limit: 500,
       summary: {
         total: Number(summary.total ?? 0),
+        collected: Number(summary.collected ?? 0),
+        creditDue: Number(summary.credit_due ?? 0),
         cash: Number(summary.cash ?? 0),
         card: Number(summary.card ?? 0),
         transfer: Number(summary.transfer ?? 0),
