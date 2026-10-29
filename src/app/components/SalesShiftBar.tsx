@@ -236,25 +236,31 @@ export default function SalesShiftBar() {
   const payoutTotalsByMethod = cashPayouts.reduce<Record<PayoutMethod, number>>(
     (totals, payout) => {
       const amount = parseAmount(payout.amount);
-      if (Number.isFinite(amount) && amount > 0) totals[payout.method] += amount;
+      if (Number.isFinite(amount) && amount > 0) {
+        totals[payout.method] = amountFromCents(
+          cents(totals[payout.method]) + cents(amount)
+        );
+      }
       return totals;
     },
     { cash: 0, card: 0, 'bank-transfer': 0 }
   );
-  const payoutTotal = Object.values(payoutTotalsByMethod).reduce((sum, amount) => sum + amount, 0);
+  const payoutTotal = amountFromCents(
+    Object.values(payoutTotalsByMethod).reduce((sum, amount) => sum + cents(amount), 0)
+  );
   const expectedCashBeforePayouts = amountFromCents(cents(shift?.openingCash) + cents(cashSales));
   const paymentBreakdown = periodPaymentBreakdown;
-  const netCashSales = Math.max(
-    0,
-    Number(paymentBreakdown.cash ?? cashSales) - payoutTotalsByMethod.cash
+  const netCashSales = amountFromCents(
+    Math.max(0, cents(paymentBreakdown.cash ?? cashSales) - cents(payoutTotalsByMethod.cash))
   );
-  const netCardPayments = Math.max(
-    0,
-    Number(paymentBreakdown.card ?? 0) - payoutTotalsByMethod.card
+  const netCardPayments = amountFromCents(
+    Math.max(0, cents(paymentBreakdown.card ?? 0) - cents(payoutTotalsByMethod.card))
   );
-  const netTransferPayments = Math.max(
-    0,
-    Number(paymentBreakdown['bank-transfer'] ?? 0) - payoutTotalsByMethod['bank-transfer']
+  const netTransferPayments = amountFromCents(
+    Math.max(
+      0,
+      cents(paymentBreakdown['bank-transfer'] ?? 0) - cents(payoutTotalsByMethod['bank-transfer'])
+    )
   );
   const expectedCash = amountFromCents(
     cents(shift?.openingCash) + cents(cashSales) - cents(payoutTotalsByMethod.cash)
@@ -681,7 +687,7 @@ export default function SalesShiftBar() {
               </p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
-              <p className="text-muted-foreground">Cash after payouts</p>
+              <p className="text-muted-foreground">Cash sales after payouts</p>
               <p className="mt-1 font-bold">{formatMoney(netCashSales, settings.currency)}</p>
             </div>
             <div className="rounded-lg border border-border p-2.5">

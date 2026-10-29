@@ -169,7 +169,9 @@ function payoutTotals(value: unknown) {
     const method =
       payout.method === 'card' || payout.method === 'bank-transfer' ? payout.method : 'cash';
     const amount = Number(payout.amount ?? 0);
-    if (Number.isFinite(amount) && amount > 0) totals[method] += amount;
+    if (Number.isFinite(amount) && amount > 0) {
+      totals[method] = amountFromCents(cents(totals[method]) + cents(amount));
+    }
   }
   return totals;
 }
@@ -253,12 +255,13 @@ export async function GET(request: NextRequest) {
     const cashSales = paymentBreakdown.cash ?? 0;
     const cashPayouts = Array.isArray(shift.cashPayouts) ? shift.cashPayouts : [];
     const payoutTotalByMethod = payoutTotals(cashPayouts);
-    const payoutTotal = Object.values(payoutTotalByMethod).reduce((sum, amount) => sum + amount, 0);
+    const payoutTotal = amountFromCents(
+      Object.values(payoutTotalByMethod).reduce((sum, amount) => sum + cents(amount), 0)
+    );
     const netPaymentBreakdown = { ...paymentBreakdown };
     for (const method of ['cash', 'card', 'bank-transfer']) {
-      netPaymentBreakdown[method] = Math.max(
-        0,
-        (paymentBreakdown[method] ?? 0) - (payoutTotalByMethod[method] ?? 0)
+      netPaymentBreakdown[method] = amountFromCents(
+        Math.max(0, cents(paymentBreakdown[method]) - cents(payoutTotalByMethod[method]))
       );
     }
     return NextResponse.json({
@@ -462,9 +465,8 @@ export async function POST(request: NextRequest) {
           );
         }
       }
-      const payoutTotal = Object.values(payoutTotalByMethod).reduce(
-        (sum, amount) => sum + amount,
-        0
+      const payoutTotal = amountFromCents(
+        Object.values(payoutTotalByMethod).reduce((sum, amount) => sum + cents(amount), 0)
       );
       const expectedCashCents =
         cents(shift.openingCash) + cents(cashSales) - cents(payoutTotalByMethod.cash);
@@ -492,7 +494,7 @@ export async function POST(request: NextRequest) {
         netPaymentBreakdown: Object.fromEntries(
           Object.entries(paymentBreakdown).map(([method, amount]) => [
             method,
-            Math.max(0, amount - (payoutTotalByMethod[method] ?? 0)),
+            amountFromCents(Math.max(0, cents(amount) - cents(payoutTotalByMethod[method]))),
           ])
         ),
         expectedCash,
