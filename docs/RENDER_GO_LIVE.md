@@ -5,6 +5,9 @@
 Deploy this repository as a Render **Node web service**, not a static site. The included `render.yaml` uses:
 
 - `npm ci && npm run build`
+- `npm run reconcile:sales -- --apply` before each deployment to repair/rebuild the indexed
+  sales projection from canonical sale records. The command is transactional and aborts the
+  deployment if the repair cannot complete.
 - `npm start`
 - `/api/health` as the deployment health check
 - Node 22

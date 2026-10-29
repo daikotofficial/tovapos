@@ -79,6 +79,10 @@ function posDateTimeKey(value: string): string {
   return `${parts.date}T${parts.time}`;
 }
 
+function minuteBoundary(value: unknown): string {
+  return typeof value === 'string' ? value.slice(0, 16) : '';
+}
+
 function salesPaymentBreakdown(rows: SaleTransaction[]): Record<string, number> {
   const breakdown: Record<string, number> = {
     cash: 0,
@@ -209,8 +213,8 @@ export default function SalesShiftBar() {
   );
   const authoritativePeriodMatches = Boolean(
     process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' &&
-      shift?.closingPeriodFrom === closingPeriodFrom &&
-      shift?.closingPeriodTo === closingPeriodTo
+      minuteBoundary(shift?.closingPeriodFrom) === closingPeriodFrom &&
+      minuteBoundary(shift?.closingPeriodTo) === closingPeriodTo
   );
   const periodPaymentBreakdown = authoritativePeriodMatches
     ? shift?.paymentBreakdown ?? {}
@@ -258,7 +262,10 @@ export default function SalesShiftBar() {
 
   const initializeClosingPeriod = (source: LocalSalesShift | null) => {
     const start = posDateTimeParts(source?.openedAt ?? new Date().toISOString());
-    const end = posDateTimeParts(new Date().toISOString());
+    // TimePicker has minute precision while sale timestamps have seconds. Move the
+    // default exclusive end into the next minute so a sale made in the current
+    // minute cannot make an otherwise balanced shift look incomplete.
+    const end = posDateTimeParts(new Date(Date.now() + 60_000).toISOString());
     setClosingPeriodFromDate(start.date);
     setClosingPeriodFromTime(start.time);
     setClosingPeriodToDate(end.date);

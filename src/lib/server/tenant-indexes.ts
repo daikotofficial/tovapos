@@ -113,11 +113,20 @@ export async function upsertTenantSaleIndex(
     )
     ON CONFLICT (tenant_id, id) DO UPDATE SET
       transaction_id = EXCLUDED.transaction_id,
+      timestamp = EXCLUDED.timestamp,
+      cashier = EXCLUDED.cashier,
+      customer_name = EXCLUDED.customer_name,
       status = EXCLUDED.status,
       payment_method = EXCLUDED.payment_method,
       payment_status = EXCLUDED.payment_status,
+      subtotal = EXCLUDED.subtotal,
+      discount_total = EXCLUDED.discount_total,
+      tax_amount = EXCLUDED.tax_amount,
+      grand_total = EXCLUDED.grand_total,
       amount_paid = EXCLUDED.amount_paid,
       amount_due = EXCLUDED.amount_due,
+      gross_profit = EXCLUDED.gross_profit,
+      item_count = EXCLUDED.item_count,
       data = EXCLUDED.data,
       updated_at = now()`,
     [

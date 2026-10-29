@@ -59,10 +59,16 @@ type InventoryCursor = { name: string; id: string };
 // double-counting records that have already been indexed.
 const SALES_SOURCE_CTE = `
 WITH sale_rows AS (
-  SELECT tenant_id, id, timestamp, cashier,
+  SELECT tenant_id, id,
+         coalesce(nullif(data->>'timestamp', '')::timestamptz, timestamp) AS timestamp,
+         coalesce(nullif(data->>'cashier', ''), cashier) AS cashier,
          coalesce(nullif(lower(trim(data->>'status')), ''), nullif(lower(trim(status)), ''), 'completed') AS status,
-         grand_total, gross_profit,
-         amount_due, tax_amount, payment_method, data
+         coalesce(nullif(data->>'grandTotal', '')::float8, grand_total) AS grand_total,
+         coalesce(nullif(data->>'grossProfit', '')::float8, gross_profit) AS gross_profit,
+         coalesce(nullif(data->>'amountDue', '')::float8, amount_due) AS amount_due,
+         coalesce(nullif(data->>'taxAmount', '')::float8, tax_amount) AS tax_amount,
+         coalesce(nullif(data->>'paymentMethod', ''), payment_method) AS payment_method,
+         data
   FROM pos_tenant_sales
   WHERE tenant_id = $1
   UNION ALL

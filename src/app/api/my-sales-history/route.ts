@@ -95,29 +95,29 @@ export async function GET(request: NextRequest) {
     }
     const summaryResult = await getPosPool().query(
       `SELECT
-         COALESCE(SUM(grand_total), 0)::numeric AS total,
+         COALESCE(SUM(COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)), 0)::numeric AS total,
          COALESCE(SUM(CASE
-           WHEN payment_method = 'cash' THEN grand_total
-           WHEN payment_method = 'split' THEN COALESCE((data->'paymentBreakdown'->>'cash')::numeric, 0)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'cash' THEN COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE((data->'paymentBreakdown'->>'cash')::numeric, 0)
            ELSE 0
          END), 0)::numeric AS cash,
          COALESCE(SUM(CASE
-           WHEN payment_method = 'card' THEN grand_total
-           WHEN payment_method = 'split' THEN COALESCE((data->'paymentBreakdown'->>'card')::numeric, 0)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'card' THEN COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE((data->'paymentBreakdown'->>'card')::numeric, 0)
            ELSE 0
          END), 0)::numeric AS card,
          COALESCE(SUM(CASE
-           WHEN payment_method = 'bank-transfer' THEN grand_total
-           WHEN payment_method = 'split' THEN COALESCE((data->'paymentBreakdown'->>'bank-transfer')::numeric, 0)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'bank-transfer' THEN COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE((data->'paymentBreakdown'->>'bank-transfer')::numeric, 0)
            ELSE 0
          END), 0)::numeric AS transfer,
          COALESCE(SUM(CASE
-           WHEN payment_method = 'split' THEN grand_total
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
              - COALESCE((data->'paymentBreakdown'->>'cash')::numeric, 0)
              - COALESCE((data->'paymentBreakdown'->>'card')::numeric, 0)
              - COALESCE((data->'paymentBreakdown'->>'bank-transfer')::numeric, 0)
-           WHEN payment_method IN ('cash', 'card', 'bank-transfer') THEN 0
-           ELSE grand_total
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) IN ('cash', 'card', 'bank-transfer') THEN 0
+           ELSE COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
          END), 0)::numeric AS other
        FROM pos_tenant_sales
        WHERE ${where.join(' AND ')}`,

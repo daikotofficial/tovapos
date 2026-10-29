@@ -68,6 +68,27 @@ function assertPeriod(from: PeriodBoundary | null, to: PeriodBoundary | null): v
   }
 }
 
+function assertSameBusinessDate(
+  businessDate: string,
+  from: PeriodBoundary | null,
+  to: PeriodBoundary | null
+): void {
+  if (from && from.value.slice(0, 10) !== businessDate) {
+    throw new HttpError(
+      400,
+      "Closing period start must use today's business date",
+      'VALIDATION_ERROR'
+    );
+  }
+  if (to && to.value.slice(0, 10) !== businessDate) {
+    throw new HttpError(
+      400,
+      "Closing period end must use today's business date",
+      'VALIDATION_ERROR'
+    );
+  }
+}
+
 function appendPeriodFilter(
   values: unknown[],
   where: string[],
@@ -166,15 +187,9 @@ export async function GET(request: NextRequest) {
       'Period start'
     );
     const periodTo = validPeriodBoundary(request.nextUrl.searchParams.get('to'), 'Period end');
-    if (periodFrom || periodTo) assertPeriod(periodFrom, periodTo);
-    if (periodTo) {
-      const future = await getPosPool().query(
-        `SELECT ($1::timestamp AT TIME ZONE $2) > now() AS is_future`,
-        [periodTo.value, process.env.POS_TIMEZONE ?? 'Africa/Lagos']
-      );
-      if (future.rows[0]?.is_future) {
-        throw new HttpError(400, 'The closing period cannot end in the future', 'VALIDATION_ERROR');
-      }
+    if (periodFrom || periodTo) {
+      assertPeriod(periodFrom, periodTo);
+      assertSameBusinessDate(businessDate, periodFrom, periodTo);
     }
     const values: unknown[] = [auth.tenantId, auth.user.id, shift.id];
     const salesWhere = [
@@ -358,13 +373,7 @@ export async function POST(request: NextRequest) {
       if (!periodFrom || !periodTo) {
         throw new HttpError(400, 'Closing period is required', 'VALIDATION_ERROR');
       }
-      const future = await client.query(
-        `SELECT ($1::timestamp AT TIME ZONE $2) > now() AS is_future`,
-        [periodTo.value, process.env.POS_TIMEZONE ?? 'Africa/Lagos']
-      );
-      if (future.rows[0]?.is_future) {
-        throw new HttpError(400, 'The closing period cannot end in the future', 'VALIDATION_ERROR');
-      }
+      assertSameBusinessDate(businessDate, periodFrom, periodTo);
       const sales = await client.query(
         `SELECT data FROM pos_tenant_sales
          WHERE tenant_id = $1 AND status = 'completed'

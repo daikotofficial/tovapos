@@ -52,6 +52,7 @@
     "print-agent": "node scripts/print-agent.mjs",
     "test:security": "node scripts/verify-security.mjs",
     "test:warehouse": "node --test scripts/verify-warehouse-rules.mjs",
+    "reconcile:sales": "node scripts/reconcile-sale-index.mjs",
     "backup:onprem": "node scripts/backup-onprem.mjs",
     "db:local:start": "/usr/lib/postgresql/16/bin/pg_ctl -D .pgdata -o \"-p 55432 -k /home/motherrepo/projects/TOVAPOS/tovapos/.pgdata\" -l .pgdata/postgres.log start",
     "db:local:stop": "/usr/lib/postgresql/16/bin/pg_ctl -D .pgdata stop"

@@ -5,6 +5,7 @@ services:
     plan: starter
     autoDeploy: true
     buildCommand: npm ci && npm run build
+    preDeployCommand: npm run reconcile:sales -- --apply
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
