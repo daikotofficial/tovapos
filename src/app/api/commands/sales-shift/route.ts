@@ -494,7 +494,7 @@ export async function POST(request: NextRequest) {
       if (cents(closingCash) !== expectedCashCents) {
         throw new HttpError(
           409,
-          'Cash does not balance. Sales cannot be closed until the count matches expected cash.',
+          `Cash does not balance. Expected ${amountFromCents(expectedCashCents).toFixed(2)}, counted ${amountFromCents(cents(closingCash)).toFixed(2)}.`,
           'CASH_OUT_OF_BALANCE'
         );
       }

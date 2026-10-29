@@ -280,18 +280,18 @@ export default function SalesShiftBar() {
       cents(paymentBreakdown['bank-transfer'] ?? 0) - cents(payoutTotalsByMethod['bank-transfer'])
     )
   );
-  const expectedCash = amountFromCents(
+  const expectedCashCents =
     cents(shift?.openingCash) +
-      cents(cashSales) -
-      cents(cashExpenseTotal) -
-      cents(payoutTotalsByMethod.cash)
-  );
+    cents(cashSales) -
+    cents(cashExpenseTotal) -
+    cents(payoutTotalsByMethod.cash);
+  const expectedCash = amountFromCents(expectedCashCents);
   const nonCashSales = Math.max(0, totalSales - cashSales);
   const countedCash = Number(closingCash);
-  const variance = Number.isFinite(countedCash)
-    ? amountFromCents(cents(countedCash) - cents(expectedCash))
-    : 0;
-  const balanced = closingCash !== '' && cents(countedCash) === cents(expectedCash);
+  const countedCashCents = Number.isFinite(countedCash) ? cents(countedCash) : 0;
+  const varianceCents = countedCashCents - expectedCashCents;
+  const variance = amountFromCents(varianceCents);
+  const balanced = closingCash !== '' && varianceCents === 0;
   const varianceLabel = variance > 0 ? 'Over by' : 'Short by';
   const periodReady = Boolean(
     closingPeriodFrom &&
@@ -888,8 +888,9 @@ export default function SalesShiftBar() {
               ) : (
                 <>
                   <AlertTriangle size={15} /> {varianceLabel}{' '}
-                  {formatMoney(Math.abs(variance), settings.currency)}. Adjust the count before
-                  closing.
+                  {formatMoney(Math.abs(varianceCents) / 100, settings.currency)}. Expected{' '}
+                  {formatMoney(expectedCash, settings.currency)}. Counted{' '}
+                  {formatMoney(countedCash, settings.currency)}.
                 </>
               )}
             </div>
