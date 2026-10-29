@@ -117,7 +117,7 @@ export async function GET(request: NextRequest) {
            ELSE 0
          END), 0)::numeric AS transfer,
          COALESCE(SUM(CASE
-           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total)
+           WHEN COALESCE(NULLIF(data->>'paymentMethod', ''), payment_method) = 'split' THEN COALESCE(NULLIF(data->>'amountPaid', '')::numeric, COALESCE(NULLIF(data->>'grandTotal', '')::numeric, grand_total))
              - COALESCE((data->'paymentBreakdown'->>'cash')::numeric, 0)
              - COALESCE((data->'paymentBreakdown'->>'card')::numeric, 0)
              - COALESCE((data->'paymentBreakdown'->>'bank-transfer')::numeric, 0)

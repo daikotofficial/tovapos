@@ -45,10 +45,11 @@ function summarizeSales(rows: SaleTransaction[]): SalesSummary {
   const summary = { ...emptySummary };
   for (const sale of rows) {
     const saleTotal = cents(sale.grandTotal);
+    const paidTotal =
+      sale.paymentMethod === 'credit' ? 0 : cents(sale.amountPaid ?? sale.grandTotal);
     summary.total += saleTotal;
     summary.creditDue += cents(sale.amountDue);
-    if (sale.paymentMethod !== 'credit')
-      summary.collected += cents(sale.amountPaid ?? sale.grandTotal);
+    summary.collected += paidTotal;
     if (sale.paymentMethod === 'split' && sale.paymentBreakdown) {
       const cash = cents(sale.paymentBreakdown.cash);
       const card = cents(sale.paymentBreakdown.card);
@@ -56,11 +57,11 @@ function summarizeSales(rows: SaleTransaction[]): SalesSummary {
       summary.cash += cash;
       summary.card += card;
       summary.transfer += transfer;
-      summary.other += saleTotal - cash - card - transfer;
-    } else if (sale.paymentMethod === 'cash') summary.cash += saleTotal;
-    else if (sale.paymentMethod === 'card') summary.card += saleTotal;
-    else if (sale.paymentMethod === 'bank-transfer') summary.transfer += saleTotal;
-    else summary.other += saleTotal;
+      summary.other += paidTotal - cash - card - transfer;
+    } else if (sale.paymentMethod === 'cash') summary.cash += paidTotal;
+    else if (sale.paymentMethod === 'card') summary.card += paidTotal;
+    else if (sale.paymentMethod === 'bank-transfer') summary.transfer += paidTotal;
+    else summary.other += paidTotal;
   }
   return {
     total: amount(summary.total),
