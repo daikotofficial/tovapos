@@ -266,7 +266,8 @@ export default function SalesShiftBar() {
   const netCashSales = amountFromCents(
     Math.max(
       0,
-      cents(paymentBreakdown.cash ?? cashSales) -
+      cents(shift?.openingCash) +
+        cents(paymentBreakdown.cash ?? cashSales) -
         cents(cashExpenseTotal) -
         cents(payoutTotalsByMethod.cash)
     )
@@ -713,7 +714,7 @@ export default function SalesShiftBar() {
               <p className="mt-1 font-bold">{formatMoney(cashExpenseTotal, settings.currency)}</p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
-              <p className="text-muted-foreground">Cash sales after expenses/payouts</p>
+              <p className="text-muted-foreground">Cash at hand after expenses/payouts</p>
               <p className="mt-1 font-bold">{formatMoney(netCashSales, settings.currency)}</p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
@@ -857,7 +858,7 @@ export default function SalesShiftBar() {
           </div>
           <label className="block space-y-1">
             <span className="text-xs font-medium text-muted-foreground">
-              Actual cash counted after payouts
+              Actual cash counted after expenses/payouts
             </span>
             <input
               autoFocus
