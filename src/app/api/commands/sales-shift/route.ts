@@ -215,6 +215,14 @@ export async function GET(request: NextRequest) {
        WHERE ${salesWhere.join(' AND ')}`,
       values
     );
+    const cashExpenses = await getPosPool().query(
+      `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+       FROM pos_tenant_expenses
+       WHERE tenant_id = $1 AND status = 'recorded'
+         AND payment_method = 'cash' AND incurred_at = $2::date`,
+      [auth.tenantId, businessDate]
+    );
+    const cashExpenseTotal = Number(cashExpenses.rows[0]?.total ?? 0);
     const shiftSalesCount = periodFrom
       ? Number(
           (
@@ -278,8 +286,9 @@ export async function GET(request: NextRequest) {
       payoutTotal,
       payoutTotalByMethod,
       netPaymentBreakdown,
+      cashExpenseTotal,
       expectedCash: amountFromCents(
-        cents(shift.openingCash) + cents(cashSales) - cents(payoutTotalByMethod.cash)
+        cents(shift.openingCash) + cents(cashSales) - cents(cashExpenseTotal) - cents(payoutTotalByMethod.cash)
       ),
     });
   } catch (error) {
@@ -403,6 +412,14 @@ export async function POST(request: NextRequest) {
           periodTo.value,
         ]
       );
+      const cashExpenses = await client.query(
+        `SELECT COALESCE(SUM(amount), 0)::numeric AS total
+         FROM pos_tenant_expenses
+         WHERE tenant_id = $1 AND status = 'recorded'
+           AND payment_method = 'cash' AND incurred_at = $2::date`,
+        [auth.tenantId, businessDate]
+      );
+      const cashExpenseTotal = Number(cashExpenses.rows[0]?.total ?? 0);
       const shiftSalesCount = Number(
         (
           await client.query(
@@ -452,7 +469,7 @@ export async function POST(request: NextRequest) {
       const cashPayouts = normalizeCashPayouts(body.cashPayouts, auth.user.id);
       const payoutTotalByMethod = payoutTotals(cashPayouts);
       const availableByMethod = {
-        cash: Number(shift.openingCash ?? 0) + cashSales,
+        cash: Number(shift.openingCash ?? 0) + cashSales - cashExpenseTotal,
         card: paymentBreakdown.card ?? 0,
         'bank-transfer': paymentBreakdown['bank-transfer'] ?? 0,
       };
@@ -469,7 +486,10 @@ export async function POST(request: NextRequest) {
         Object.values(payoutTotalByMethod).reduce((sum, amount) => sum + cents(amount), 0)
       );
       const expectedCashCents =
-        cents(shift.openingCash) + cents(cashSales) - cents(payoutTotalByMethod.cash);
+        cents(shift.openingCash) +
+        cents(cashSales) -
+        cents(cashExpenseTotal) -
+        cents(payoutTotalByMethod.cash);
       const expectedCash = amountFromCents(expectedCashCents);
       if (cents(closingCash) !== expectedCashCents) {
         throw new HttpError(
@@ -491,6 +511,7 @@ export async function POST(request: NextRequest) {
         cashPayouts,
         payoutTotal,
         payoutTotalByMethod,
+        cashExpenseTotal,
         netPaymentBreakdown: Object.fromEntries(
           Object.entries(paymentBreakdown).map(([method, amount]) => [
             method,

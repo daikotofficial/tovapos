@@ -114,7 +114,7 @@ function salesPaymentBreakdown(rows: SaleTransaction[]): Record<string, number> 
 }
 
 export default function SalesShiftBar() {
-  const { currentUser, sales, settings } = usePosStore();
+  const { currentUser, sales, settings, expenses } = usePosStore();
   const [shift, setShift] = useState<LocalSalesShift | null>(null);
   const [mode, setMode] = useState<'open' | 'close' | null>(null);
   const [openingCash, setOpeningCash] = useState('');
@@ -233,6 +233,17 @@ export default function SalesShiftBar() {
   const localPeriodComplete = periodSales.length === todaySales.length;
   const totalSales = authoritativePeriodMatches ? shift?.totalSales ?? 0 : periodTotalSales;
   const cashSales = authoritativePeriodMatches ? shift?.cashSales ?? 0 : periodCashSales;
+  const localCashExpenseTotal = expenses
+    .filter(
+      (expense) =>
+        expense.status === 'recorded' &&
+        expense.paymentMethod === 'cash' &&
+        expense.incurredAt.slice(0, 10) === businessDate()
+    )
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const cashExpenseTotal = authoritativePeriodMatches
+    ? shift?.cashExpenseTotal ?? 0
+    : amountFromCents(cents(localCashExpenseTotal));
   const payoutTotalsByMethod = cashPayouts.reduce<Record<PayoutMethod, number>>(
     (totals, payout) => {
       const amount = parseAmount(payout.amount);
@@ -248,10 +259,17 @@ export default function SalesShiftBar() {
   const payoutTotal = amountFromCents(
     Object.values(payoutTotalsByMethod).reduce((sum, amount) => sum + cents(amount), 0)
   );
-  const expectedCashBeforePayouts = amountFromCents(cents(shift?.openingCash) + cents(cashSales));
+  const expectedCashBeforePayouts = amountFromCents(
+    cents(shift?.openingCash) + cents(cashSales) - cents(cashExpenseTotal)
+  );
   const paymentBreakdown = periodPaymentBreakdown;
   const netCashSales = amountFromCents(
-    Math.max(0, cents(paymentBreakdown.cash ?? cashSales) - cents(payoutTotalsByMethod.cash))
+    Math.max(
+      0,
+      cents(paymentBreakdown.cash ?? cashSales) -
+        cents(cashExpenseTotal) -
+        cents(payoutTotalsByMethod.cash)
+    )
   );
   const netCardPayments = amountFromCents(
     Math.max(0, cents(paymentBreakdown.card ?? 0) - cents(payoutTotalsByMethod.card))
@@ -263,7 +281,10 @@ export default function SalesShiftBar() {
     )
   );
   const expectedCash = amountFromCents(
-    cents(shift?.openingCash) + cents(cashSales) - cents(payoutTotalsByMethod.cash)
+    cents(shift?.openingCash) +
+      cents(cashSales) -
+      cents(cashExpenseTotal) -
+      cents(payoutTotalsByMethod.cash)
   );
   const nonCashSales = Math.max(0, totalSales - cashSales);
   const countedCash = Number(closingCash);
@@ -271,6 +292,7 @@ export default function SalesShiftBar() {
     ? amountFromCents(cents(countedCash) - cents(expectedCash))
     : 0;
   const balanced = closingCash !== '' && cents(countedCash) === cents(expectedCash);
+  const varianceLabel = variance > 0 ? 'Over by' : 'Short by';
   const periodReady = Boolean(
     closingPeriodFrom &&
       closingPeriodTo &&
@@ -687,7 +709,11 @@ export default function SalesShiftBar() {
               </p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
-              <p className="text-muted-foreground">Cash sales after payouts</p>
+              <p className="text-muted-foreground">Recorded cash expenses</p>
+              <p className="mt-1 font-bold">{formatMoney(cashExpenseTotal, settings.currency)}</p>
+            </div>
+            <div className="rounded-lg border border-border p-2.5">
+              <p className="text-muted-foreground">Cash sales after expenses/payouts</p>
               <p className="mt-1 font-bold">{formatMoney(netCashSales, settings.currency)}</p>
             </div>
             <div className="rounded-lg border border-border p-2.5">
@@ -861,7 +887,7 @@ export default function SalesShiftBar() {
                 'Cash balances exactly.'
               ) : (
                 <>
-                  <AlertTriangle size={15} /> Short / over by{' '}
+                  <AlertTriangle size={15} /> {varianceLabel}{' '}
                   {formatMoney(Math.abs(variance), settings.currency)}. Adjust the count before
                   closing.
                 </>
@@ -870,7 +896,8 @@ export default function SalesShiftBar() {
           )}
           <p className="text-xs text-muted-foreground">
             Opening cash {formatMoney(shift?.openingCash ?? 0, settings.currency)} + cash sales{' '}
-            {formatMoney(cashSales, settings.currency)} - cash payouts{' '}
+            {formatMoney(cashSales, settings.currency)} - recorded cash expenses{' '}
+            {formatMoney(cashExpenseTotal, settings.currency)} - additional cash payouts{' '}
             {formatMoney(payoutTotalsByMethod.cash, settings.currency)} = expected cash at hand.
           </p>
         </div>

@@ -9,6 +9,7 @@ export interface LocalSalesShift {
   closedAt?: string;
   closingCash?: number;
   expectedCash?: number;
+  cashExpenseTotal?: number;
   cashVariance?: number;
   totalSales?: number;
   cashSales?: number;
