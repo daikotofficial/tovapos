@@ -42,6 +42,15 @@ function parseAmount(value: string): number {
   return Number(value.replace(/,/g, ''));
 }
 
+function cents(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
+}
+
+function amountFromCents(value: number): number {
+  return value / 100;
+}
+
 function formatAmountInput(value: string): string {
   const raw = value.replace(/,/g, '').trim();
   if (!raw || raw === '.') return raw;
@@ -233,7 +242,7 @@ export default function SalesShiftBar() {
     { cash: 0, card: 0, 'bank-transfer': 0 }
   );
   const payoutTotal = Object.values(payoutTotalsByMethod).reduce((sum, amount) => sum + amount, 0);
-  const expectedCashBeforePayouts = (shift?.openingCash ?? 0) + cashSales;
+  const expectedCashBeforePayouts = amountFromCents(cents(shift?.openingCash) + cents(cashSales));
   const paymentBreakdown = periodPaymentBreakdown;
   const netCashSales = Math.max(
     0,
@@ -247,11 +256,15 @@ export default function SalesShiftBar() {
     0,
     Number(paymentBreakdown['bank-transfer'] ?? 0) - payoutTotalsByMethod['bank-transfer']
   );
-  const expectedCash = expectedCashBeforePayouts - payoutTotalsByMethod.cash;
+  const expectedCash = amountFromCents(
+    cents(shift?.openingCash) + cents(cashSales) - cents(payoutTotalsByMethod.cash)
+  );
   const nonCashSales = Math.max(0, totalSales - cashSales);
   const countedCash = Number(closingCash);
-  const variance = Number.isFinite(countedCash) ? countedCash - expectedCash : 0;
-  const balanced = closingCash !== '' && Math.abs(variance) < 0.005;
+  const variance = Number.isFinite(countedCash)
+    ? amountFromCents(cents(countedCash) - cents(expectedCash))
+    : 0;
+  const balanced = closingCash !== '' && cents(countedCash) === cents(expectedCash);
   const periodReady = Boolean(
     closingPeriodFrom &&
       closingPeriodTo &&

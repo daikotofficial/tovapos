@@ -20,6 +20,15 @@ function currentBusinessDate(): string {
   }).format(new Date());
 }
 
+function cents(value: unknown): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
+}
+
+function amountFromCents(value: number): number {
+  return value / 100;
+}
+
 function validId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9:_-]{8,160}$/.test(value);
 }
@@ -266,7 +275,9 @@ export async function GET(request: NextRequest) {
       payoutTotal,
       payoutTotalByMethod,
       netPaymentBreakdown,
-      expectedCash: Number(shift.openingCash ?? 0) + cashSales - (payoutTotalByMethod.cash ?? 0),
+      expectedCash: amountFromCents(
+        cents(shift.openingCash) + cents(cashSales) - cents(payoutTotalByMethod.cash)
+      ),
     });
   } catch (error) {
     return errorResponse(error);
@@ -455,9 +466,10 @@ export async function POST(request: NextRequest) {
         (sum, amount) => sum + amount,
         0
       );
-      const expectedCash =
-        Number(shift.openingCash ?? 0) + cashSales - (payoutTotalByMethod.cash ?? 0);
-      if (Math.abs(closingCash - expectedCash) > 0.005) {
+      const expectedCashCents =
+        cents(shift.openingCash) + cents(cashSales) - cents(payoutTotalByMethod.cash);
+      const expectedCash = amountFromCents(expectedCashCents);
+      if (cents(closingCash) !== expectedCashCents) {
         throw new HttpError(
           409,
           'Cash does not balance. Sales cannot be closed until the count matches expected cash.',
