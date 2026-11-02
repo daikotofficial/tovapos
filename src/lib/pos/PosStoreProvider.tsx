@@ -117,7 +117,10 @@ interface PosStoreValue {
   }>;
   hasPermission: (permission: Permission) => boolean;
   hasViewPermission: (permission: Permission) => boolean;
-  upsertInventoryItem: (item: InventoryItem) => Promise<InventoryItem>;
+  upsertInventoryItem: (
+    item: InventoryItem,
+    expected?: { updatedAt: string; currentQty: number }
+  ) => Promise<InventoryItem>;
   deleteInventoryItem: (inventoryId: string) => Promise<void>;
   applyInventorySnapshot: (item: InventoryItem, movement?: StockMovement) => Promise<void>;
   upsertUser: (user: TovaUser) => Promise<TovaUser>;
@@ -737,6 +740,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
                     product: inventoryQueueItem.payload,
                     expectedUpdatedAt: (inventoryQueueItem.payload as VersionedInventoryItem)
                       ._expectedUpdatedAt,
+                    quantityMode: 'set',
                     quantityDelta: movement?.quantityDelta ?? 0,
                     reason: movement?.reason,
                   }),
@@ -1154,28 +1158,29 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const upsertInventoryItem = useCallback(
-    async (item: InventoryItem) => {
+    async (item: InventoryItem, expected?: { updatedAt: string; currentQty: number }) => {
       if (!hasActiveSubscription(settings)) {
         throw new Error(
           'An active subscription is required to manage products. Please subscribe to continue.'
         );
       }
       const existingItem = inventory.find((existing) => existing.id === item.id);
-      if (!existingItem && !hasPermission('add-product')) {
+      const isEditing = Boolean(existingItem || expected);
+      if (!isEditing && !hasPermission('add-product')) {
         throw new Error('Your role is not allowed to add products.');
       }
-      if (existingItem && !hasPermission('edit-product')) {
+      if (isEditing && !hasPermission('edit-product')) {
         throw new Error('Your role is not allowed to edit products.');
       }
       if (
-        existingItem &&
-        item.currentQty !== existingItem.currentQty &&
+        isEditing &&
+        item.currentQty !== (existingItem?.currentQty ?? expected?.currentQty) &&
         !hasPermission('adjust-stock')
       ) {
         throw new Error('Your role is not allowed to adjust stock quantity.');
       }
       const planUsage = getProductUsage(settings.subscriptionPlanId, inventory.length);
-      if (!existingItem && planUsage.isAtLimit) {
+      if (!isEditing && planUsage.isAtLimit) {
         throw new Error(
           `${planUsage.plan.name} allows ${planUsage.limit?.toLocaleString()} products. Upgrade your plan to add more inventory.`
         );
@@ -1198,7 +1203,8 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         barcode: item.barcode?.trim() || undefined,
         updatedAt: new Date().toISOString(),
       });
-      const action = existingItem ? 'update' : 'create';
+      const originalUpdatedAt = expected?.updatedAt ?? existingItem?.updatedAt;
+      const action = isEditing ? 'update' : 'create';
       const operationId = createOperationId(
         action === 'create' ? 'inventory-create' : 'inventory-update'
       );
@@ -1210,12 +1216,12 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
           action,
           payload: {
             ...normalized,
-            _expectedUpdatedAt: existingItem?.updatedAt,
+            _expectedUpdatedAt: originalUpdatedAt,
           },
         }),
         idempotencyKey: `stock:${operationId}`,
       };
-      const quantityBefore = existingItem?.currentQty ?? 0;
+      const quantityBefore = existingItem?.currentQty ?? expected?.currentQty ?? 0;
       const quantityDelta = normalized.currentQty - quantityBefore;
       const movement =
         quantityDelta === 0
@@ -1270,8 +1276,9 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
               operationId,
               idempotencyKey: `stock:${operationId}`,
               product: normalized,
+              quantityMode: 'set',
               quantityDelta,
-              expectedUpdatedAt: existingItem?.updatedAt,
+              expectedUpdatedAt: originalUpdatedAt,
               reason: movement?.reason,
             }),
           });

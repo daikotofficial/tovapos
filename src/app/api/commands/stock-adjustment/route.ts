@@ -26,6 +26,13 @@ export async function POST(request: NextRequest) {
     if (!Number.isFinite(quantityDelta)) {
       throw new HttpError(400, 'Stock quantity change is invalid', 'VALIDATION_ERROR');
     }
+    // Product edits send the desired final balance. Restock commands continue
+    // to use the additive delta behavior.
+    const quantityMode = body.quantityMode === 'set' ? 'set' : 'delta';
+    const requestedQuantity = Number(product.currentQty);
+    if (quantityMode === 'set' && (!Number.isFinite(requestedQuantity) || requestedQuantity < 0)) {
+      throw new HttpError(400, 'Stock quantity is invalid', 'VALIDATION_ERROR');
+    }
     const expectedUpdatedAt =
       typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined;
     const operationId =
@@ -88,7 +95,9 @@ export async function POST(request: NextRequest) {
       const productPermission = existing ? 'edit-product' : 'add-product';
       assertWritePermission(auth, productPermission);
       await assertTenantPlanPermission(auth.tenantId, productPermission);
-      if (existing && quantityDelta !== 0) {
+      const before = existing ? Number(existing.current_qty) : 0;
+      const effectiveDelta = quantityMode === 'set' ? requestedQuantity - before : quantityDelta;
+      if (existing && effectiveDelta !== 0) {
         assertWritePermission(auth, 'adjust-stock');
         await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
       }
@@ -103,8 +112,7 @@ export async function POST(request: NextRequest) {
           'STALE_INVENTORY_UPDATE'
         );
       }
-      const before = existing ? Number(existing.current_qty) : 0;
-      const after = before + quantityDelta;
+      const after = quantityMode === 'set' ? requestedQuantity : before + quantityDelta;
       if (after < 0) {
         throw new HttpError(
           409,
@@ -121,7 +129,7 @@ export async function POST(request: NextRequest) {
         updatedAt: now,
       };
       const movement: StockMovement | null =
-        quantityDelta === 0
+        effectiveDelta === 0
           ? null
           : {
               id: `move-${operationId}-${product.id}`,
@@ -132,7 +140,7 @@ export async function POST(request: NextRequest) {
               barcode: saved.barcode,
               batchLot: saved.batchLot,
               type: existing ? 'adjustment' : 'restock',
-              quantityDelta,
+              quantityDelta: effectiveDelta,
               quantityBefore: before,
               quantityAfter: after,
               unitCost: saved.unitCost,
@@ -181,7 +189,7 @@ export async function POST(request: NextRequest) {
           saved.id,
           operationId,
           JSON.stringify(saved),
-          JSON.stringify({ quantityBefore: before, quantityDelta, quantityAfter: after }),
+          JSON.stringify({ quantityBefore: before, quantityDelta: effectiveDelta, quantityAfter: after }),
         ]
       );
       await client.query('COMMIT');

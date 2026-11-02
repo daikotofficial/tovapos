@@ -314,8 +314,8 @@ export default function InventoryScreen() {
           setEditItem(null);
         }}
         editItem={editItem}
-        onSave={async (item) => {
-          await upsertInventoryItem(item);
+        onSave={async (item, expected) => {
+          await upsertInventoryItem(item, expected);
           const [pageResult, metricResult] = await Promise.all([
             loadInventoryPage({
               q: search,

@@ -22,7 +22,10 @@ interface AddStockModalProps {
   open: boolean;
   onClose: () => void;
   editItem: InventoryItem | null;
-  onSave: (item: InventoryItem) => void | Promise<void>;
+  onSave: (
+    item: InventoryItem,
+    expected?: { updatedAt: string; currentQty: number }
+  ) => void | Promise<void>;
 }
 
 type FormData = Omit<InventoryItem, 'id' | 'stockStatus' | 'packPricingEnabled' | 'packPrice' | 'packQuantity' | 'packUnit'> & {
@@ -298,7 +301,12 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       updatedAt: new Date().toISOString(),
     };
     try {
-      await onSave(saved);
+      await onSave(
+        saved,
+        editItem
+          ? { updatedAt: editItem.updatedAt ?? '', currentQty: editItem.currentQty }
+          : undefined
+      );
       toast.success(
         editItem ? `${saved.name} updated successfully` : `${saved.name} added to inventory`
       );
