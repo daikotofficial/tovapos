@@ -22,15 +22,11 @@ export async function POST(request: NextRequest) {
     if (!product?.id || !product.name?.trim() || !product.sku?.trim()) {
       throw new HttpError(400, 'Product name and SKU are required before saving', 'VALIDATION_ERROR');
     }
-    const quantityDelta = Number(body.quantityDelta ?? 0);
-    if (!Number.isFinite(quantityDelta)) {
-      throw new HttpError(400, 'Stock quantity change is invalid', 'VALIDATION_ERROR');
-    }
-    // Product edits send the desired final balance. Restock commands continue
-    // to use the additive delta behavior.
-    const quantityMode = body.quantityMode === 'set' ? 'set' : 'delta';
+    // This command is only for product corrections/initial quantities. It
+    // always stores the submitted quantity as the final balance. Receiving
+    // stock uses the separate stock-management command, which is additive.
     const requestedQuantity = Number(product.currentQty);
-    if (quantityMode === 'set' && (!Number.isFinite(requestedQuantity) || requestedQuantity < 0)) {
+    if (!Number.isFinite(requestedQuantity) || requestedQuantity < 0) {
       throw new HttpError(400, 'Stock quantity is invalid', 'VALIDATION_ERROR');
     }
     const expectedUpdatedAt =
@@ -96,7 +92,7 @@ export async function POST(request: NextRequest) {
       assertWritePermission(auth, productPermission);
       await assertTenantPlanPermission(auth.tenantId, productPermission);
       const before = existing ? Number(existing.current_qty) : 0;
-      const effectiveDelta = quantityMode === 'set' ? requestedQuantity - before : quantityDelta;
+      const effectiveDelta = requestedQuantity - before;
       if (existing && effectiveDelta !== 0) {
         assertWritePermission(auth, 'adjust-stock');
         await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
@@ -112,7 +108,7 @@ export async function POST(request: NextRequest) {
           'STALE_INVENTORY_UPDATE'
         );
       }
-      const after = quantityMode === 'set' ? requestedQuantity : before + quantityDelta;
+      const after = requestedQuantity;
       if (after < 0) {
         throw new HttpError(
           409,
