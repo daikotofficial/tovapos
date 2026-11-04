@@ -53,6 +53,7 @@ export async function POST(request: NextRequest) {
     const reason = text(body.reason);
     const notes = text(body.notes);
     const quantity = positive(body.quantity, 'Return quantity');
+    const branchName = auth.user.branch?.trim() || 'Main Store';
     const operationId = /^[A-Za-z0-9:_-]{8,160}$/.test(String(body.operationId ?? ''))
       ? String(body.operationId)
       : randomUUID();
@@ -98,10 +99,11 @@ export async function POST(request: NextRequest) {
         `SELECT id, data FROM pos_tenant_sales
          WHERE tenant_id = $1
            AND status = 'completed'
-           AND data->'items' @> jsonb_build_array(jsonb_build_object('inventoryItemId', $2))
+           AND coalesce(data->>'branch', 'Main Store') = $2
+           AND data->'items' @> jsonb_build_array(jsonb_build_object('inventoryItemId', $3))
          ORDER BY timestamp DESC, id DESC
          FOR UPDATE`,
-        [auth.tenantId, productId]
+        [auth.tenantId, branchName, productId]
       );
       stage = 'loading product';
       const inventoryResult = await client.query(
@@ -111,6 +113,15 @@ export async function POST(request: NextRequest) {
       );
       const inventoryRow = inventoryResult.rows[0];
       if (!inventoryRow) throw new HttpError(404, 'Product was not found', 'PRODUCT_NOT_FOUND');
+      const branchResult = await client.query(
+        `SELECT * FROM pos_branch_inventory
+         WHERE tenant_id = $1 AND branch = $2 AND inventory_item_id = $3 FOR UPDATE`,
+        [auth.tenantId, branchName, productId]
+      );
+      const branchRow = branchResult.rows[0];
+      if (branchName !== 'Main Store' && !branchRow) {
+        throw new HttpError(409, 'The branch stock record is missing; return was not posted', 'INVENTORY_CONFLICT');
+      }
 
       let remaining = quantity;
       const updatedSales: SaleTransaction[] = [];
@@ -224,8 +235,12 @@ export async function POST(request: NextRequest) {
         throw new HttpError(409, `Only ${quantity - remaining} of this product is available to return from completed sales`, 'RETURN_QUANTITY_EXCEEDS_SALES');
       }
 
-      const current = inventoryRow.data as InventoryItem;
-      const beforeQty = Number(inventoryRow.current_qty);
+      const current = (branchRow && branchName !== 'Main Store'
+        ? { ...(inventoryRow.data as InventoryItem), ...(branchRow.data as InventoryItem) }
+        : inventoryRow.data) as InventoryItem;
+      const beforeQty = branchRow && branchName !== 'Main Store'
+        ? Number(branchRow.current_qty)
+        : Number(inventoryRow.current_qty);
       const afterQty = beforeQty + restoredStockQuantity;
       const now = new Date().toISOString();
       const updated: InventoryItem = {
@@ -244,12 +259,21 @@ export async function POST(request: NextRequest) {
         await upsertTenantSaleIndex(client, auth.tenantId, normalizeSaleForIndex(sale));
       }
       stage = 'updating inventory';
-      await client.query(
-        `UPDATE pos_tenant_records SET data = $3::jsonb, version = version + 1, updated_at = now()
-         WHERE tenant_id = $1 AND store_name = 'inventory' AND record_id = $2`,
-        [auth.tenantId, productId, JSON.stringify(updated)]
-      );
-      await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
+      if (branchName === 'Main Store') {
+        await client.query(
+          `UPDATE pos_tenant_records SET data = $3::jsonb, version = version + 1, updated_at = now()
+           WHERE tenant_id = $1 AND store_name = 'inventory' AND record_id = $2`,
+          [auth.tenantId, productId, JSON.stringify(updated)]
+        );
+        await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
+      } else {
+        await client.query(
+          `UPDATE pos_branch_inventory
+           SET current_qty = $1, data = $2::jsonb, version = version + 1, updated_at = now()
+           WHERE tenant_id = $3 AND branch = $4 AND inventory_item_id = $5`,
+          [updated.currentQty, JSON.stringify(updated), auth.tenantId, branchName, productId]
+        );
+      }
       stage = 'restoring stock batches';
       const batchResult = await client.query(
         `SELECT record_id, data

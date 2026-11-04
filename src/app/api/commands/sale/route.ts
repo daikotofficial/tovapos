@@ -91,6 +91,7 @@ function parseItems(value: unknown): SaleCommandItem[] {
       !inventoryItemId ||
       !Number.isFinite(quantity) ||
       quantity <= 0 ||
+      !Number.isInteger(quantity) ||
       !Number.isFinite(discount) ||
       discount < 0 ||
       discount > 100 ||
@@ -309,6 +310,13 @@ export async function POST(request: NextRequest) {
             'PACK_PRICE_NOT_CONFIGURED'
           );
         }
+        if (requested.saleUnit !== 'piece' && requested.saleUnit !== productData.packUnit) {
+          throw new HttpError(
+            409,
+            `${row.name} is configured to sell by ${productData.packUnit}, not ${requested.saleUnit}`,
+            'SALE_UNIT_MISMATCH'
+          );
+        }
         const unitsPerSale =
           requested.saleUnit === 'piece' ? 1 : Math.floor(Number(productData.packQuantity));
         const canonicalPrice =
@@ -417,6 +425,15 @@ export async function POST(request: NextRequest) {
           }
           remainingToAllocate -= allocated;
         }
+        // Legacy products and branch transfers may not have receipt-batch rows.
+        // If rows exist, however, they must fully explain the piece deduction.
+        if (batchRows.rows.length > 0 && remainingToAllocate !== 0) {
+          throw new HttpError(
+            409,
+            `${updated.name} stock batches cannot account for this sale. Stock was not changed.`,
+            'STOCK_LEDGER_CONFLICT'
+          );
+        }
       }
 
       const taxable = money(subtotal - discountTotal);
@@ -454,6 +471,7 @@ export async function POST(request: NextRequest) {
         cashier: auth.user.name,
         cashierId: auth.user.id,
         shiftId,
+        branch: branchName,
         status: 'completed',
         syncStatus: 'synced',
       };

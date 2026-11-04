@@ -142,6 +142,7 @@ export interface SaleTransaction {
   cashier: string;
   cashierId?: string;
   shiftId?: string;
+  branch?: string;
   status: 'completed' | 'voided' | 'refunded';
   syncStatus: 'pending' | 'synced' | 'failed';
 }

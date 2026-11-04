@@ -78,12 +78,36 @@ export async function POST(request: NextRequest) {
         throw new HttpError(409, 'A refunded product no longer exists', 'INVENTORY_CONFLICT');
       }
       const byId = new Map(inventoryResult.rows.map((row) => [row.id as string, row]));
+      const branchName = typeof sale.branch === 'string' && sale.branch.trim() ? sale.branch.trim() : 'Main Store';
+      const branchResult = await client.query(
+        `SELECT * FROM pos_branch_inventory
+         WHERE tenant_id = $1 AND branch = $2 AND inventory_item_id = ANY($3::text[])
+         ORDER BY inventory_item_id FOR UPDATE`,
+        [auth.tenantId, branchName, sale.items.map((item) => item.inventoryItemId)]
+      );
+      const branchById = new Map(
+        branchResult.rows.map((row) => [row.inventory_item_id as string, row])
+      );
+      if (branchName !== 'Main Store' && branchById.size !== new Set(sale.items.map((item) => item.inventoryItemId)).size) {
+        throw new HttpError(409, 'The sale branch stock record is missing; refund was not posted', 'INVENTORY_CONFLICT');
+      }
       const now = new Date().toISOString();
       const updates: InventoryItem[] = [];
       const movements: StockMovement[] = [];
       for (const line of sale.items) {
-        const row = byId.get(line.inventoryItemId);
-        if (!row) continue;
+        const baseRow = byId.get(line.inventoryItemId);
+        if (!baseRow) continue;
+        const branchRow = branchById.get(line.inventoryItemId);
+        const row = branchRow && branchName !== 'Main Store'
+          ? {
+              ...baseRow,
+              current_qty: branchRow.current_qty,
+              unit_cost: branchRow.unit_cost,
+              selling_price: branchRow.selling_price,
+              stock_status: branchRow.data?.stockStatus ?? baseRow.stock_status,
+              data: { ...(baseRow.data as Record<string, unknown>), ...(branchRow.data as Record<string, unknown>) },
+            }
+          : baseRow;
         const existingUpdate = updates.find((item) => item.id === line.inventoryItemId);
         const before = existingUpdate ? existingUpdate.currentQty : Number(row.current_qty);
         const restoredQuantity = line.quantity * (line.unitsPerSale ?? 1);
@@ -121,13 +145,60 @@ export async function POST(request: NextRequest) {
       }
       const refunded: SaleTransaction = { ...sale, status: 'refunded', syncStatus: 'synced' };
       for (const updated of updates) {
+        if (branchName === 'Main Store') {
+          await client.query(
+            `UPDATE pos_tenant_records SET data = $3::jsonb,
+              version = version + 1, updated_at = now()
+             WHERE tenant_id = $1 AND store_name = 'inventory' AND record_id = $2`,
+            [auth.tenantId, updated.id, JSON.stringify(updated)]
+          );
+          await upsertTenantInventoryIndex(client, auth.tenantId, { ...updated });
+          if (branchById.has(updated.id)) {
+            await client.query(
+              `UPDATE pos_branch_inventory
+               SET current_qty = $1, unit_cost = $2, selling_price = $3, data = $4::jsonb,
+                   version = version + 1, updated_at = now()
+               WHERE tenant_id = $5 AND branch = 'Main Store' AND inventory_item_id = $6`,
+              [updated.currentQty, updated.unitCost, updated.sellingPrice, JSON.stringify(updated), auth.tenantId, updated.id]
+            );
+          }
+        } else {
+          await client.query(
+            `UPDATE pos_branch_inventory
+             SET current_qty = $1, data = $2::jsonb, version = version + 1, updated_at = now()
+             WHERE tenant_id = $3 AND branch = $4 AND inventory_item_id = $5`,
+            [updated.currentQty, JSON.stringify(updated), auth.tenantId, branchName, updated.id]
+          );
+        }
+      }
+      // A refund puts the exact piece quantity back into a new FIFO batch. We do
+      // not guess which historical batch supplied a multi-batch sale.
+      for (const line of sale.items) {
+        const unitsPerSale = Math.max(1, Number(line.unitsPerSale) || 1);
+        const quantity = line.quantity * unitsPerSale;
+        const batchId = `batch-refund-${operationId}-${line.id}`;
+        const returnedBatch = {
+          id: batchId,
+          productId: line.inventoryItemId,
+          productName: line.name,
+          sku: line.sku,
+          barcode: line.barcode,
+          quantityReceived: quantity,
+          quantityRemaining: quantity,
+          unitCost: Number(line.unitCost) / unitsPerSale,
+          sellingPrice: Number(line.unitPrice),
+          expiryDate: line.expiryDate,
+          supplier: '',
+          supplierPhone: '',
+          invoiceNumber: '',
+          receivedAt: now,
+          status: 'active',
+        };
         await client.query(
-          `UPDATE pos_tenant_records SET data = $3::jsonb,
-            version = version + 1, updated_at = now()
-           WHERE tenant_id = $1 AND store_name = 'inventory' AND record_id = $2`,
-          [auth.tenantId, updated.id, JSON.stringify(updated)]
+          `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+           VALUES ($1, 'stockBatches', $2, $3::jsonb)`,
+          [auth.tenantId, batchId, JSON.stringify(returnedBatch)]
         );
-        await upsertTenantInventoryIndex(client, auth.tenantId, { ...updated });
       }
       await client.query(
         `UPDATE pos_tenant_records SET data = $3::jsonb,

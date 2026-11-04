@@ -1570,41 +1570,14 @@ function ReportsContent() {
     if (activeView === 'inventory') {
       return {
         filename: 'inventory-report',
-        headers: [
-          'Product',
-          'Brand',
-          'SKU',
-          'Barcode',
-          'Category',
-          'Batch',
-          'Supplier',
-          'Qty',
-          'Reorder',
-          'Cost',
-          'Price',
-          'Cost Value',
-          'Retail Value',
-          'Expiry',
-          'Location',
-          'Status',
-        ],
+        headers: ['Product', 'SKU', 'Category', 'Qty', 'Cost', 'Price'],
         rows: displayInventoryRows.map((item) => [
           item.name,
-          item.genericName,
           item.sku,
-          item.barcode ?? '',
           item.category,
-          item.batchLot,
-          item.supplier,
           item.currentQty.toString(),
-          item.reorderLevel.toString(),
           item.unitCost.toFixed(2),
           item.sellingPrice.toFixed(2),
-          (item.currentQty * item.unitCost).toFixed(2),
-          (item.currentQty * item.sellingPrice).toFixed(2),
-          item.expiryDate,
-          item.location,
-          item.stockStatus,
         ]),
       };
     }
@@ -2426,38 +2399,15 @@ function ReportsContent() {
               <ReportTable
                 title="Inventory report"
                 subtitle={`${formatMoney(data.stockCostValue, settings.currency)} cost value · ${formatMoney(data.stockRetailValue, settings.currency)} retail value`}
-                headers={[
-                  'Product',
-                  'Brand',
-                  'SKU',
-                  'Category',
-                  'Batch',
-                  'Supplier',
-                  'Qty',
-                  'Reorder',
-                  'Cost',
-                  'Price',
-                  'Cost Value',
-                  'Retail Value',
-                  'Expiry',
-                  'Status',
-                ]}
+                headers={['Product', 'SKU', 'Category', 'Qty', 'Cost', 'Price']}
                 empty="No inventory records."
                 rows={displayInventoryRows.map((item) => [
                   item.name,
-                  item.genericName,
                   item.sku,
                   item.category,
-                  item.batchLot,
-                  item.supplier,
                   item.currentQty.toString(),
-                  item.reorderLevel.toString(),
                   formatMoney(item.unitCost, settings.currency),
                   formatMoney(item.sellingPrice, settings.currency),
-                  formatMoney(item.currentQty * item.unitCost, settings.currency),
-                  formatMoney(item.currentQty * item.sellingPrice, settings.currency),
-                  item.expiryDate,
-                  item.stockStatus,
                 ])}
               />
             )}
@@ -3198,7 +3148,10 @@ function ReportTable({
           <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
             <tr>
               {headers.map((header) => (
-                <th key={header} className="px-4 py-3">
+                <th
+                  key={header}
+                  className={`px-4 py-3 ${title === 'Inventory report' && header === 'Product' ? 'min-w-[280px]' : ''}`}
+                >
                   {header}
                 </th>
               ))}
@@ -3220,7 +3173,7 @@ function ReportTable({
                   {row.map((cell, cellIndex) => (
                     <td
                       key={`${cell}-${cellIndex}`}
-                      className={`px-4 py-3 text-sm ${cellIndex === 0 ? 'font-medium' : 'text-muted-foreground'} ${cellIndex >= row.length - 2 ? 'font-tabular' : ''}`}
+                      className={`px-4 py-3 text-sm ${cellIndex === 0 ? 'font-medium' : 'text-muted-foreground'} ${title === 'Inventory report' && cellIndex === 0 ? 'min-w-[280px] whitespace-normal' : ''} ${cellIndex >= row.length - 2 ? 'font-tabular' : ''}`}
                     >
                       {cell}
                     </td>
