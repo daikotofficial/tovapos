@@ -6,6 +6,7 @@ import type {
   InventoryItem,
   PaymentBreakdown,
   SaleTransaction,
+  StockBatch,
   StockMovement,
 } from '@/lib/pos/types';
 import { calculateSaleLine, money } from '@/lib/pos/sale-calculations';
@@ -272,6 +273,7 @@ export async function POST(request: NextRequest) {
       let taxAmount = 0;
       let exclusiveTaxAmount = 0;
       const updatedInventory: InventoryItem[] = [];
+      const reconciledBatches: StockBatch[] = [];
 
       const lineItems = items.map((requested) => {
         const row = inventoryById.get(requested.inventoryItemId);
@@ -400,11 +402,49 @@ export async function POST(request: NextRequest) {
            ORDER BY data->>'receivedAt' ASC, record_id ASC FOR UPDATE`,
           [auth.tenantId, updated.id]
         );
+        const recordedBatchQuantity = batchRows.rows.reduce(
+          (sum, batchRow) => sum + Math.max(0, Number(batchRow.data?.quantityRemaining) || 0),
+          0
+        );
+        const quantityBeforeSale = updated.currentQty + remainingToAllocate;
+        const unbatchedQuantity = Math.max(0, quantityBeforeSale - recordedBatchQuantity);
+        if (unbatchedQuantity > 0) {
+          // Older inventory edits and warehouse transfers can predate receipt
+          // batches. Convert that already-authoritative stock into an explicit
+          // reconciliation batch inside this same transaction, so checkout is
+          // never forced to choose between blocking a valid sale and silently
+          // deducting stock without a ledger entry.
+          const reconciliationBatch: StockBatch = {
+            id: `batch-reconcile-${operationId}-${updated.id}`,
+            productId: updated.id,
+            productName: updated.name,
+            sku: updated.sku,
+            barcode: updated.barcode,
+            quantityReceived: unbatchedQuantity,
+            quantityRemaining: unbatchedQuantity,
+            unitCost: updated.unitCost,
+            sellingPrice: updated.sellingPrice,
+            expiryDate: updated.expiryDate,
+            supplier: 'System reconciliation',
+            invoiceNumber: 'SYSTEM-RECONCILIATION',
+            receivedAt: now,
+            status: 'active',
+          };
+          await client.query(
+            `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+             VALUES ($1, 'stockBatches', $2, $3::jsonb)`,
+            [auth.tenantId, reconciliationBatch.id, JSON.stringify(reconciliationBatch)]
+          );
+          batchRows.rows.push({ record_id: reconciliationBatch.id, data: reconciliationBatch });
+          reconciledBatches.push(reconciliationBatch);
+        }
         for (const batchRow of batchRows.rows) {
           if (remainingToAllocate <= 0) break;
           const batch = batchRow.data as { id: string; quantityRemaining: number; status: string };
-          const allocated = Math.min(remainingToAllocate, Number(batch.quantityRemaining));
-          const nextRemaining = Number(batch.quantityRemaining) - allocated;
+          const batchQuantity = Number(batch.quantityRemaining);
+          if (!Number.isFinite(batchQuantity) || batchQuantity <= 0) continue;
+          const allocated = Math.min(remainingToAllocate, batchQuantity);
+          const nextRemaining = batchQuantity - allocated;
           const nextBatch = {
             ...batch,
             quantityRemaining: nextRemaining,
@@ -425,9 +465,7 @@ export async function POST(request: NextRequest) {
           }
           remainingToAllocate -= allocated;
         }
-        // Legacy products and branch transfers may not have receipt-batch rows.
-        // If rows exist, however, they must fully explain the piece deduction.
-        if (batchRows.rows.length > 0 && remainingToAllocate !== 0) {
+        if (remainingToAllocate !== 0) {
           throw new HttpError(
             409,
             `${updated.name} stock batches cannot account for this sale. Stock was not changed.`,
@@ -670,9 +708,16 @@ export async function POST(request: NextRequest) {
       );
       await client.query(
         `INSERT INTO pos_audit_log
-          (tenant_id, user_id, action, entity_type, entity_id, operation_id, after_data)
-         VALUES ($1, $2, 'sale.completed', 'sale', $3, $4, $5::jsonb)`,
-        [auth.tenantId, auth.user.id, sale.id, operationId, JSON.stringify(sale)]
+          (tenant_id, user_id, action, entity_type, entity_id, operation_id, after_data, metadata)
+         VALUES ($1, $2, 'sale.completed', 'sale', $3, $4, $5::jsonb, $6::jsonb)`,
+        [
+          auth.tenantId,
+          auth.user.id,
+          sale.id,
+          operationId,
+          JSON.stringify(sale),
+          JSON.stringify({ reconciledBatches }),
+        ]
       );
       await client.query('COMMIT');
       return NextResponse.json(responseBody, { status: 201 });
