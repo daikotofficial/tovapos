@@ -17,6 +17,8 @@ import {
 } from '@/lib/pos/local-store';
 import { getProductUsage } from '@/lib/pos/subscription';
 import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
+import Link from 'next/link';
+import { Barcode } from 'lucide-react';
 
 export default function InventoryScreen() {
   const searchParams = useSearchParams();
@@ -26,7 +28,6 @@ export default function InventoryScreen() {
     upsertInventoryItem,
     deleteInventoryItem,
     pendingSyncCount,
-    currentUser,
     hasPermission,
     settings,
   } = usePosStore();
@@ -153,16 +154,22 @@ export default function InventoryScreen() {
     else setSelectedIds(new Set(paginated.map((i) => i.id)));
   };
 
-  const canDeleteProducts = ['owner', 'super-admin', 'manager'].includes(currentUser?.role ?? '');
+  const canDeleteProducts = hasPermission('delete-product');
   const handleDeleteSelected = async () => {
-    if (!canDeleteProducts) { toast.error('Only an admin or manager can delete products.'); return; }
+    if (!canDeleteProducts) {
+      toast.error('You do not have permission to delete products.');
+      return;
+    }
     if (!selectedIds.size) return;
-    if (!window.confirm(`Delete ${selectedIds.size} selected product(s)? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${selectedIds.size} selected product(s)? This cannot be undone.`))
+      return;
     try {
       for (const id of selectedIds) await deleteInventoryItem(id);
       setSelectedIds(new Set());
       toast.success('Selected products deleted.');
-      setPage((value) => Math.min(value, Math.max(1, Math.ceil((totalItems - selectedIds.size) / perPage))));
+      setPage((value) =>
+        Math.min(value, Math.max(1, Math.ceil((totalItems - selectedIds.size) / perPage)))
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to delete products');
     }
@@ -261,6 +268,14 @@ export default function InventoryScreen() {
       />
 
       {/* Filters + Actions */}
+      <div className="mb-3 flex justify-end">
+        <Link
+          href="/barcode-management"
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground hover:border-primary hover:text-primary"
+        >
+          <Barcode size={14} /> Barcode management
+        </Link>
+      </div>
       <InventoryFilters
         search={search}
         setSearch={setSearch}

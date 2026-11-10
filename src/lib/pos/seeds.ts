@@ -78,5 +78,13 @@ export const defaultSettings: BusinessSettings = {
   loyaltyEnabled: true,
   loyaltyEarnPercent: 1,
   loyaltyRedemptionThreshold: 100,
+  barcodePrintingEnabled: true,
+  barcodeShowDescription: true,
+  barcodeShowPrice: false,
+  barcodeShowCodeText: true,
+  barcodeLabelWidthMm: 50,
+  barcodeLabelHeightMm: 30,
+  barcodeColumns: 3,
+  barcodeGapMm: 2,
   updatedAt: now,
 };

@@ -30,6 +30,7 @@ import {
   CalendarCheck,
   ReceiptText,
   Warehouse,
+  Barcode,
 } from 'lucide-react';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission } from '@/lib/pos/types';
@@ -92,6 +93,15 @@ const navItems: NavItem[] = [
     group: 'Operations',
     permission: 'inventory',
     order: 2,
+  },
+  {
+    id: 'nav-barcodes',
+    label: 'Barcode Management',
+    href: '/barcode-management',
+    icon: Barcode,
+    group: 'Operations',
+    permission: 'inventory',
+    order: 2.5,
   },
   {
     id: 'nav-stock-management',
@@ -307,6 +317,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
   );
   const canUseHospitality = activeBusinessMode === 'hospitality';
   const visibleNavItems = navItems.filter((item) => {
+    if (item.id === 'nav-barcodes' && settings.barcodePrintingEnabled === false) return false;
     if (['nav-reservations', 'nav-rooms-services'].includes(item.id)) {
       return canUseHospitality;
     }

@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   Bell,
+  Barcode,
   Building2,
   CheckCircle2,
   CreditCard,
@@ -170,6 +171,7 @@ function SettingsPageContent() {
                 ['loyalty', 'Loyalty'],
                 ['business-profile', 'Business'],
                 ['tax-receipts', 'Tax & Receipts'],
+                ['barcode-labels', 'Barcode Labels'],
                 ['tax-types', 'Tax Types'],
                 ['alerts', 'Alerts'],
                 ['pos-rules', 'POS Rules'],
@@ -678,6 +680,108 @@ function SettingsPageContent() {
               </div>
             </div>
 
+            <div
+              id="barcode-labels"
+              className="mb-5 scroll-mt-16 rounded-xl border border-border bg-card shadow-card"
+            >
+              <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                <Barcode size={16} className="text-primary" />
+                <div>
+                  <span className="text-sm font-semibold">Barcode labels</span>
+                  <p className="text-xs text-muted-foreground">
+                    Code 128 labels for products that need a shelf or item barcode. The saved
+                    dimensions and layout are used every time you print.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-4 p-5 md:grid-cols-2 lg:grid-cols-4">
+                <label className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm md:col-span-2">
+                  <span>
+                    <span className="block font-medium">Enable barcode printing</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Show Barcode Management in Operations.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={form.barcodePrintingEnabled ?? true}
+                    onChange={(e) => setForm({ ...form, barcodePrintingEnabled: e.target.checked })}
+                  />
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.barcodeShowDescription ?? true}
+                    onChange={(e) => setForm({ ...form, barcodeShowDescription: e.target.checked })}
+                  />{' '}
+                  Description
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.barcodeShowPrice ?? false}
+                    onChange={(e) => setForm({ ...form, barcodeShowPrice: e.target.checked })}
+                  />{' '}
+                  Price
+                </label>
+                <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={form.barcodeShowCodeText ?? true}
+                    onChange={(e) => setForm({ ...form, barcodeShowCodeText: e.target.checked })}
+                  />{' '}
+                  Show code text
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Label width (mm)</span>
+                  <input
+                    type="number"
+                    min={20}
+                    max={150}
+                    value={form.barcodeLabelWidthMm ?? 50}
+                    onChange={(e) =>
+                      setForm({ ...form, barcodeLabelWidthMm: Number(e.target.value) })
+                    }
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Label height (mm)</span>
+                  <input
+                    type="number"
+                    min={15}
+                    max={100}
+                    value={form.barcodeLabelHeightMm ?? 30}
+                    onChange={(e) =>
+                      setForm({ ...form, barcodeLabelHeightMm: Number(e.target.value) })
+                    }
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Columns per row</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={6}
+                    value={form.barcodeColumns ?? 3}
+                    onChange={(e) => setForm({ ...form, barcodeColumns: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Gap (mm)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={form.barcodeGapMm ?? 2}
+                    onChange={(e) => setForm({ ...form, barcodeGapMm: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+              </div>
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <div
                 id="alerts"

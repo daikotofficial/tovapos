@@ -641,6 +641,14 @@ export interface BusinessSettings {
   loyaltyEnabled?: boolean;
   loyaltyEarnPercent?: number;
   loyaltyRedemptionThreshold?: number;
+  barcodePrintingEnabled?: boolean;
+  barcodeShowDescription?: boolean;
+  barcodeShowPrice?: boolean;
+  barcodeShowCodeText?: boolean;
+  barcodeLabelWidthMm?: number;
+  barcodeLabelHeightMm?: number;
+  barcodeColumns?: number;
+  barcodeGapMm?: number;
   updatedAt?: string;
 }
 
