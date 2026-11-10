@@ -145,17 +145,19 @@ export default function BarcodeManagementPage() {
       <div className="barcode-print-sheet">
         {labels.map((item, index) => (
           <div className="barcode-label" key={`${item.item.id}-${index}`}>
-            <p className="barcode-label-name">{item.labelText}</p>
-            {settings.barcodeShowDescription !== false && item.item.description && (
-              <p className="barcode-label-description">{item.item.description}</p>
-            )}
-            <BarcodeGraphic
-              value={item.value}
-              showText={settings.barcodeShowCodeText !== false}
-            />
-            {settings.barcodeShowPrice && (
-              <p className="barcode-label-price">{formatMoney(item.item.sellingPrice)}</p>
-            )}
+            <div className="barcode-label-content">
+              <p className="barcode-label-name">{item.labelText}</p>
+              {settings.barcodeShowDescription !== false && item.item.description && (
+                <p className="barcode-label-description">{item.item.description}</p>
+              )}
+              <BarcodeGraphic
+                value={item.value}
+                showText={settings.barcodeShowCodeText !== false}
+              />
+              {settings.barcodeShowPrice && (
+                <p className="barcode-label-price">{formatMoney(item.item.sellingPrice)}</p>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -337,21 +339,29 @@ export default function BarcodeManagementPage() {
                         paddingRight: `${labelMargins.right}mm`,
                         paddingBottom: `${labelMargins.bottom}mm`,
                         paddingLeft: `${labelMargins.left}mm`,
+                        ['--barcode-margin-top' as string]: `${labelMargins.top}mm`,
+                        ['--barcode-margin-right' as string]: `${labelMargins.right}mm`,
+                        ['--barcode-margin-bottom' as string]: `${labelMargins.bottom}mm`,
+                        ['--barcode-margin-left' as string]: `${labelMargins.left}mm`,
                       }}
                     >
-                      <p className="barcode-label-name">{labels[0]?.labelText || 'Product name'}</p>
-                      {settings.barcodeShowDescription !== false && labels[0]?.item.description && (
-                        <p className="barcode-label-description">{labels[0].item.description}</p>
-                      )}
-                      <BarcodeGraphic
-                        value={labels[0]?.value || '0123456789'}
-                        showText={settings.barcodeShowCodeText !== false}
-                      />
-                      {settings.barcodeShowPrice && labels[0]?.item && (
-                        <p className="barcode-label-price">
-                          {formatMoney(labels[0].item.sellingPrice)}
+                      <div className="barcode-label-content">
+                        <p className="barcode-label-name">
+                          {labels[0]?.labelText || 'Product name'}
                         </p>
-                      )}
+                        {settings.barcodeShowDescription !== false && labels[0]?.item.description && (
+                          <p className="barcode-label-description">{labels[0].item.description}</p>
+                        )}
+                        <BarcodeGraphic
+                          value={labels[0]?.value || '0123456789'}
+                          showText={settings.barcodeShowCodeText !== false}
+                        />
+                        {settings.barcodeShowPrice && labels[0]?.item && (
+                          <p className="barcode-label-price">
+                            {formatMoney(labels[0].item.sellingPrice)}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -368,6 +378,7 @@ export default function BarcodeManagementPage() {
           }
           .barcode-preview-label {
             box-sizing: border-box;
+            position: relative;
             overflow: hidden;
             padding: 8px;
             border: 1px solid #cbd5e1;
@@ -375,11 +386,20 @@ export default function BarcodeManagementPage() {
             text-align: center;
             font-family: Arial, sans-serif;
             background: #fff;
+          }
+          .barcode-label-content {
+            box-sizing: border-box;
+            position: absolute;
+            top: var(--barcode-margin-top, 2mm);
+            right: var(--barcode-margin-right, 2mm);
+            bottom: var(--barcode-margin-bottom, 2mm);
+            left: var(--barcode-margin-left, 2mm);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 2px;
+            overflow: hidden;
           }
           .barcode-preview-label .barcode-label-name,
           .barcode-preview-label .barcode-label-description,
@@ -420,26 +440,35 @@ export default function BarcodeManagementPage() {
           }
           .barcode-label {
             box-sizing: border-box;
+            position: relative;
             width: var(--barcode-width);
             height: var(--barcode-height);
             overflow: hidden;
-            padding: var(--barcode-margin-top) var(--barcode-margin-right)
-              var(--barcode-margin-bottom) var(--barcode-margin-left);
+            padding: 0;
             border: 0;
             color: #000;
             text-align: center;
             font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 1mm;
             break-after: page;
             page-break-after: always;
           }
           .barcode-label:last-child {
             break-after: auto;
             page-break-after: auto;
+          }
+          .barcode-label-content {
+            box-sizing: border-box;
+            position: absolute;
+            top: var(--barcode-margin-top, 2mm);
+            right: var(--barcode-margin-right, 2mm);
+            bottom: var(--barcode-margin-bottom, 2mm);
+            left: var(--barcode-margin-left, 2mm);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1mm;
+            overflow: hidden;
           }
           .barcode-label-name {
             width: 100%;
