@@ -647,6 +647,10 @@ export interface BusinessSettings {
   barcodeShowCodeText?: boolean;
   barcodeLabelWidthMm?: number;
   barcodeLabelHeightMm?: number;
+  barcodeMarginTopMm?: number;
+  barcodeMarginRightMm?: number;
+  barcodeMarginBottomMm?: number;
+  barcodeMarginLeftMm?: number;
   barcodeColumns?: number;
   barcodeGapMm?: number;
   updatedAt?: string;

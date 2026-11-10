@@ -786,6 +786,36 @@ function SettingsPageContent() {
                     enter 6 for width and 4 for height.
                   </span>
                 </label>
+                <div className="rounded-lg border border-border bg-muted/20 p-3 md:col-span-2 lg:col-span-4">
+                  <p className="text-xs font-semibold text-foreground">Content margins (mm)</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    These margins control where the name and barcode sit inside each physical
+                    label. They are saved with your settings and reused when printing.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {([
+                      ['barcodeMarginTopMm', 'Top'],
+                      ['barcodeMarginRightMm', 'Right'],
+                      ['barcodeMarginBottomMm', 'Bottom'],
+                      ['barcodeMarginLeftMm', 'Left'],
+                    ] as const).map(([key, label]) => (
+                      <label key={key} className="space-y-1">
+                        <span className="text-[11px] text-muted-foreground">{label}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={15}
+                          step={0.5}
+                          value={form[key] ?? 2}
+                          onChange={(e) =>
+                            setForm({ ...form, [key]: Math.max(0, Math.min(15, Number(e.target.value) || 0)) })
+                          }
+                          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

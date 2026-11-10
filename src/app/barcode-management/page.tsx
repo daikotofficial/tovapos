@@ -50,6 +50,12 @@ export default function BarcodeManagementPage() {
   const enabled = settings.barcodePrintingEnabled ?? true;
   const labelWidthMm = Math.max(20, Math.min(settings.barcodeLabelWidthMm ?? 60, 150));
   const labelHeightMm = Math.max(15, Math.min(settings.barcodeLabelHeightMm ?? 40, 100));
+  const labelMargins = {
+    top: Math.max(0, Math.min(settings.barcodeMarginTopMm ?? 2, 15)),
+    right: Math.max(0, Math.min(settings.barcodeMarginRightMm ?? 2, 15)),
+    bottom: Math.max(0, Math.min(settings.barcodeMarginBottomMm ?? 2, 15)),
+    left: Math.max(0, Math.min(settings.barcodeMarginLeftMm ?? 2, 15)),
+  };
 
   useEffect(() => {
     // The shared stylesheet has receipt defaults. Barcode labels need their own
@@ -130,6 +136,10 @@ export default function BarcodeManagementPage() {
       style={{
         ['--barcode-width' as string]: `${labelWidthMm}mm`,
         ['--barcode-height' as string]: `${labelHeightMm}mm`,
+        ['--barcode-margin-top' as string]: `${labelMargins.top}mm`,
+        ['--barcode-margin-right' as string]: `${labelMargins.right}mm`,
+        ['--barcode-margin-bottom' as string]: `${labelMargins.bottom}mm`,
+        ['--barcode-margin-left' as string]: `${labelMargins.left}mm`,
       }}
     >
       <div className="barcode-print-sheet">
@@ -323,6 +333,10 @@ export default function BarcodeManagementPage() {
                       style={{
                         width: `${Math.min(labelWidthMm, 100) * 2.2}px`,
                         height: `${Math.min(labelHeightMm, 100) * 2.2}px`,
+                        paddingTop: `${labelMargins.top}mm`,
+                        paddingRight: `${labelMargins.right}mm`,
+                        paddingBottom: `${labelMargins.bottom}mm`,
+                        paddingLeft: `${labelMargins.left}mm`,
                       }}
                     >
                       <p className="barcode-label-name">{labels[0]?.labelText || 'Product name'}</p>
@@ -409,7 +423,8 @@ export default function BarcodeManagementPage() {
             width: var(--barcode-width);
             height: var(--barcode-height);
             overflow: hidden;
-            padding: 2mm;
+            padding: var(--barcode-margin-top) var(--barcode-margin-right)
+              var(--barcode-margin-bottom) var(--barcode-margin-left);
             border: 0;
             color: #000;
             text-align: center;
