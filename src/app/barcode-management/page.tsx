@@ -361,12 +361,22 @@ export default function BarcodeManagementPage() {
             text-align: center;
             font-family: Arial, sans-serif;
             background: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+          }
+          .barcode-preview-label .barcode-label-name,
+          .barcode-preview-label .barcode-label-description,
+          .barcode-preview-label .barcode-label-price {
+            max-width: 100%;
           }
           .barcode-preview-label .barcode-svg svg {
             display: block;
-            width: 100%;
+            width: 94%;
             height: auto;
-            max-height: 55%;
+            max-height: 58%;
           }
         }
         @media print {
@@ -404,6 +414,11 @@ export default function BarcodeManagementPage() {
             color: #000;
             text-align: center;
             font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1mm;
             break-after: page;
             page-break-after: always;
           }
@@ -412,31 +427,37 @@ export default function BarcodeManagementPage() {
             page-break-after: auto;
           }
           .barcode-label-name {
-            margin: 0 0 1mm;
-            font-size: 9pt;
+            width: 100%;
+            margin: 0;
+            font-size: 10pt;
+            line-height: 1.1;
             font-weight: 700;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
           .barcode-label-description {
-            margin: 0 0 1mm;
-            font-size: 7pt;
+            width: 100%;
+            margin: 0;
+            font-size: 7.5pt;
+            line-height: 1.1;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
           .barcode-svg {
             width: 100%;
+            display: flex;
+            justify-content: center;
           }
           .barcode-svg svg {
             display: block;
-            width: 100%;
+            width: 94%;
             height: auto;
-            max-height: 16mm;
+            max-height: 20mm;
           }
           .barcode-label-price {
-            margin: 1mm 0 0;
+            margin: 0;
             font-size: 8pt;
             font-weight: 700;
           }
