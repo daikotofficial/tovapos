@@ -10,6 +10,12 @@ import type { InventoryItem } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
 import { toast } from 'sonner';
 
+interface BarcodeQueueEntry {
+  quantity: number;
+  value: string;
+  labelText: string;
+}
+
 function BarcodeGraphic({ value, showText }: { value: string; showText: boolean }) {
   let svg = '';
   try {
@@ -38,7 +44,7 @@ function BarcodeGraphic({ value, showText }: { value: string; showText: boolean 
 export default function BarcodeManagementPage() {
   const { inventory, settings } = usePosStore();
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<Record<string, number>>({});
+  const [selected, setSelected] = useState<Record<string, BarcodeQueueEntry>>({});
   const [scanValue, setScanValue] = useState('');
   const enabled = settings.barcodePrintingEnabled ?? true;
   const matches = useMemo(() => {
@@ -53,9 +59,13 @@ export default function BarcodeManagementPage() {
       )
       .slice(0, 100);
   }, [inventory, query]);
-  const selectedItems = inventory.filter((item) => selected[item.id] && (item.barcode || item.sku));
+  const selectedItems = inventory.filter((item) => selected[item.id]);
   const labels = selectedItems.flatMap((item) =>
-    Array.from({ length: selected[item.id] }, () => item)
+    Array.from({ length: selected[item.id].quantity }, () => ({
+      item,
+      value: selected[item.id].value,
+      labelText: selected[item.id].labelText,
+    }))
   );
 
   const addItem = (item: InventoryItem) => {
@@ -65,7 +75,19 @@ export default function BarcodeManagementPage() {
     }
     setSelected((current) => ({
       ...current,
-      [item.id]: Math.min(999, (current[item.id] ?? 0) + 1),
+      [item.id]: current[item.id]
+        ? { ...current[item.id], quantity: Math.min(999, current[item.id].quantity + 1) }
+        : {
+            quantity: 1,
+            value: item.barcode || item.sku,
+            labelText: item.name,
+          },
+    }));
+  };
+  const updateQueueEntry = (item: InventoryItem, changes: Partial<BarcodeQueueEntry>) => {
+    setSelected((current) => ({
+      ...current,
+      [item.id]: { ...current[item.id], ...changes },
     }));
   };
   const scan = (event: React.FormEvent) => {
@@ -159,7 +181,7 @@ export default function BarcodeManagementPage() {
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="text-xs text-muted-foreground">
-                          {selected[item.id] ?? 0}
+                          {selected[item.id]?.quantity ?? 0}
                         </span>
                         <button
                           type="button"
@@ -178,72 +200,123 @@ export default function BarcodeManagementPage() {
                   )}
                 </div>
               </div>
-              <div className="rounded-xl border border-border bg-card p-4 shadow-card">
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-semibold">Print queue</p>
-                  <button
-                    type="button"
-                    onClick={() => setSelected({})}
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    Clear
-                  </button>
-                </div>
-                {selectedItems.length ? (
-                  selectedItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2"
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border bg-card p-4 shadow-card">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold">Print queue</p>
+                    <button
+                      type="button"
+                      onClick={() => setSelected({})}
+                      className="text-xs text-muted-foreground hover:text-foreground"
                     >
-                      <span className="truncate text-xs font-medium">{item.name}</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={999}
-                        value={selected[item.id]}
-                        onChange={(e) =>
-                          setSelected({
-                            ...selected,
-                            [item.id]: Math.max(1, Math.min(999, Number(e.target.value) || 1)),
-                          })
-                        }
-                        className="w-16 rounded border border-border bg-background px-2 py-1 text-right text-xs"
-                      />
-                    </div>
-                  ))
-                ) : (
-                  <p className="py-8 text-center text-xs text-muted-foreground">
-                    Nothing selected yet.
+                      Clear
+                    </button>
+                  </div>
+                  {selectedItems.length ? (
+                    selectedItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2"
+                      >
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <span className="block truncate text-xs font-medium">{item.name}</span>
+                          <label className="block text-[10px] text-muted-foreground">
+                            Barcode value (what the scanner reads)
+                            <input
+                              value={selected[item.id].value}
+                              onChange={(e) => updateQueueEntry(item, { value: e.target.value })}
+                              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs font-mono"
+                            />
+                          </label>
+                          <label className="block text-[10px] text-muted-foreground">
+                            Text on label
+                            <input
+                              value={selected[item.id].labelText}
+                              onChange={(e) =>
+                                updateQueueEntry(item, { labelText: e.target.value })
+                              }
+                              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                            />
+                          </label>
+                        </div>
+                        <input
+                          type="number"
+                          min={1}
+                          max={999}
+                          value={selected[item.id].quantity}
+                          onChange={(e) =>
+                            updateQueueEntry(item, {
+                              quantity: Math.max(1, Math.min(999, Number(e.target.value) || 1)),
+                            })
+                          }
+                          className="w-16 rounded border border-border bg-background px-2 py-1 text-right text-xs"
+                        />
+                      </div>
+                    ))
+                  ) : (
+                    <p className="py-8 text-center text-xs text-muted-foreground">
+                      Nothing selected yet.
+                    </p>
+                  )}
+                  <div className="mt-4 rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <Barcode size={15} className="mb-2 text-primary" />
+                    The barcode is generated from the editable <strong>Barcode value</strong>. By
+                    default, this is the product barcode; if it is empty, TOVAPOS uses the SKU.
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border bg-card p-4 shadow-card">
+                  <p className="text-sm font-semibold">Live preview</p>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    This is the label shape and content that will print. Your printer driver still
+                    needs the same paper size.
                   </p>
-                )}
-                <div className="mt-4 rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-                  <Barcode size={15} className="mb-2 text-primary" />
-                  Code 128 encodes the product barcode when available, otherwise the SKU. Labels use
-                  your saved layout settings.
+                  <div className="flex justify-center overflow-auto rounded-lg bg-muted/40 p-4">
+                    <div
+                      className="barcode-label barcode-preview-label"
+                      style={{
+                        width: `${Math.min(settings.barcodeLabelWidthMm ?? 60, 100) * 2.2}px`,
+                        height: `${Math.min(settings.barcodeLabelHeightMm ?? 40, 100) * 2.2}px`,
+                      }}
+                    >
+                      <p className="barcode-label-name">{labels[0]?.labelText || 'Product name'}</p>
+                      {settings.barcodeShowDescription !== false && labels[0]?.item.description && (
+                        <p className="barcode-label-description">{labels[0].item.description}</p>
+                      )}
+                      <BarcodeGraphic
+                        value={labels[0]?.value || '0123456789'}
+                        showText={settings.barcodeShowCodeText !== false}
+                      />
+                      {settings.barcodeShowPrice && labels[0]?.item && (
+                        <p className="barcode-label-price">
+                          {formatMoney(labels[0].item.sellingPrice)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
             <div
               className="barcode-print-sheet"
               style={{
-                ['--barcode-width' as string]: `${settings.barcodeLabelWidthMm ?? 50}mm`,
-                ['--barcode-height' as string]: `${settings.barcodeLabelHeightMm ?? 30}mm`,
+                ['--barcode-width' as string]: `${settings.barcodeLabelWidthMm ?? 60}mm`,
+                ['--barcode-height' as string]: `${settings.barcodeLabelHeightMm ?? 40}mm`,
                 ['--barcode-columns' as string]: settings.barcodeColumns ?? 3,
                 ['--barcode-gap' as string]: `${settings.barcodeGapMm ?? 2}mm`,
               }}
             >
               {labels.map((item, index) => (
-                <div className="barcode-label" key={`${item.id}-${index}`}>
-                  <p className="barcode-label-name">{item.name}</p>
-                  {settings.barcodeShowDescription !== false && item.description && (
-                    <p className="barcode-label-description">{item.description}</p>
+                <div className="barcode-label" key={`${item.item.id}-${index}`}>
+                  <p className="barcode-label-name">{item.labelText}</p>
+                  {settings.barcodeShowDescription !== false && item.item.description && (
+                    <p className="barcode-label-description">{item.item.description}</p>
                   )}
                   <BarcodeGraphic
-                    value={item.barcode || item.sku}
+                    value={item.value}
                     showText={settings.barcodeShowCodeText !== false}
                   />
                   {settings.barcodeShowPrice && (
-                    <p className="barcode-label-price">{formatMoney(item.sellingPrice)}</p>
+                    <p className="barcode-label-price">{formatMoney(item.item.sellingPrice)}</p>
                   )}
                 </div>
               ))}
@@ -255,6 +328,22 @@ export default function BarcodeManagementPage() {
         @media screen {
           .barcode-print-sheet {
             display: none;
+          }
+          .barcode-preview-label {
+            box-sizing: border-box;
+            overflow: hidden;
+            padding: 8px;
+            border: 1px solid #cbd5e1;
+            color: #000;
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background: #fff;
+          }
+          .barcode-preview-label .barcode-svg svg {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-height: 55%;
           }
         }
         @media print {

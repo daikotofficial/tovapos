@@ -733,27 +733,27 @@ function SettingsPageContent() {
                   Show code text
                 </label>
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Label width (mm)</span>
+                  <span className="text-xs text-muted-foreground">Label width (cm)</span>
                   <input
                     type="number"
-                    min={20}
-                    max={150}
-                    value={form.barcodeLabelWidthMm ?? 50}
+                    min={2}
+                    max={15}
+                    value={Number(((form.barcodeLabelWidthMm ?? 60) / 10).toFixed(1))}
                     onChange={(e) =>
-                      setForm({ ...form, barcodeLabelWidthMm: Number(e.target.value) })
+                      setForm({ ...form, barcodeLabelWidthMm: Number(e.target.value) * 10 })
                     }
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Label height (mm)</span>
+                  <span className="text-xs text-muted-foreground">Label height (cm)</span>
                   <input
                     type="number"
-                    min={15}
-                    max={100}
-                    value={form.barcodeLabelHeightMm ?? 30}
+                    min={1.5}
+                    max={10}
+                    value={Number(((form.barcodeLabelHeightMm ?? 40) / 10).toFixed(1))}
                     onChange={(e) =>
-                      setForm({ ...form, barcodeLabelHeightMm: Number(e.target.value) })
+                      setForm({ ...form, barcodeLabelHeightMm: Number(e.target.value) * 10 })
                     }
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                   />
@@ -770,15 +770,21 @@ function SettingsPageContent() {
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Gap (mm)</span>
+                  <span className="text-xs text-muted-foreground">Space between labels (cm)</span>
                   <input
                     type="number"
                     min={0}
                     max={20}
-                    value={form.barcodeGapMm ?? 2}
-                    onChange={(e) => setForm({ ...form, barcodeGapMm: Number(e.target.value) })}
+                    value={Number(((form.barcodeGapMm ?? 2) / 10).toFixed(1))}
+                    onChange={(e) =>
+                      setForm({ ...form, barcodeGapMm: Number(e.target.value) * 10 })
+                    }
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                   />
+                  <span className="text-[11px] text-muted-foreground">
+                    This is the blank space between one label and the next. For a 6 × 4 cm label,
+                    enter 6 for width and 4 for height.
+                  </span>
                 </label>
               </div>
             </div>
