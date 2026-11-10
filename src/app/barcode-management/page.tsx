@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import bwipjs from '@bwip-js/browser';
 import { Barcode, Printer, Search } from 'lucide-react';
 import AppLayout from '@/components/AppLayout';
@@ -47,6 +48,24 @@ export default function BarcodeManagementPage() {
   const [selected, setSelected] = useState<Record<string, BarcodeQueueEntry>>({});
   const [scanValue, setScanValue] = useState('');
   const enabled = settings.barcodePrintingEnabled ?? true;
+  const labelWidthMm = Math.max(20, Math.min(settings.barcodeLabelWidthMm ?? 60, 150));
+  const labelHeightMm = Math.max(15, Math.min(settings.barcodeLabelHeightMm ?? 40, 100));
+
+  useEffect(() => {
+    // The shared stylesheet has receipt defaults. Barcode labels need their own
+    // physical page size so Chrome can preview a 6 x 4 cm label correctly.
+    document.documentElement.style.setProperty('--barcode-width', `${labelWidthMm}mm`);
+    document.documentElement.style.setProperty('--barcode-height', `${labelHeightMm}mm`);
+    const style = document.createElement('style');
+    style.dataset.barcodePrint = 'true';
+    style.textContent = `@page { size: ${labelWidthMm}mm ${labelHeightMm}mm; margin: 0 !important; }`;
+    document.head.appendChild(style);
+    return () => {
+      style.remove();
+      document.documentElement.style.removeProperty('--barcode-width');
+      document.documentElement.style.removeProperty('--barcode-height');
+    };
+  }, [labelHeightMm, labelWidthMm]);
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     return inventory
@@ -104,6 +123,34 @@ export default function BarcodeManagementPage() {
     if (!labels.length) return toast.error('Select at least one product label.');
     window.print();
   };
+
+  const barcodePrintSheet = (
+    <div
+      className="barcode-print-root"
+      style={{
+        ['--barcode-width' as string]: `${labelWidthMm}mm`,
+        ['--barcode-height' as string]: `${labelHeightMm}mm`,
+      }}
+    >
+      <div className="barcode-print-sheet">
+        {labels.map((item, index) => (
+          <div className="barcode-label" key={`${item.item.id}-${index}`}>
+            <p className="barcode-label-name">{item.labelText}</p>
+            {settings.barcodeShowDescription !== false && item.item.description && (
+              <p className="barcode-label-description">{item.item.description}</p>
+            )}
+            <BarcodeGraphic
+              value={item.value}
+              showText={settings.barcodeShowCodeText !== false}
+            />
+            {settings.barcodeShowPrice && (
+              <p className="barcode-label-price">{formatMoney(item.item.sellingPrice)}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <AppLayout
@@ -274,8 +321,8 @@ export default function BarcodeManagementPage() {
                     <div
                       className="barcode-label barcode-preview-label"
                       style={{
-                        width: `${Math.min(settings.barcodeLabelWidthMm ?? 60, 100) * 2.2}px`,
-                        height: `${Math.min(settings.barcodeLabelHeightMm ?? 40, 100) * 2.2}px`,
+                        width: `${Math.min(labelWidthMm, 100) * 2.2}px`,
+                        height: `${Math.min(labelHeightMm, 100) * 2.2}px`,
                       }}
                     >
                       <p className="barcode-label-name">{labels[0]?.labelText || 'Product name'}</p>
@@ -296,37 +343,13 @@ export default function BarcodeManagementPage() {
                 </div>
               </div>
             </div>
-            <div
-              className="barcode-print-sheet"
-              style={{
-                ['--barcode-width' as string]: `${settings.barcodeLabelWidthMm ?? 60}mm`,
-                ['--barcode-height' as string]: `${settings.barcodeLabelHeightMm ?? 40}mm`,
-                ['--barcode-columns' as string]: settings.barcodeColumns ?? 3,
-                ['--barcode-gap' as string]: `${settings.barcodeGapMm ?? 2}mm`,
-              }}
-            >
-              {labels.map((item, index) => (
-                <div className="barcode-label" key={`${item.item.id}-${index}`}>
-                  <p className="barcode-label-name">{item.labelText}</p>
-                  {settings.barcodeShowDescription !== false && item.item.description && (
-                    <p className="barcode-label-description">{item.item.description}</p>
-                  )}
-                  <BarcodeGraphic
-                    value={item.value}
-                    showText={settings.barcodeShowCodeText !== false}
-                  />
-                  {settings.barcodeShowPrice && (
-                    <p className="barcode-label-price">{formatMoney(item.item.sellingPrice)}</p>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
         )}
       </PermissionGate>
+      {typeof document !== 'undefined' ? createPortal(barcodePrintSheet, document.body) : null}
       <style jsx global>{`
         @media screen {
-          .barcode-print-sheet {
+          .barcode-print-root {
             display: none;
           }
           .barcode-preview-label {
@@ -347,26 +370,29 @@ export default function BarcodeManagementPage() {
           }
         }
         @media print {
-          @page {
-            margin: 4mm;
+          .no-print {
+            display: none !important;
           }
           body {
             background: #fff !important;
+            width: var(--barcode-width) !important;
+            min-width: var(--barcode-width) !important;
+            overflow: visible !important;
           }
           body > * {
             display: none !important;
           }
-          body > .pos-app-shell {
+          body > .barcode-print-root {
             display: block !important;
+            width: var(--barcode-width) !important;
+            min-width: var(--barcode-width) !important;
+            height: auto !important;
+            overflow: visible !important;
           }
-          .pos-app-shell > * {
-            display: none !important;
-          }
-          .pos-app-shell .barcode-print-sheet {
-            display: grid !important;
-            grid-template-columns: repeat(var(--barcode-columns), var(--barcode-width));
-            gap: var(--barcode-gap);
-            width: fit-content;
+          body > .barcode-print-root .barcode-print-sheet {
+            display: block !important;
+            width: var(--barcode-width) !important;
+            margin: 0 !important;
           }
           .barcode-label {
             box-sizing: border-box;
@@ -378,6 +404,12 @@ export default function BarcodeManagementPage() {
             color: #000;
             text-align: center;
             font-family: Arial, sans-serif;
+            break-after: page;
+            page-break-after: always;
+          }
+          .barcode-label:last-child {
+            break-after: auto;
+            page-break-after: auto;
           }
           .barcode-label-name {
             margin: 0 0 1mm;
