@@ -651,6 +651,8 @@ export interface BusinessSettings {
   barcodeMarginRightMm?: number;
   barcodeMarginBottomMm?: number;
   barcodeMarginLeftMm?: number;
+  barcodeGraphicWidthPercent?: number;
+  barcodeGraphicHeightMm?: number;
   barcodeColumns?: number;
   barcodeGapMm?: number;
   updatedAt?: string;

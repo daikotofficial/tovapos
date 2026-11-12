@@ -972,6 +972,9 @@ function normalizeSettings(settings: BusinessSettings, seed: BusinessSettings): 
     barcodeMarginRightMm: settings.barcodeMarginRightMm ?? seed.barcodeMarginRightMm ?? 2,
     barcodeMarginBottomMm: settings.barcodeMarginBottomMm ?? seed.barcodeMarginBottomMm ?? 2,
     barcodeMarginLeftMm: settings.barcodeMarginLeftMm ?? seed.barcodeMarginLeftMm ?? 2,
+    barcodeGraphicWidthPercent:
+      settings.barcodeGraphicWidthPercent ?? seed.barcodeGraphicWidthPercent ?? 100,
+    barcodeGraphicHeightMm: settings.barcodeGraphicHeightMm ?? seed.barcodeGraphicHeightMm ?? 20,
     subscriptionPlanId: settings.subscriptionPlanId ?? seed.subscriptionPlanId ?? 'starter',
     subscriptionStatus: settings.subscriptionStatus ?? seed.subscriptionStatus ?? 'active',
     subscriptionRenewsAt: settings.subscriptionRenewsAt ?? seed.subscriptionRenewsAt,

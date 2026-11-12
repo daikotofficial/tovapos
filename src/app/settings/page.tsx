@@ -786,11 +786,46 @@ function SettingsPageContent() {
                     enter 6 for width and 4 for height.
                   </span>
                 </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Barcode width (% of safe area)</span>
+                  <input
+                    type="number"
+                    min={60}
+                    max={100}
+                    step={1}
+                    value={form.barcodeGraphicWidthPercent ?? 100}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        barcodeGraphicWidthPercent: Math.max(60, Math.min(100, Number(e.target.value) || 100)),
+                      })
+                    }
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Barcode height (mm)</span>
+                  <input
+                    type="number"
+                    min={10}
+                    max={30}
+                    step={1}
+                    value={form.barcodeGraphicHeightMm ?? 20}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        barcodeGraphicHeightMm: Math.max(10, Math.min(30, Number(e.target.value) || 20)),
+                      })
+                    }
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                  />
+                </label>
                 <div className="rounded-lg border border-border bg-muted/20 p-3 md:col-span-2 lg:col-span-4">
                   <p className="text-xs font-semibold text-foreground">Content margins (mm)</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    These margins control where the name and barcode sit inside each physical
-                    label. They are saved with your settings and reused when printing.
+                    Label width/height define the physical paper page. These margins and barcode
+                    dimensions define the content inside that label. All values are saved and
+                    reused when printing.
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {([

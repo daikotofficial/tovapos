@@ -23,8 +23,8 @@ function BarcodeGraphic({ value, showText }: { value: string; showText: boolean 
     svg = bwipjs.toSVG({
       bcid: 'code128',
       text: value,
-      scale: 2,
-      height: 9,
+      scale: 3,
+      height: 14,
       includetext: showText,
       textsize: 8,
       textxalign: 'center',
@@ -56,6 +56,14 @@ export default function BarcodeManagementPage() {
     bottom: Math.max(0, Math.min(settings.barcodeMarginBottomMm ?? 2, 15)),
     left: Math.max(0, Math.min(settings.barcodeMarginLeftMm ?? 2, 15)),
   };
+  const barcodeGraphicWidthPercent = Math.max(
+    60,
+    Math.min(settings.barcodeGraphicWidthPercent ?? 100, 100)
+  );
+  const barcodeGraphicHeightMm = Math.max(
+    10,
+    Math.min(settings.barcodeGraphicHeightMm ?? 20, 30)
+  );
 
   useEffect(() => {
     // The shared stylesheet has receipt defaults. Barcode labels need their own
@@ -140,6 +148,8 @@ export default function BarcodeManagementPage() {
         ['--barcode-margin-right' as string]: `${labelMargins.right}mm`,
         ['--barcode-margin-bottom' as string]: `${labelMargins.bottom}mm`,
         ['--barcode-margin-left' as string]: `${labelMargins.left}mm`,
+        ['--barcode-graphic-width' as string]: `${barcodeGraphicWidthPercent}%`,
+        ['--barcode-graphic-height' as string]: `${barcodeGraphicHeightMm}mm`,
       }}
     >
       <div className="barcode-print-sheet">
@@ -343,6 +353,8 @@ export default function BarcodeManagementPage() {
                         ['--barcode-margin-right' as string]: `${labelMargins.right}mm`,
                         ['--barcode-margin-bottom' as string]: `${labelMargins.bottom}mm`,
                         ['--barcode-margin-left' as string]: `${labelMargins.left}mm`,
+                        ['--barcode-graphic-width' as string]: `${barcodeGraphicWidthPercent}%`,
+                        ['--barcode-graphic-height' as string]: `${barcodeGraphicHeightMm}mm`,
                       }}
                     >
                       <div className="barcode-label-content">
@@ -408,9 +420,9 @@ export default function BarcodeManagementPage() {
           }
           .barcode-preview-label .barcode-svg svg {
             display: block;
-            width: 94%;
-            height: auto;
-            max-height: 58%;
+            width: var(--barcode-graphic-width, 100%);
+            max-width: 100%;
+            height: var(--barcode-graphic-height, 20mm);
           }
         }
         @media print {
@@ -496,9 +508,9 @@ export default function BarcodeManagementPage() {
           }
           .barcode-svg svg {
             display: block;
-            width: 94%;
-            height: auto;
-            max-height: 20mm;
+            width: var(--barcode-graphic-width, 100%);
+            max-width: 100%;
+            height: var(--barcode-graphic-height, 20mm);
           }
           .barcode-label-price {
             margin: 0;

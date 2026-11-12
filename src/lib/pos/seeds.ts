@@ -88,6 +88,8 @@ export const defaultSettings: BusinessSettings = {
   barcodeMarginRightMm: 2,
   barcodeMarginBottomMm: 2,
   barcodeMarginLeftMm: 2,
+  barcodeGraphicWidthPercent: 100,
+  barcodeGraphicHeightMm: 20,
   barcodeColumns: 3,
   barcodeGapMm: 2,
   updatedAt: now,
