@@ -16,6 +16,7 @@ interface BarcodeQueueEntry {
   quantity: number;
   value: string;
   labelText: string;
+  sourceSku?: string;
 }
 
 function normalizeSearchValue(value: string): string {
@@ -172,10 +173,31 @@ export default function BarcodeManagementPage() {
   const labels = selectedItems.flatMap((item) =>
     Array.from({ length: selected[item.id].quantity }, () => ({
       item,
-      value: selected[item.id].value,
+      value:
+        selected[item.id].sourceSku && selected[item.id].value === selected[item.id].sourceSku
+          ? item.sku
+          : selected[item.id].value,
       labelText: selected[item.id].labelText,
     }))
   );
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setSelected((current) => {
+        let changed = false;
+        const next = { ...current };
+        inventory.forEach((item) => {
+          const entry = current[item.id];
+          if (!entry || !entry.sourceSku || entry.value !== entry.sourceSku) return;
+          if (entry.sourceSku === item.sku) return;
+          next[item.id] = { ...entry, value: item.sku, sourceSku: item.sku };
+          changed = true;
+        });
+        return changed ? next : current;
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [inventory]);
 
   const addItem = (item: InventoryItem) => {
     if (!item.barcode && !item.sku) {
@@ -188,8 +210,9 @@ export default function BarcodeManagementPage() {
         ? { ...current[item.id], quantity: Math.min(999, current[item.id].quantity + 1) }
         : {
             quantity: 1,
-            value: item.barcode || item.sku,
+            value: item.sku || item.barcode || '',
             labelText: item.name,
+            sourceSku: item.sku,
           },
     }));
   };
@@ -363,7 +386,8 @@ export default function BarcodeManagementPage() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold">{item.name}</p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {item.barcode || item.sku} · {formatMoney(item.sellingPrice)}
+                          SKU: {item.sku} · {item.barcode ? `Barcode: ${item.barcode} · ` : ''}
+                          {formatMoney(item.sellingPrice)}
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
@@ -458,7 +482,8 @@ export default function BarcodeManagementPage() {
                   <div className="mt-4 rounded-lg border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
                     <Barcode size={15} className="mb-2 text-primary" />
                     The barcode is generated from the editable <strong>Barcode value</strong>. By
-                    default, this is the product barcode; if it is empty, TOVAPOS uses the SKU.
+                    default, TOVAPOS encodes the product SKU. The visible label text is separate and
+                    does not affect what the scanner reads.
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-card p-4 shadow-card">
