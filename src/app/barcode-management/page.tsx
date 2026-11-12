@@ -9,12 +9,47 @@ import PermissionGate from '@/components/PermissionGate';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import type { InventoryItem } from '@/lib/pos/types';
 import { formatMoney } from '@/lib/pos/money';
+import { loadInventoryPage } from '@/lib/pos/local-store';
 import { toast } from 'sonner';
 
 interface BarcodeQueueEntry {
   quantity: number;
   value: string;
   labelText: string;
+}
+
+function normalizeSearchValue(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function searchableValues(item: InventoryItem): string[] {
+  return [
+    item.name,
+    item.genericName,
+    item.sku,
+    item.barcode,
+    item.batchLot,
+    ...(item.skuAliases ?? []).map((alias) => alias.code),
+    ...(item.barcodeAliases ?? []).map((alias) => alias.code),
+  ].filter((value): value is string => Boolean(value));
+}
+
+function matchesLocalQuery(item: InventoryItem, query: string): boolean {
+  const normalizedQuery = normalizeSearchValue(query);
+  return (
+    !normalizedQuery ||
+    searchableValues(item).some((value) => normalizeSearchValue(value).includes(normalizedQuery))
+  );
+}
+
+function matchesCode(item: InventoryItem, value: string): boolean {
+  const codes = [
+    item.barcode,
+    item.sku,
+    ...(item.barcodeAliases ?? []).map((alias) => alias.code),
+    ...(item.skuAliases ?? []).map((alias) => alias.code),
+  ].filter((code): code is string => Boolean(code));
+  return codes.some((code) => normalizeSearchValue(code) === normalizeSearchValue(value));
 }
 
 function BarcodeGraphic({ value, showText }: { value: string; showText: boolean }) {
@@ -47,6 +82,9 @@ export default function BarcodeManagementPage() {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Record<string, BarcodeQueueEntry>>({});
   const [scanValue, setScanValue] = useState('');
+  const [remoteMatches, setRemoteMatches] = useState<InventoryItem[] | null>(null);
+  const [searchTotal, setSearchTotal] = useState<number | undefined>();
+  const [searching, setSearching] = useState(false);
   const enabled = settings.barcodePrintingEnabled ?? true;
   const labelWidthMm = Math.max(20, Math.min(settings.barcodeLabelWidthMm ?? 60, 150));
   const labelHeightMm = Math.max(15, Math.min(settings.barcodeLabelHeightMm ?? 40, 100));
@@ -60,10 +98,7 @@ export default function BarcodeManagementPage() {
     60,
     Math.min(settings.barcodeGraphicWidthPercent ?? 100, 100)
   );
-  const barcodeGraphicHeightMm = Math.max(
-    10,
-    Math.min(settings.barcodeGraphicHeightMm ?? 20, 30)
-  );
+  const barcodeGraphicHeightMm = Math.max(10, Math.min(settings.barcodeGraphicHeightMm ?? 20, 30));
 
   useEffect(() => {
     // The shared stylesheet has receipt defaults. Barcode labels need their own
@@ -80,19 +115,57 @@ export default function BarcodeManagementPage() {
       document.documentElement.style.removeProperty('--barcode-height');
     };
   }, [labelHeightMm, labelWidthMm]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void loadInventoryPage({
+        q,
+        limit: 500,
+        includeTotal: true,
+        signal: controller.signal,
+      })
+        .then((result) => {
+          if (controller.signal.aborted) return;
+          setRemoteMatches(result.items);
+          setSearchTotal(result.total);
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          console.warn('Barcode product search fell back to cached inventory', error);
+          setRemoteMatches([]);
+          setSearchTotal(0);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSearching(false);
+        });
+    }, 180);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
   const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return inventory
-      .filter(
-        (item) =>
-          !q ||
-          [item.name, item.sku, item.barcode, item.genericName].some((v) =>
-            v?.toLowerCase().includes(q)
-          )
-      )
-      .slice(0, 100);
-  }, [inventory, query]);
-  const selectedItems = inventory.filter((item) => selected[item.id]);
+    const source = query.trim() ? (remoteMatches ?? inventory) : inventory;
+    const localMatches = inventory.filter((item) => matchesLocalQuery(item, query));
+    const unique = new Map<string, InventoryItem>();
+    [...source, ...localMatches].forEach((item) => unique.set(item.id, item));
+    return Array.from(unique.values())
+      .filter((item) => matchesLocalQuery(item, query))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }, [inventory, query, remoteMatches]);
+  const catalog = useMemo(() => {
+    const byId = new Map(inventory.map((item) => [item.id, item]));
+    if (query.trim()) (remoteMatches ?? []).forEach((item) => byId.set(item.id, item));
+    return byId;
+  }, [inventory, query, remoteMatches]);
+  const selectedItems = Array.from(catalog.values()).filter((item) => selected[item.id]);
   const labels = selectedItems.flatMap((item) =>
     Array.from({ length: selected[item.id].quantity }, () => ({
       item,
@@ -123,14 +196,23 @@ export default function BarcodeManagementPage() {
       [item.id]: { ...current[item.id], ...changes },
     }));
   };
-  const scan = (event: React.FormEvent) => {
+  const scan = async (event: React.FormEvent) => {
     event.preventDefault();
-    const value = scanValue.trim().toLowerCase();
-    const item = inventory.find((candidate) =>
-      [candidate.barcode, candidate.sku].some((code) => code?.toLowerCase() === value)
-    );
-    if (!item) toast.error('No product matched that barcode or SKU.');
-    else addItem(item);
+    const value = normalizeSearchValue(scanValue);
+    let item = matches.find((candidate) => matchesCode(candidate, value));
+    if (!item && value) {
+      try {
+        const result = await loadInventoryPage({ q: value, limit: 500, includeTotal: true });
+        item = result.items.find((candidate) => matchesCode(candidate, value));
+      } catch (error) {
+        console.warn('Barcode scan lookup failed', error);
+      }
+    }
+    if (!item) {
+      toast.error(
+        'No product matched that barcode, SKU, or code alias. Search the product first, then scan again.'
+      );
+    } else addItem(item);
     setScanValue('');
   };
   const print = () => {
@@ -205,8 +287,8 @@ export default function BarcodeManagementPage() {
                 {labels.length === 1 ? '' : 's'}
               </button>
             </div>
-            <div className="no-print grid gap-4 lg:grid-cols-[1fr_360px]">
-              <div className="rounded-xl border border-border bg-card shadow-card">
+            <div className="no-print grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+              <div className="min-w-0 rounded-xl border border-border bg-card shadow-card">
                 <div className="border-b border-border p-4">
                   <form onSubmit={scan} className="flex gap-2">
                     <div className="relative flex-1">
@@ -239,7 +321,15 @@ export default function BarcodeManagementPage() {
                     />
                   </div>
                 </div>
-                <div className="max-h-[520px] divide-y divide-border overflow-y-auto">
+                <div className="flex items-center justify-between border-b border-border px-4 py-2 text-[11px] text-muted-foreground">
+                  <span>
+                    {query.trim() && searching
+                      ? 'Searching the full inventory…'
+                      : `${matches.length}${searchTotal !== undefined && searchTotal > matches.length ? ` of ${searchTotal}` : ''} product${matches.length === 1 ? '' : 's'}`}
+                  </span>
+                  {query.trim() && <span>Searches name, SKU, barcode, batch, and aliases</span>}
+                </div>
+                <div className="max-h-[min(60vh,620px)] divide-y divide-border overflow-y-auto">
                   {matches.map((item) => (
                     <div key={item.id} className="flex items-center justify-between gap-3 p-4">
                       <div className="min-w-0">
@@ -269,7 +359,7 @@ export default function BarcodeManagementPage() {
                   )}
                 </div>
               </div>
-              <div className="space-y-4">
+              <div className="min-w-0 space-y-4">
                 <div className="rounded-xl border border-border bg-card p-4 shadow-card">
                   <div className="mb-3 flex items-center justify-between">
                     <p className="text-sm font-semibold">Print queue</p>
@@ -339,16 +429,11 @@ export default function BarcodeManagementPage() {
                     This is the label shape and content that will print. Your printer driver still
                     needs the same paper size.
                   </p>
-                  <div className="flex justify-center overflow-auto rounded-lg bg-muted/40 p-4">
+                  <div className="flex min-h-[280px] items-center justify-center overflow-auto rounded-lg bg-muted/40 p-4 sm:min-h-[320px]">
                     <div
                       className="barcode-label barcode-preview-label"
                       style={{
-                        width: `${Math.min(labelWidthMm, 100) * 2.2}px`,
-                        height: `${Math.min(labelHeightMm, 100) * 2.2}px`,
-                        paddingTop: `${labelMargins.top}mm`,
-                        paddingRight: `${labelMargins.right}mm`,
-                        paddingBottom: `${labelMargins.bottom}mm`,
-                        paddingLeft: `${labelMargins.left}mm`,
+                        ['--barcode-label-aspect' as string]: `${labelWidthMm} / ${labelHeightMm}`,
                         ['--barcode-margin-top' as string]: `${labelMargins.top}mm`,
                         ['--barcode-margin-right' as string]: `${labelMargins.right}mm`,
                         ['--barcode-margin-bottom' as string]: `${labelMargins.bottom}mm`,
@@ -361,9 +446,12 @@ export default function BarcodeManagementPage() {
                         <p className="barcode-label-name">
                           {labels[0]?.labelText || 'Product name'}
                         </p>
-                        {settings.barcodeShowDescription !== false && labels[0]?.item.description && (
-                          <p className="barcode-label-description">{labels[0].item.description}</p>
-                        )}
+                        {settings.barcodeShowDescription !== false &&
+                          labels[0]?.item.description && (
+                            <p className="barcode-label-description">
+                              {labels[0].item.description}
+                            </p>
+                          )}
                         <BarcodeGraphic
                           value={labels[0]?.value || '0123456789'}
                           showText={settings.barcodeShowCodeText !== false}
@@ -391,6 +479,9 @@ export default function BarcodeManagementPage() {
           .barcode-preview-label {
             box-sizing: border-box;
             position: relative;
+            width: min(100%, 360px) !important;
+            height: auto !important;
+            aspect-ratio: var(--barcode-label-aspect, 3 / 2);
             overflow: hidden;
             padding: 8px;
             border: 1px solid #cbd5e1;
@@ -416,7 +507,29 @@ export default function BarcodeManagementPage() {
           .barcode-preview-label .barcode-label-name,
           .barcode-preview-label .barcode-label-description,
           .barcode-preview-label .barcode-label-price {
+            width: 100%;
             max-width: 100%;
+            margin: 0;
+            line-height: 1.1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .barcode-preview-label .barcode-label-name {
+            font-size: 10pt;
+            font-weight: 700;
+          }
+          .barcode-preview-label .barcode-label-description {
+            font-size: 7.5pt;
+          }
+          .barcode-preview-label .barcode-label-price {
+            font-size: 8pt;
+            font-weight: 700;
+          }
+          .barcode-preview-label .barcode-svg {
+            width: 100%;
+            display: flex;
+            justify-content: center;
           }
           .barcode-preview-label .barcode-svg svg {
             display: block;

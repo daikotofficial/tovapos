@@ -787,7 +787,9 @@ function SettingsPageContent() {
                   </span>
                 </label>
                 <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Barcode width (% of safe area)</span>
+                  <span className="text-xs text-muted-foreground">
+                    Barcode width (% of safe area)
+                  </span>
                   <input
                     type="number"
                     min={60}
@@ -797,7 +799,10 @@ function SettingsPageContent() {
                     onChange={(e) =>
                       setForm({
                         ...form,
-                        barcodeGraphicWidthPercent: Math.max(60, Math.min(100, Number(e.target.value) || 100)),
+                        barcodeGraphicWidthPercent: Math.max(
+                          60,
+                          Math.min(100, Number(e.target.value) || 100)
+                        ),
                       })
                     }
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -814,7 +819,10 @@ function SettingsPageContent() {
                     onChange={(e) =>
                       setForm({
                         ...form,
-                        barcodeGraphicHeightMm: Math.max(10, Math.min(30, Number(e.target.value) || 20)),
+                        barcodeGraphicHeightMm: Math.max(
+                          10,
+                          Math.min(30, Number(e.target.value) || 20)
+                        ),
                       })
                     }
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -824,16 +832,18 @@ function SettingsPageContent() {
                   <p className="text-xs font-semibold text-foreground">Content margins (mm)</p>
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     Label width/height define the physical paper page. These margins and barcode
-                    dimensions define the content inside that label. All values are saved and
-                    reused when printing.
+                    dimensions define the content inside that label. All values are saved and reused
+                    when printing.
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    {([
-                      ['barcodeMarginTopMm', 'Top'],
-                      ['barcodeMarginRightMm', 'Right'],
-                      ['barcodeMarginBottomMm', 'Bottom'],
-                      ['barcodeMarginLeftMm', 'Left'],
-                    ] as const).map(([key, label]) => (
+                    {(
+                      [
+                        ['barcodeMarginTopMm', 'Top'],
+                        ['barcodeMarginRightMm', 'Right'],
+                        ['barcodeMarginBottomMm', 'Bottom'],
+                        ['barcodeMarginLeftMm', 'Left'],
+                      ] as const
+                    ).map(([key, label]) => (
                       <label key={key} className="space-y-1">
                         <span className="text-[11px] text-muted-foreground">{label}</span>
                         <input
@@ -843,7 +853,10 @@ function SettingsPageContent() {
                           step={0.5}
                           value={form[key] ?? 2}
                           onChange={(e) =>
-                            setForm({ ...form, [key]: Math.max(0, Math.min(15, Number(e.target.value) || 0)) })
+                            setForm({
+                              ...form,
+                              [key]: Math.max(0, Math.min(15, Number(e.target.value) || 0)),
+                            })
                           }
                           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                         />
