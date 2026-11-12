@@ -84,7 +84,9 @@ export default function BarcodeManagementPage() {
   const [scanValue, setScanValue] = useState('');
   const [remoteMatches, setRemoteMatches] = useState<InventoryItem[] | null>(null);
   const [searchTotal, setSearchTotal] = useState<number | undefined>();
+  const [searchCursor, setSearchCursor] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const enabled = settings.barcodePrintingEnabled ?? true;
   const labelWidthMm = Math.max(20, Math.min(settings.barcodeLabelWidthMm ?? 60, 150));
   const labelHeightMm = Math.max(15, Math.min(settings.barcodeLabelHeightMm ?? 40, 100));
@@ -133,6 +135,7 @@ export default function BarcodeManagementPage() {
           if (controller.signal.aborted) return;
           setRemoteMatches(result.items);
           setSearchTotal(result.total);
+          setSearchCursor(result.nextCursor);
         })
         .catch((error) => {
           if (controller.signal.aborted) return;
@@ -214,6 +217,31 @@ export default function BarcodeManagementPage() {
       );
     } else addItem(item);
     setScanValue('');
+  };
+  const loadMoreSearchResults = async () => {
+    const q = query.trim();
+    if (!q || !searchCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const result = await loadInventoryPage({
+        q,
+        cursor: searchCursor,
+        limit: 500,
+        includeTotal: true,
+      });
+      setRemoteMatches((current) => {
+        const byId = new Map((current ?? []).map((item) => [item.id, item]));
+        result.items.forEach((item) => byId.set(item.id, item));
+        return Array.from(byId.values());
+      });
+      setSearchTotal(result.total);
+      setSearchCursor(result.nextCursor);
+    } catch (error) {
+      console.warn('Unable to load more barcode search results', error);
+      toast.error('Unable to load more products right now.');
+    } finally {
+      setLoadingMore(false);
+    }
   };
   const print = () => {
     if (!labels.length) return toast.error('Select at least one product label.');
@@ -356,6 +384,16 @@ export default function BarcodeManagementPage() {
                     <p className="p-8 text-center text-sm text-muted-foreground">
                       No products found.
                     </p>
+                  )}
+                  {query.trim() && searchCursor && (
+                    <button
+                      type="button"
+                      onClick={loadMoreSearchResults}
+                      disabled={loadingMore}
+                      className="w-full px-4 py-3 text-center text-xs font-semibold text-primary hover:bg-primary/5 disabled:opacity-60"
+                    >
+                      {loadingMore ? 'Loading more products…' : 'Load more matching products'}
+                    </button>
                   )}
                 </div>
               </div>
