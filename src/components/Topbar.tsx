@@ -266,7 +266,7 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
             </span>
           </div>
 
-          <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground lg:flex">
+          <div className="hidden h-8 items-center gap-1.5 rounded-md bg-muted px-3 text-xs text-muted-foreground 2xl:flex">
             <Cloud size={12} />
             <span
               className="font-tabular"

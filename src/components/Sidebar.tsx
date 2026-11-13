@@ -346,7 +346,7 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
   return (
     <aside
       className="relative flex h-screen min-h-0 flex-col border-r border-border bg-card shadow-sidebar transition-all duration-300 ease-smooth"
-      style={{ width: collapsed ? 64 : 268 }}
+      style={{ width: collapsed ? 64 : 248 }}
     >
       {/* Logo */}
       <div
@@ -364,16 +364,6 @@ export default function Sidebar({ collapsed, onToggle, onNavigate }: SidebarProp
           </div>
         )}
       </div>
-
-      {/* Alerts Banner */}
-      {!collapsed && activeBusinessMode !== 'hospitality' && (
-        <div className="mx-3 mt-3 mb-1 flex items-center gap-2 bg-warning/10 border border-warning/20 rounded-md px-3 py-2">
-          <AlertTriangle size={13} className="text-warning shrink-0" />
-          <span className="text-xs text-warning font-medium">
-            {lowStockCount} stock alert{lowStockCount === 1 ? '' : 's'}
-          </span>
-        </div>
-      )}
 
       {/* Nav */}
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin py-2 pb-4">

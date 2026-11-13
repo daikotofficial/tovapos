@@ -395,6 +395,15 @@
   .pos-page table {
     border-spacing: 0;
   }
+
+  .pos-page > div {
+    min-width: 0;
+  }
+
+  .pos-page .rounded-xl.border.bg-card,
+  .pos-page .rounded-lg.border.bg-card {
+    box-shadow: var(--pos-card-shadow, 0 1px 3px rgb(15 23 42 / 0.06));
+  }
 }
 
 @layer utilities {

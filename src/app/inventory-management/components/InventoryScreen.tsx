@@ -85,7 +85,10 @@ export default function InventoryScreen() {
         setMetrics(metricResult);
         setSelectedIds(new Set());
       } catch (error) {
-        if (!cancelled) console.error('Failed to load inventory page', error);
+        if (!cancelled) {
+          console.error('Failed to load inventory page', error);
+          toast.error('Inventory could not be loaded. Please refresh and try again.');
+        }
       } finally {
         if (!cancelled) setIsLoadingPage(false);
       }
@@ -221,7 +224,7 @@ export default function InventoryScreen() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-screen-2xl px-3 py-4 sm:p-6">
+    <div className="mx-auto w-full max-w-screen-2xl space-y-5 px-3 py-4 sm:space-y-6 sm:p-6">
       {!isHydrated && (
         <div className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
           Loading inventory...
@@ -268,10 +271,14 @@ export default function InventoryScreen() {
       />
 
       {/* Filters + Actions */}
-      <div className="mb-3 flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold tracking-tight text-foreground">Your inventory</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Search, filter, and manage products without leaving this page.</p>
+        </div>
         <Link
           href="/barcode-management"
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground hover:border-primary hover:text-primary"
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground shadow-card transition hover:border-primary hover:text-primary"
         >
           <Barcode size={14} /> Barcode management
         </Link>

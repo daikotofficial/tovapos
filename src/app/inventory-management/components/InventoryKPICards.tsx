@@ -110,7 +110,7 @@ export default function InventoryKPICards({
   ];
 
   return (
-    <div className="mb-4 grid min-w-0 grid-cols-1 gap-3 sm:mb-6 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-6">
+    <div className="mb-5 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
       {cards.map((card) => {
         const Icon = card.icon;
         const clickable = Boolean(card.filter);
