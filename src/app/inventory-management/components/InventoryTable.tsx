@@ -161,7 +161,7 @@ export default function InventoryTable({
               items.map((item, idx) => (
                 <tr
                   key={item.id}
-                  className={`group hover:bg-muted/30 transition-colors duration-100 ${idx % 2 === 0 ? '' : 'bg-muted/10'} ${selectedIds.has(item.id) ? 'bg-primary/5' : ''}`}
+                  className={`group align-top hover:bg-muted/30 transition-colors duration-100 ${idx % 2 === 0 ? '' : 'bg-muted/10'} ${selectedIds.has(item.id) ? 'bg-primary/5' : ''}`}
                 >
                   <td className="px-4 py-3 w-10">
                     <input
@@ -176,7 +176,7 @@ export default function InventoryTable({
                     <div className="flex items-start gap-2">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-sm font-medium text-foreground leading-tight">
+                          <span className="max-w-[14rem] break-words text-sm font-semibold leading-tight text-foreground">
                             {item.name}
                           </span>
                           {item.isControlled && (
@@ -299,7 +299,7 @@ export default function InventoryTable({
                   </td>
                   {/* Actions */}
                   <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                    <div className="flex items-center justify-end gap-1 opacity-100 transition-opacity duration-150 lg:opacity-0 lg:group-hover:opacity-100">
                       <div className="relative group/btn">
                         <button
                           onClick={() => onViewBatch(item)}

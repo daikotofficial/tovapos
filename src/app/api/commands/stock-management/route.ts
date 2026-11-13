@@ -69,10 +69,11 @@ export async function GET(request: NextRequest) {
     const movementResult = await getPosPool().query(`SELECT data FROM pos_tenant_records WHERE tenant_id = $1 AND store_name = 'stockMovements' AND data->>'inventoryItemId' = $2 ORDER BY data->>'createdAt' DESC`, [auth.tenantId, productId]);
     const auditResult = await getPosPool().query(`SELECT id, action, entity_id AS \"entityId\", metadata, created_at AS \"createdAt\", user_id AS \"userId\" FROM pos_audit_log WHERE tenant_id = $1 AND entity_type = 'inventory' AND entity_id = $2 ORDER BY created_at DESC, id DESC`, [auth.tenantId, productId]);
     const salesResult = await getPosPool().query(
-      `SELECT id, data FROM pos_tenant_sales
-       WHERE tenant_id = $1 AND status = 'completed'
+      `SELECT record_id AS id, data FROM pos_tenant_records
+       WHERE tenant_id = $1 AND store_name = 'sales'
+         AND data->>'status' = 'completed'
          AND data->'items' @> jsonb_build_array(jsonb_build_object('inventoryItemId', $2))
-       ORDER BY timestamp DESC, id DESC`,
+       ORDER BY data->>'timestamp' DESC, record_id DESC`,
       [auth.tenantId, productId]
     );
     const returnableSales = salesResult.rows.flatMap((row) => {

@@ -379,6 +379,24 @@
   }
 }
 
+@layer components {
+  .pos-page {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .pos-page button,
+  .pos-page input,
+  .pos-page select,
+  .pos-page textarea {
+    max-width: 100%;
+  }
+
+  .pos-page table {
+    border-spacing: 0;
+  }
+}
+
 @layer utilities {
   .font-tabular {
     font-variant-numeric: tabular-nums;

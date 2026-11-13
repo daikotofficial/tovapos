@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import type { InventoryItem, SaleTransaction, StockMovement } from '@/lib/pos/types';
-import { computeStockStatus } from '@/lib/pos/stock';
+import { computeStockStatus, computeWeightedAverageUnitCost } from '@/lib/pos/stock';
 import { getPosPool } from '@/lib/server/pos-db';
 import { upsertTenantInventoryIndex, upsertTenantSaleIndex } from '@/lib/server/tenant-indexes';
 import {
@@ -96,12 +96,12 @@ export async function POST(request: NextRequest) {
 
       stage = 'loading matching sales';
       const salesResult = await client.query(
-        `SELECT id, data FROM pos_tenant_sales
-         WHERE tenant_id = $1
-           AND status = 'completed'
+        `SELECT record_id AS id, data FROM pos_tenant_records
+         WHERE tenant_id = $1 AND store_name = 'sales'
+           AND data->>'status' = 'completed'
            AND coalesce(data->>'branch', 'Main Store') = $2
            AND data->'items' @> jsonb_build_array(jsonb_build_object('inventoryItemId', $3))
-         ORDER BY timestamp DESC, id DESC
+         ORDER BY data->>'timestamp' DESC, record_id DESC
          FOR UPDATE`,
         [auth.tenantId, branchName, productId]
       );
@@ -137,6 +137,7 @@ export async function POST(request: NextRequest) {
         expiryDate: string;
       }[] = [];
       let restoredStockQuantity = 0;
+      let restoredStockValue = 0;
       stage = 'calculating return';
       for (const row of salesResult.rows) {
         if (saleId && String(row.id) !== saleId) continue;
@@ -160,6 +161,9 @@ export async function POST(request: NextRequest) {
           const returnedQuantity = Math.min(remaining, line.quantity);
           const nextQuantity = line.quantity - returnedQuantity;
           const unitsPerSale = Math.max(1, Number(line.unitsPerSale) || 1);
+          const returnedUnitCost = Number.isFinite(Number(line.unitCost)) && Number(line.unitCost) > 0
+            ? Number(line.unitCost) / unitsPerSale
+            : Number(inventoryRow.unit_cost);
           const returnedStockQuantity = returnedQuantity * unitsPerSale;
           const lineReturnTotal = money((originalLineTotal / Math.max(1, originalQuantity)) * returnedQuantity);
           const lineReturnGross = money(line.unitPrice * returnedQuantity);
@@ -172,6 +176,7 @@ export async function POST(request: NextRequest) {
           saleReturnedDiscount += lineReturnDiscount;
           saleReturnedTax += lineReturnTax;
           restoredStockQuantity += returnedStockQuantity;
+          restoredStockValue += returnedStockQuantity * returnedUnitCost;
           returnedItems.push({
             saleId: sale.id,
             quantity: returnedQuantity,
@@ -179,7 +184,7 @@ export async function POST(request: NextRequest) {
             amount: lineReturnTotal + (line.taxMode === 'exclusive' ? lineReturnTax : 0),
             sku: line.sku,
             barcode: line.barcode,
-            unitCost: Number(line.unitCost) / unitsPerSale,
+            unitCost: returnedUnitCost,
             sellingPrice: Number(line.unitPrice),
             expiryDate: line.expiryDate,
           });
@@ -242,10 +247,22 @@ export async function POST(request: NextRequest) {
         ? Number(branchRow.current_qty)
         : Number(inventoryRow.current_qty);
       const afterQty = beforeQty + restoredStockQuantity;
+      const beforeValue = beforeQty * Number(current.unitCost);
+      const afterValue = beforeValue + restoredStockValue;
+      const restoredUnitCost = afterQty > 0
+        ? computeWeightedAverageUnitCost(
+            beforeQty,
+            Number(current.unitCost),
+            restoredStockQuantity,
+            restoredStockQuantity > 0 ? restoredStockValue / restoredStockQuantity : Number(current.unitCost)
+          )
+        : 0;
       const now = new Date().toISOString();
       const updated: InventoryItem = {
         ...current,
         currentQty: afterQty,
+        unitCost: restoredUnitCost,
+        profitMargin: restoredUnitCost > 0 ? Number((((Number(current.sellingPrice) - restoredUnitCost) / restoredUnitCost) * 100).toFixed(2)) : 0,
         stockStatus: computeStockStatus(afterQty, current.reorderLevel, current.expiryDate),
         updatedAt: now,
       };
@@ -347,13 +364,15 @@ export async function POST(request: NextRequest) {
         quantityDelta: restoredStockQuantity,
         quantityBefore: beforeQty,
         quantityAfter: afterQty,
-        unitCost: current.unitCost,
+        unitCost: restoredUnitCost,
         unitPrice: current.sellingPrice,
         referenceId: updatedSales[0]?.id ?? productId,
         referenceLabel: updatedSales.length === 1 ? updatedSales[0].transactionId : `${updatedSales.length} sales`,
         reason: notes ? `${reason} — ${notes}` : reason,
         createdAt: now,
         createdBy: auth.user.name,
+        valueBefore: beforeValue,
+        valueAfter: afterValue,
         syncStatus: 'synced',
       };
       stage = 'recording stock movement';
@@ -367,10 +386,10 @@ export async function POST(request: NextRequest) {
         `INSERT INTO pos_audit_log
           (tenant_id, user_id, action, entity_type, entity_id, operation_id, after_data, metadata)
          VALUES ($1, $2, 'sale.returned', 'inventory', $3, $4, $5::jsonb, $6::jsonb)`,
-        [auth.tenantId, auth.user.id, productId, operationId, JSON.stringify(updated), JSON.stringify({ quantity, restoredStockQuantity, reason, returnedItems })]
+        [auth.tenantId, auth.user.id, productId, operationId, JSON.stringify(updated), JSON.stringify({ quantity, restoredStockQuantity, restoredStockValue, beforeValue, afterValue, reason, returnedItems })]
       );
       stage = 'saving completed response';
-      const responseBody = { inventory: updated, movement, sales: updatedSales, returnedItems, returnedQuantity: quantity, restoredStockQuantity };
+      const responseBody = { inventory: updated, movement, sales: updatedSales, returnedItems, returnedQuantity: quantity, restoredStockQuantity, restoredStockValue };
       await client.query(
         `UPDATE pos_idempotency_keys SET response_status = 200, response_body = $3::jsonb, completed_at = now()
          WHERE tenant_id = $1 AND idempotency_key = $2`,

@@ -2211,6 +2211,11 @@ export async function DELETE(request: NextRequest) {
         [auth.tenantId, storeName, id]
       );
       if (storeName === 'inventory') {
+        await client.query(
+          `DELETE FROM pos_branch_inventory
+           WHERE tenant_id = $1 AND inventory_item_id = $2`,
+          [auth.tenantId, id]
+        );
         await client.query('DELETE FROM pos_tenant_inventory WHERE tenant_id = $1 AND id = $2', [
           auth.tenantId,
           id,

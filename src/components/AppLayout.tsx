@@ -75,7 +75,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar title={title} subtitle={subtitle} onOpenMenu={() => setMobileMenuOpen(true)} />
         <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-background pb-[calc(5.25rem+env(safe-area-inset-bottom))] scrollbar-thin lg:pb-0">
-          <div className="min-w-0 flex-none lg:min-h-0 lg:flex-1">{children}</div>
+          <div className="pos-page min-w-0 w-full flex-none lg:min-h-0 lg:flex-1">{children}</div>
         </main>
 
         <footer className="hidden shrink-0 border-t border-border bg-card/95 px-4 py-4 text-xs text-muted-foreground lg:block">

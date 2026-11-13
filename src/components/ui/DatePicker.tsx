@@ -111,8 +111,8 @@ export default function DatePicker({
   };
 
   return (
-    <div ref={ref} className={`relative ${className}`}>
-      <div className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-background px-3 shadow-sm transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/25">
+    <div ref={ref} className={`relative min-w-0 ${className}`}>
+      <div className="flex h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-3 shadow-sm transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/25">
         <input
           type="text"
           value={inputValue}
@@ -128,7 +128,7 @@ export default function DatePicker({
           autoComplete="off"
           placeholder={displayFormat === 'iso' ? 'YYYY-MM-DD' : 'DD/MM/YYYY'}
           aria-label={placeholder}
-          className="min-w-0 flex-1 select-text touch-manipulation bg-transparent text-base sm:text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground"
+          className="min-w-0 flex-1 select-text touch-manipulation bg-transparent text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground"
         />
         <button
           type="button"
@@ -142,7 +142,7 @@ export default function DatePicker({
 
       {open && (
         <div
-          className={`absolute right-0 z-50 w-[20rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card p-3 shadow-modal sm:left-0 sm:right-auto ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+          className={`absolute right-0 z-[70] w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-card p-3 shadow-modal sm:left-0 sm:right-auto ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <button
