@@ -26,7 +26,7 @@ import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
 import NiceSelect from '@/components/ui/NiceSelect';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
-import { BusinessSettings, BusinessMode } from '@/lib/pos/types';
+import { BusinessSettings, BusinessMode, InventoryItem } from '@/lib/pos/types';
 import AppImage from '@/components/ui/AppImage';
 import { toast } from 'sonner';
 import { brandForeground, normalizeBrandColor, tenantThemeModeKey } from '@/lib/pos/theme';
@@ -46,12 +46,17 @@ export default function SettingsPage() {
 }
 
 function SettingsPageContent() {
-  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated, currentUser, tenant } =
+  const { settings, updateSettings, pendingSyncCount, inventory, isHydrated, currentUser, tenant, applyInventorySnapshot } =
     usePosStore();
   const [form, setForm] = useState<BusinessSettings>(settings);
   const [saved, setSaved] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [payingPlan, setPayingPlan] = useState<SubscriptionPlanId | null>(null);
+  const [bulkTaxCategory, setBulkTaxCategory] = useState('');
+  const [bulkTaxId, setBulkTaxId] = useState('');
+  const [bulkTaxRate, setBulkTaxRate] = useState(0);
+  const [bulkTaxMode, setBulkTaxMode] = useState<'inclusive' | 'exclusive'>('exclusive');
+  const [isApplyingBulkTax, setIsApplyingBulkTax] = useState(false);
   const searchParams = useSearchParams();
   const isHospitality = settings.businessMode === 'hospitality';
   const isOnPremise = isOnPremiseDeployment();
@@ -120,6 +125,38 @@ function SettingsPageContent() {
       window.setTimeout(() => setSaved(false), 1800);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to save settings.');
+    }
+  };
+
+  const bulkTaxOptions = settings.taxRates?.filter((tax) => tax.active) ?? [];
+  const bulkCategoryOptions = Array.from(
+    new Set([...(settings.productCategories ?? []), ...inventory.map((item) => item.category)])
+  ).filter(Boolean).sort();
+  const bulkTaxProductCount = bulkTaxCategory
+    ? inventory.filter((item) => item.category.trim().toLowerCase() === bulkTaxCategory.trim().toLowerCase()).length
+    : 0;
+  const applyBulkTax = async () => {
+    if (!bulkTaxCategory) {
+      toast.error('Select a product category first.');
+      return;
+    }
+    setIsApplyingBulkTax(true);
+    try {
+      const response = await fetch('/api/commands/tax-category', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: bulkTaxCategory, taxId: bulkTaxId, taxRate: bulkTaxRate, taxMode: bulkTaxMode }),
+      });
+      const payload = (await response.json().catch(() => null)) as { updatedItems?: InventoryItem[]; updatedCount?: number; error?: string } | null;
+      if (!response.ok || !payload?.updatedItems) {
+        throw new Error(payload?.error ?? 'Unable to apply VAT settings to this category.');
+      }
+      await Promise.all(payload.updatedItems.map((item) => applyInventorySnapshot(item)));
+      toast.success(`VAT settings applied to ${payload.updatedCount ?? payload.updatedItems.length} product(s) in ${bulkTaxCategory}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to apply VAT settings.');
+    } finally {
+      setIsApplyingBulkTax(false);
     }
   };
 
@@ -533,6 +570,85 @@ function SettingsPageContent() {
                     ]}
                   />
                 </label>
+                <div className="md:col-span-2 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm font-semibold text-foreground">Apply VAT to a product category</span>
+                    <span className="text-xs leading-5 text-muted-foreground">
+                      This permanently updates every product in the selected category, including products with a different VAT setting. Existing prices are not changed.
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4 md:items-end">
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-muted-foreground">Category</span>
+                      <NiceSelect
+                        value={bulkTaxCategory}
+                        onChange={setBulkTaxCategory}
+                        options={[
+                          { value: '', label: 'Select category' },
+                          ...bulkCategoryOptions.map((category) => ({ value: category, label: category })),
+                        ]}
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-muted-foreground">VAT type</span>
+                      <NiceSelect
+                        value={bulkTaxId || '__default__'}
+                        onChange={(taxId) => {
+                          if (taxId === '__default__') {
+                            setBulkTaxId('');
+                            setBulkTaxRate(Number(form.taxRate) || 0);
+                            setBulkTaxMode(form.taxMode ?? 'exclusive');
+                            return;
+                          }
+                          const tax = bulkTaxOptions.find((item) => item.id === taxId);
+                          setBulkTaxId(taxId);
+                          setBulkTaxRate(Number(tax?.rate) || 0);
+                          if (tax) setBulkTaxMode(tax.mode);
+                        }}
+                        options={[
+                          { value: '__default__', label: `Default (${form.taxRate || 0}%)` },
+                          ...bulkTaxOptions.map((tax) => ({ value: tax.id, label: `${tax.name} (${tax.rate}%)` })),
+                        ]}
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-muted-foreground">VAT rate (%)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={bulkTaxRate}
+                        onChange={(event) => setBulkTaxRate(Number(event.target.value))}
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-muted-foreground">Pricing mode</span>
+                      <NiceSelect
+                        value={bulkTaxMode}
+                        onChange={(mode) => setBulkTaxMode(mode as 'inclusive' | 'exclusive')}
+                        options={[
+                          { value: 'exclusive', label: 'VAT added to price' },
+                          { value: 'inclusive', label: 'VAT included in price' },
+                        ]}
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      {bulkTaxCategory ? `${bulkTaxProductCount} product(s) will be updated.` : 'Choose a category to preview the affected products.'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void applyBulkTax()}
+                      disabled={!bulkTaxCategory || isApplyingBulkTax}
+                      className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isApplyingBulkTax ? 'Applying...' : 'Apply to category'}
+                    </button>
+                  </div>
+                </div>
                 <label className="space-y-1">
                   <span className="text-xs text-muted-foreground">Tax Name</span>
                   <input
