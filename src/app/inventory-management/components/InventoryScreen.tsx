@@ -114,6 +114,10 @@ export default function InventoryScreen() {
     supplierFilter,
   ]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [categoryFilter, search, statusFilter, supplierFilter]);
+
   const sorted = [...items].sort((a, b) => {
     const aVal = a[sortField];
     const bVal = b[sortField];
@@ -354,7 +358,12 @@ export default function InventoryScreen() {
               includeTotal: true,
               expiryAlertDays,
             }),
-            loadInventoryMetrics(expiryAlertDays),
+            loadInventoryMetrics(expiryAlertDays, {
+              q: search,
+              category: categoryFilter,
+              supplier: supplierFilter,
+              status: statusFilter,
+            }),
           ]);
           setItems(pageResult.items);
           setTotalItems(pageResult.total ?? pageResult.items.length);

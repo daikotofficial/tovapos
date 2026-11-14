@@ -17,6 +17,16 @@ const inputClass = 'w-full rounded-lg border border-border bg-background px-3 py
 const labelClass = 'mb-1.5 block text-xs font-semibold text-muted-foreground';
 
 type Action = 'receive' | 'return';
+type ReturnableSale = {
+  saleId: string;
+  transactionId: string;
+  timestamp: string;
+  itemName: string;
+  quantity: number;
+  returnableQuantity: number;
+  unitPrice: number;
+  returnedQuantity: number;
+};
 function nextExpiry(): string {
   const date = new Date();
   date.setFullYear(date.getFullYear() + 1);
@@ -35,6 +45,9 @@ export default function StockManagementScreen() {
   const [batches, setBatches] = useState<StockBatch[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [audits, setAudits] = useState<{ id: number; action: string; metadata?: Record<string, unknown>; createdAt: string; userId: string }[]>([]);
+  const [returnableSales, setReturnableSales] = useState<ReturnableSale[]>([]);
+  const [selectedReturnSale, setSelectedReturnSale] = useState<ReturnableSale | null>(null);
+  const [returnSearch, setReturnSearch] = useState('');
   const [selectedBatch, setSelectedBatch] = useState<StockBatch | null>(null);
   const [loadingBatches, setLoadingBatches] = useState(false);
   const [quantity, setQuantity] = useState('');
@@ -116,11 +129,13 @@ export default function StockManagementScreen() {
     setLoadingBatches(true);
     try {
       const response = await fetch(`/api/commands/stock-management?productId=${encodeURIComponent(product.id)}`, { cache: 'no-store', credentials: 'same-origin' });
-      const payload = (await response.json()) as { batches?: StockBatch[]; movements?: StockMovement[]; audits?: { id: number; action: string; metadata?: Record<string, unknown>; createdAt: string; userId: string }[]; error?: string };
+      const payload = (await response.json()) as { batches?: StockBatch[]; movements?: StockMovement[]; audits?: { id: number; action: string; metadata?: Record<string, unknown>; createdAt: string; userId: string }[]; returnableSales?: ReturnableSale[]; error?: string };
       if (!response.ok) throw new Error(payload.error ?? `Unable to load product history (${response.status})`);
       setBatches(payload.batches ?? []);
       setMovements(payload.movements ?? []);
       setAudits(payload.audits ?? []);
+      setReturnableSales(payload.returnableSales ?? []);
+      setSelectedReturnSale(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to load the selected product history');
     } finally {
@@ -146,6 +161,12 @@ export default function StockManagementScreen() {
     setBatchId('');
     setReason('Damaged');
     setNotes('');
+    setReturnSearch('');
+    setSelectedReturnSale(null);
+    if (nextAction === 'return' && returnableSales.length === 0) {
+      toast.error('This product has no remaining quantity from a completed sale to return.');
+      return;
+    }
     setShowActionModal(true);
   };
 
@@ -155,6 +176,11 @@ export default function StockManagementScreen() {
     const parsedQuantity = Number(quantity);
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) { toast.error('Enter a quantity greater than zero.'); return; }
     if (action === 'receive' && (!Number(unitCost) || Number(unitCost) <= 0)) { toast.error('Enter the purchase/cost price.'); return; }
+    if (action === 'return' && !selectedReturnSale) { toast.error('Select the sold item you are returning.'); return; }
+    if (action === 'return' && selectedReturnSale && parsedQuantity > selectedReturnSale.returnableQuantity) {
+      toast.error(`You can return at most ${selectedReturnSale.returnableQuantity} unit(s) from this sale.`);
+      return;
+    }
     setIsSaving(true);
     try {
       const operationId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -163,7 +189,7 @@ export default function StockManagementScreen() {
       const response = await fetch(action === 'return' ? '/api/commands/stock-return' : '/api/commands/stock-management', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(action === 'return'
-          ? { operationId, productId: selectedProduct.id, quantity: parsedQuantity, reason, notes }
+          ? { operationId, productId: selectedProduct.id, saleId: selectedReturnSale?.saleId, quantity: parsedQuantity, reason, notes }
           : { operationId, action, productId: selectedProduct.id, quantity: parsedQuantity, unitCost: Number(unitCost), sellingPrice: sellingPrice ? Number(sellingPrice) : undefined, expiryDate, sku, barcode, supplier, supplierPhone, invoiceNumber, reason, notes }),
       });
       const payload = (await response.json()) as { inventory?: InventoryItem; movement?: StockMovement; error?: string };
@@ -218,7 +244,10 @@ export default function StockManagementScreen() {
       <AddStockModal open={showAddProduct} onClose={() => setShowAddProduct(false)} editItem={null} onSave={async (item) => { await upsertInventoryItem(item); setShowAddProduct(false); toast.success('Product added successfully.'); }} />
       <Modal open={showActionModal} onClose={() => setShowActionModal(false)} title={action === 'receive' ? 'Receive Products' : 'Return Stock'} subtitle={selectedProduct ? `${selectedProduct.name} · Current stock ${selectedProduct.currentQty}` : ''} size="lg" footer={<><button type="button" onClick={() => setShowActionModal(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted">Cancel</button><button type="submit" form="stock-action-form" disabled={isSaving} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{isSaving ? 'Saving...' : action === 'receive' ? 'Receive Stock' : 'Return Stock'}</button></>}>
         <form id="stock-action-form" onSubmit={submitAction} className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div><label className={labelClass}>Quantity {action === 'receive' ? 'Received' : 'Returned'} *</label><input required type="text" inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0" /></div>{action === 'receive' ? <><div><label className={labelClass}>Purchase / Cost Price *</label><input required type="text" inputMode="decimal" value={unitCost} onChange={(event) => setUnitCost(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0.00" /></div><div><label className={labelClass}>Selling Price</label><input type="text" inputMode="decimal" value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value)} className={inputClass} placeholder="Keep existing price" /></div><div><label className={labelClass}>Expiry Date *</label><DatePicker value={expiryDate} onChange={setExpiryDate} placeholder="Expiry date" /></div><div><label className={labelClass}>New SKU</label><input value={sku} onChange={(event) => setSku(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Existing SKU if unchanged" /></div><div><label className={labelClass}>New Barcode</label><input value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Scan or type barcode" /></div><div><label className={labelClass}>Vendor Name <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplier} onChange={(event) => setSupplier(event.target.value)} className={inputClass} placeholder="Vendor or supplier name" /></div><div><label className={labelClass}>Vendor Phone <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplierPhone} onChange={(event) => setSupplierPhone(event.target.value)} className={inputClass} placeholder="Vendor or supplier phone" inputMode="tel" /></div><div><label className={labelClass}>Invoice Number <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} className={`${inputClass} font-mono`} placeholder="Invoice/reference number" /></div></> : <div><label className={labelClass}>Return Reason *</label><NiceSelect value={reason} onChange={setReason} options={[{ value: 'Damaged', label: 'Damaged' }, { value: 'Expired', label: 'Expired' }, { value: 'Defective', label: 'Defective' }, { value: 'Customer return', label: 'Customer return' }, { value: 'Other', label: 'Other' }]} /></div>}</div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div><label className={labelClass}>Quantity {action === 'receive' ? 'Received' : 'Returned'} *</label><input required type="text" inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0" /></div>
+            {action === 'receive' ? <><div><label className={labelClass}>Purchase / Cost Price *</label><input required type="text" inputMode="decimal" value={unitCost} onChange={(event) => setUnitCost(event.target.value.replace(/[^0-9.]/g, ''))} className={inputClass} placeholder="0.00" /></div><div><label className={labelClass}>Selling Price</label><input type="text" inputMode="decimal" value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value)} className={inputClass} placeholder="Keep existing price" /></div><div><label className={labelClass}>Expiry Date *</label><DatePicker value={expiryDate} onChange={setExpiryDate} placeholder="Expiry date" /></div><div><label className={labelClass}>New SKU</label><input value={sku} onChange={(event) => setSku(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Existing SKU if unchanged" /></div><div><label className={labelClass}>New Barcode</label><input value={barcode} onChange={(event) => setBarcode(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); } }} className={inputClass} placeholder="Scan or type barcode" /></div><div><label className={labelClass}>Vendor Name <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplier} onChange={(event) => setSupplier(event.target.value)} className={inputClass} placeholder="Vendor or supplier name" /></div><div><label className={labelClass}>Vendor Phone <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={supplierPhone} onChange={(event) => setSupplierPhone(event.target.value)} className={inputClass} placeholder="Vendor or supplier phone" inputMode="tel" /></div><div><label className={labelClass}>Invoice Number <span className="font-normal text-muted-foreground">(Optional)</span></label><input value={invoiceNumber} onChange={(event) => setInvoiceNumber(event.target.value)} className={`${inputClass} font-mono`} placeholder="Invoice/reference number" /></div></> : <div className="sm:col-span-2 space-y-3"><div><label className={labelClass}>Search sold items</label><input value={returnSearch} onChange={(event) => setReturnSearch(event.target.value)} className={inputClass} placeholder="Search receipt number or item" /></div><div className="max-h-52 space-y-2 overflow-y-auto rounded-lg border border-border p-2">{returnableSales.filter((sale) => `${sale.transactionId} ${sale.itemName}`.toLowerCase().includes(returnSearch.toLowerCase())).map((sale) => <button key={`${sale.saleId}-${sale.itemName}`} type="button" onClick={() => { setSelectedReturnSale(sale); setQuantity('1'); }} className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left ${selectedReturnSale?.saleId === sale.saleId ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted'}`}><span className="min-w-0"><span className="block truncate text-sm font-semibold">{sale.itemName}</span><span className="block text-xs text-muted-foreground">Receipt {sale.transactionId} · {new Date(sale.timestamp).toLocaleString()}</span></span><span className="shrink-0 text-right text-xs"><span className="block font-semibold">{formatMoney(sale.unitPrice, settings.currency)} each</span><span className="block text-muted-foreground">{sale.returnableQuantity} available</span></span></button>)}{returnableSales.filter((sale) => `${sale.transactionId} ${sale.itemName}`.toLowerCase().includes(returnSearch.toLowerCase())).length === 0 && <p className="p-3 text-sm text-muted-foreground">No sold items match this search.</p>}</div><div><label className={labelClass}>Return Reason *</label><NiceSelect value={reason} onChange={setReason} options={[{ value: 'Damaged', label: 'Damaged' }, { value: 'Expired', label: 'Expired' }, { value: 'Defective', label: 'Defective' }, { value: 'Customer return', label: 'Customer return' }, { value: 'Other', label: 'Other' }]} /></div>{selectedReturnSale && <p className="text-xs text-muted-foreground">Returning from receipt <span className="font-semibold text-foreground">{selectedReturnSale.transactionId}</span> at the original selling price of {formatMoney(selectedReturnSale.unitPrice, settings.currency)} per unit. You can return up to {selectedReturnSale.returnableQuantity}.</p>}</div>}
+          </div>
           {action === 'receive' && projectedRestock && <div className="rounded-lg border border-primary/25 bg-primary/5 p-3"><p className="text-xs font-semibold text-foreground">Weighted-average result</p><div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3"><div><span className="block text-muted-foreground">New total quantity</span><span className="font-bold tabular-nums text-foreground">{projectedRestock.resultingQuantity}</span></div><div><span className="block text-muted-foreground">New average cost</span><span className="font-bold tabular-nums text-foreground">{formatMoney(projectedRestock.resultingUnitCost, settings.currency)}</span></div><div><span className="block text-muted-foreground">New stock value</span><span className="font-bold tabular-nums text-foreground">{formatMoney(projectedRestock.resultingValue, settings.currency)}</span></div></div><p className="mt-2 text-[11px] text-muted-foreground">Calculated from the value of existing stock plus the value of this received batch, divided by the combined quantity.</p></div>}
           {action === 'return' && <div><label className={labelClass}>Notes / Return Details</label><textarea value={notes} onChange={(event) => setNotes(event.target.value)} className={`${inputClass} min-h-24 resize-y`} placeholder="Add return or supplier reference details" /></div>}
         </form>

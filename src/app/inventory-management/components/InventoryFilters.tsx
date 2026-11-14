@@ -62,7 +62,9 @@ export default function InventoryFilters({
 }: InventoryFiltersProps) {
   const { settings } = usePosStore();
   const suppliers = Array.from(new Set(items.map((i) => i.supplier)));
-  const categories = settings.productCategories ?? [];
+  const categories = Array.from(
+    new Set([...(settings.productCategories ?? []), ...items.map((item) => item.category)])
+  ).filter(Boolean).sort();
 
   return (
     <div className="mb-4 rounded-lg border border-border bg-card shadow-card sm:rounded-xl">

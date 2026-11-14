@@ -123,6 +123,8 @@ export async function GET(request: NextRequest) {
           timestamp: String(sale.timestamp ?? ''),
           itemName: String(line.name ?? ''),
           quantity,
+          // The sale line quantity is reduced after each partial return, so it
+          // already represents the remaining returnable quantity.
           returnableQuantity: Math.max(0, quantity),
           unitPrice: Number(line.unitPrice ?? 0),
           returnedQuantity,
