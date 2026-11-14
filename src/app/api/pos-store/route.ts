@@ -100,11 +100,12 @@ const READ_PERMISSIONS: Partial<Record<string, Permission[]>> = {
     'add-product',
     'edit-product',
     'adjust-stock',
+    'stock-management',
     'delete-product',
     'checkout',
     'reports',
   ],
-  stockMovements: ['view-only', 'inventory', 'reports'],
+  stockMovements: ['view-only', 'inventory', 'stock-management', 'reports'],
   users: ['users'],
   customers: ['view-only', 'customers', 'checkout', 'reports'],
   vendors: ['view-only', 'vendors', 'inventory', 'reports'],
@@ -1817,6 +1818,7 @@ export async function PUT(request: NextRequest) {
           'expense-clerk',
           'auditor',
           'viewer',
+          'custom',
         ]);
         const suppliedRole = typeof record.role === 'string' ? record.role : '';
         if (suppliedRole && !allowedRoles.has(suppliedRole)) {
@@ -1888,7 +1890,6 @@ export async function PUT(request: NextRequest) {
           ? record.permissions.filter(
               (permission): permission is Permission =>
                 typeof permission === 'string' &&
-                permission !== 'sync-logs' &&
                 getSubscriptionPlan('delux').permissions.includes(permission as Permission)
             )
           : Array.isArray(current?.permissions)

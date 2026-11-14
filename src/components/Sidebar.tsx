@@ -31,6 +31,7 @@ import {
   ReceiptText,
   Warehouse,
   Barcode,
+  RotateCcw,
 } from 'lucide-react';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { Permission } from '@/lib/pos/types';
@@ -82,6 +83,15 @@ const navItems: NavItem[] = [
     group: 'Operations',
     permission: 'checkout',
     order: 2,
+  },
+  {
+    id: 'nav-refunds',
+    label: 'Refunds & Returns',
+    href: '/refunds',
+    icon: RotateCcw,
+    group: 'Operations',
+    permission: 'refunds',
+    order: 3,
   },
   {
     id: 'nav-inventory',
@@ -219,7 +229,6 @@ const navItems: NavItem[] = [
     group: 'Admin',
     permission: 'sync-logs',
     order: 2,
-    adminOnly: true,
   },
   {
     id: 'nav-notifications',

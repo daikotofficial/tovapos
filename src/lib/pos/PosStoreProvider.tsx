@@ -530,6 +530,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         can('add-product') ||
         can('edit-product') ||
         can('adjust-stock') ||
+        can('stock-management') ||
         can('delete-product') ||
         can('checkout') ||
         canView('reports')
@@ -538,7 +539,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         canView('reports') || can('credit-sales') || can('refunds')
           ? safely('Sales', loadSales(), [])
           : Promise.resolve([]),
-        canView('inventory') || canView('reports')
+        canView('inventory') || can('stock-management') || canView('reports')
           ? safely('Stock history', loadStockMovements(), [])
           : Promise.resolve([]),
         safely('User account', loadUsers(defaultUsers), [session.user]),

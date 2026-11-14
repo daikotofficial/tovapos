@@ -13,12 +13,11 @@ import { useRowsPerPage } from '@/lib/pos/useRowsPerPage';
 import ListPagination from '@/components/ui/ListPagination';
 
 export default function SyncLogsPage() {
-  const { currentUser, isOnline, syncQueue, retrySyncOperation, resolveFailedInventorySync, cancelFailedOfflineSale } =
+  const { isOnline, syncQueue, retrySyncOperation, resolveFailedInventorySync, cancelFailedOfflineSale } =
     usePosStore();
   const [workingId, setWorkingId] = useState('');
   const [rowsPerPage] = useRowsPerPage();
   const [page, setPage] = useState(1);
-  const isAdmin = currentUser?.role === 'owner' || currentUser?.role === 'super-admin';
   const operations = useMemo(() => {
     const groups = new Map<string, SyncQueueItem[]>();
     syncQueue.forEach((item) => {
@@ -73,14 +72,7 @@ export default function SyncLogsPage() {
   return (
     <AppLayout title="Sync Logs" subtitle="Review and resolve offline reconciliation problems">
       <PermissionGate permission="sync-logs">
-        {!isAdmin ? (
-          <div className="px-3 py-4 sm:p-6">
-            <div className="mx-auto max-w-xl rounded-xl border border-warning/30 bg-warning/10 p-5 text-warning">
-              Sync Logs are restricted to owners and super administrators.
-            </div>
-          </div>
-        ) : (
-          <div className="mx-auto w-full max-w-screen-2xl space-y-5 p-4 sm:p-6">
+        <div className="mx-auto w-full max-w-screen-2xl space-y-5 p-4 sm:p-6">
             <div className="grid gap-3 sm:grid-cols-3">
               <Summary label="Needs attention" value={failedCount} tone="danger" />
               <Summary label="Waiting to sync" value={pendingCount} tone="warning" />
@@ -224,8 +216,7 @@ export default function SyncLogsPage() {
                 </>
               )}
             </div>
-          </div>
-        )}
+        </div>
       </PermissionGate>
     </AppLayout>
   );

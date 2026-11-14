@@ -299,6 +299,7 @@ export type Permission =
   | 'delete-product'
   | 'inventory'
   | 'adjust-stock'
+  | 'stock-management'
   | 'give-discount'
   | 'void-sale'
   | 'reports'
@@ -448,6 +449,7 @@ export type UserRole =
   | 'expense-clerk'
   | 'auditor'
   | 'viewer'
+  | 'custom'
   | 'receptionist'
   | 'housekeeping'
   | 'booking-agent';

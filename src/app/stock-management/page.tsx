@@ -6,7 +6,7 @@ import StockManagementScreen from './components/StockManagementScreen';
 export default function StockManagementPage() {
   return (
     <AppLayout title="Stock Management" subtitle="Receive products, manage batches, update stock, and process returns">
-      <PermissionGate permission={['add-product', 'adjust-stock']}>
+      <PermissionGate permission={['stock-management', 'adjust-stock']}>
         <StockManagementScreen />
       </PermissionGate>
     </AppLayout>

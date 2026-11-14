@@ -22,6 +22,7 @@ const permissions: Permission[] = [
   'delete-product',
   'inventory',
   'adjust-stock',
+  'stock-management',
   'give-discount',
   'void-sale',
   'reports',
@@ -48,6 +49,7 @@ const permissions: Permission[] = [
   'warehouse-approve',
   'warehouse-receive-transfer',
   'warehouse-adjust',
+  'sync-logs',
 ];
 
 const permissionGroups: { title: string; items: Permission[] }[] = [
@@ -67,6 +69,7 @@ const permissionGroups: { title: string; items: Permission[] }[] = [
       'edit-product',
       'delete-product',
       'adjust-stock',
+      'stock-management',
       'categories',
       'expiry-alerts',
     ],
@@ -96,6 +99,7 @@ const permissionGroups: { title: string; items: Permission[] }[] = [
     ],
   },
   { title: 'Settings & Control', items: ['settings', 'manage-tax', 'notifications'] },
+  { title: 'System Operations', items: ['sync-logs'] },
 ];
 
 const hospitalityPermissions: Permission[] = [
@@ -139,6 +143,7 @@ const roles: UserRole[] = [
   'expense-clerk',
   'auditor',
   'viewer',
+  'custom',
 ];
 
 const hospitalityRoles: UserRole[] = [
@@ -163,6 +168,7 @@ const defaultPermissionsByRole: Record<UserRole, Permission[]> = {
     'edit-product',
     'inventory',
     'adjust-stock',
+    'stock-management',
     'give-discount',
     'void-sale',
     'reports',
@@ -193,6 +199,7 @@ const defaultPermissionsByRole: Record<UserRole, Permission[]> = {
     'edit-product',
     'inventory',
     'adjust-stock',
+    'stock-management',
     'vendors',
     'reports',
     'expiry-alerts',
@@ -215,6 +222,7 @@ const defaultPermissionsByRole: Record<UserRole, Permission[]> = {
   'expense-clerk': ['dashboard', 'expenses', 'expense-heads', 'reports'],
   auditor: ['view-only'],
   viewer: ['dashboard', 'reports'],
+  custom: [],
   receptionist: [
     'dashboard',
     'hospitality-reservations',
@@ -260,6 +268,7 @@ const permissionLabels: Record<Permission, string> = {
   'delete-product': 'Delete product',
   inventory: 'View inventory',
   'adjust-stock': 'Adjust stock',
+  'stock-management': 'Open Stock Management',
   'give-discount': 'Give discount',
   'void-sale': 'Void sale',
   reports: 'View reports',
@@ -322,6 +331,7 @@ export default function UsersPage() {
   const permissionsForRole = (role: UserRole) =>
     (isHospitality ? hospitalityDefaultPermissions[role] : defaultPermissionsByRole[role]) ?? [];
   const roleLabels: Partial<Record<UserRole, string>> = {
+    custom: 'Custom access',
     receptionist: 'Front Desk / Reception',
     housekeeping: 'Housekeeping',
     'booking-agent': 'Reservations Officer',

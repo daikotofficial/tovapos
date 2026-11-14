@@ -8,6 +8,7 @@ import {
   assertSameOrigin,
   assertTenantActive,
   assertTenantPlanPermission,
+  assertAnyPermission,
   assertPermission,
   assertWritePermission,
   errorResponse,
@@ -42,12 +43,17 @@ function aliasList(value: unknown, kind: 'sku' | 'barcode'): InventoryCodeAlias[
     : [];
 }
 
-async function authorize(request: NextRequest) {
+async function authorize(request: NextRequest, write = false) {
   assertSameOrigin(request);
   const auth = await requireAuth(request);
   assertTenantActive(auth);
-  assertWritePermission(auth, 'adjust-stock');
-  await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
+  if (write) {
+    assertWritePermission(auth, 'adjust-stock');
+    await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
+  } else {
+    assertAnyPermission(auth, ['stock-management', 'adjust-stock']);
+    await assertTenantPlanPermission(auth.tenantId, 'stock-management');
+  }
   return auth;
 }
 
@@ -108,7 +114,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const auth = await authorize(request);
+    const auth = await authorize(request, true);
     const body = (await request.json()) as Record<string, unknown>;
     const action = body.action === 'return' ? 'return' : body.action === 'receive' ? 'receive' : '';
     if (!action) throw new HttpError(400, 'Stock action is invalid', 'VALIDATION_ERROR');

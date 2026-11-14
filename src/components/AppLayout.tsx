@@ -25,7 +25,7 @@ const mobileNavItems: {
 }[] = [
   { label: 'Home', href: '/dashboard', icon: LayoutDashboard, permission: 'dashboard' },
   { label: 'Sales', href: '/sales', icon: ShoppingCart, permission: 'checkout' },
-  { label: 'Stock', href: '/stock-management', icon: Package, permission: ['add-product', 'adjust-stock'] },
+  { label: 'Stock', href: '/stock-management', icon: Package, permission: ['stock-management', 'adjust-stock'] },
   { label: 'Reports', href: '/reports', icon: TrendingUp, permission: 'reports' },
   { label: 'Support', href: '/support', icon: LifeBuoy, permission: 'dashboard' },
 ];

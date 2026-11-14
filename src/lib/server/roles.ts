@@ -8,6 +8,7 @@ export const OWNER_PERMISSIONS: Permission[] = [
   'delete-product',
   'inventory',
   'adjust-stock',
+  'stock-management',
   'give-discount',
   'void-sale',
   'reports',
