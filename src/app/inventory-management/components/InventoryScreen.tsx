@@ -77,7 +77,12 @@ export default function InventoryScreen() {
             includeTotal: true,
             expiryAlertDays,
           }),
-          loadInventoryMetrics(expiryAlertDays),
+          loadInventoryMetrics(expiryAlertDays, {
+            q: search,
+            category: categoryFilter,
+            supplier: supplierFilter,
+            status: statusFilter,
+          }),
         ]);
         if (cancelled) return;
         setItems(pageResult.items);

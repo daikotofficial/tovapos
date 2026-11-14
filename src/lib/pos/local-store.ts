@@ -600,18 +600,46 @@ export async function loadInventoryPage(
 
 export async function loadInventoryMetrics(
   expiryAlertDays = 30,
-  options: { requireServer?: boolean } = {}
+  options: {
+    requireServer?: boolean;
+    q?: string;
+    category?: string;
+    supplier?: string;
+    status?: string;
+  } = {}
 ): Promise<InventoryMetrics> {
   if (shouldUsePostgresStore() || options.requireServer) {
     return apiRequest<InventoryMetrics>('inventory', undefined, {
       metrics: true,
       expiryAlertDays,
+      q: options.q,
+      category: options.category,
+      supplier: options.supplier,
+      status: options.status,
     });
   }
 
-  const allItems = (await getAllFromBrowser<InventoryItem>('inventory')).map((item) =>
-    normalizeInventoryItem(item, expiryAlertDays)
-  );
+  const query = options.q?.trim().toLowerCase();
+  const allItems = (await getAllFromBrowser<InventoryItem>('inventory'))
+    .map((item) => normalizeInventoryItem(item, expiryAlertDays))
+    .filter((item) => {
+      const matchesQuery =
+        !query ||
+        [item.name, item.genericName, item.sku, item.barcode ?? '', item.batchLot].some((field) =>
+          field.toLowerCase().includes(query)
+        );
+      const matchesCategory = !options.category || options.category === 'all' || item.category === options.category;
+      const matchesSupplier = !options.supplier || options.supplier === 'all' || item.supplier === options.supplier;
+      const matchesStatus =
+        !options.status ||
+        options.status === 'all' ||
+        (options.status === 'low-stock'
+          ? ['low', 'critical'].includes(item.stockStatus)
+          : options.status === 'alerts'
+            ? ['low', 'critical', 'out', 'expired', 'expiring-soon'].includes(item.stockStatus)
+            : item.stockStatus === options.status);
+      return matchesQuery && matchesCategory && matchesSupplier && matchesStatus;
+    });
   return {
     totalProducts: allItems.length,
     totalUnits: allItems.reduce((sum, item) => sum + item.currentQty, 0),

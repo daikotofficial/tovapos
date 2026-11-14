@@ -275,33 +275,68 @@ function protectInventoryFinancials(data: Record<string, unknown>, auth: AuthCon
 }
 
 async function getInventoryMetrics(request: NextRequest, auth: AuthContext) {
+  const params = request.nextUrl.searchParams;
   const expiryAlertDays = Math.max(
     0,
     Math.min(3650, Math.floor(Number(request.nextUrl.searchParams.get('expiryAlertDays')) || 30))
   );
+  const values: unknown[] = [auth.tenantId, auth.user.branch?.trim() || 'Main Store', expiryAlertDays];
+  const where: string[] = ['inventory.tenant_id = $1', "inventory.product_status = 'active'"];
+  const q = params.get('q')?.trim();
+  if (q) {
+    values.push(q);
+    const index = values.length;
+    where.push(`(
+      lower(inventory.name) LIKE '%' || lower($${index}) || '%'
+      OR lower(inventory.generic_name) LIKE '%' || lower($${index}) || '%'
+      OR lower(inventory.sku) LIKE lower($${index}) || '%'
+      OR lower(coalesce(inventory.barcode, '')) LIKE lower($${index}) || '%'
+      OR lower(inventory.batch_lot) LIKE '%' || lower($${index}) || '%'
+    )`);
+  }
+  const category = params.get('category');
+  if (category && category !== 'all') {
+    values.push(category);
+    where.push(`inventory.category = $${values.length}`);
+  }
+  const supplier = params.get('supplier');
+  if (supplier && supplier !== 'all') {
+    values.push(supplier);
+    where.push(`inventory.supplier = $${values.length}`);
+  }
+  const status = params.get('status');
+  if (status && status !== 'all') {
+    if (status === 'low-stock') where.push("inventory.stock_status IN ('low', 'critical')");
+    else if (status === 'alerts') where.push("(inventory.stock_status IN ('low', 'critical', 'out', 'expired') OR (inventory.expiry_date >= current_date AND inventory.expiry_date <= current_date + ($3::int * interval '1 day')))");
+    else if (status === 'expiring-soon') where.push("(inventory.expiry_date >= current_date AND inventory.expiry_date <= current_date + ($3::int * interval '1 day'))");
+    else {
+      values.push(status);
+      where.push(`inventory.stock_status = $${values.length}`);
+    }
+  }
   const result = await getPosPool().query(
     `
     SELECT
       count(*)::bigint AS total_products,
-      coalesce(sum(CASE WHEN $3 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END), 0)::float8 AS total_units,
+      coalesce(sum(CASE WHEN $2 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END), 0)::float8 AS total_units,
       count(*) FILTER (WHERE inventory.stock_status IN ('low', 'critical'))::bigint AS low_stock,
       count(*) FILTER (WHERE inventory.stock_status = 'critical')::bigint AS critical_stock,
       count(*) FILTER (WHERE inventory.stock_status = 'out')::bigint AS out_of_stock,
       count(*) FILTER (WHERE inventory.stock_status = 'expired' OR inventory.expiry_date < current_date)::bigint AS expired,
       count(*) FILTER (
         WHERE inventory.expiry_date >= current_date
-          AND inventory.expiry_date <= current_date + ($1::int * interval '1 day')
+          AND inventory.expiry_date <= current_date + ($3::int * interval '1 day')
       )::bigint AS expiring_soon,
-      coalesce(sum(CASE WHEN $3 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END * coalesce(branch.unit_cost, inventory.unit_cost)), 0)::float8 AS total_value,
-      coalesce(sum(CASE WHEN $3 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END * (coalesce(branch.selling_price, inventory.selling_price) - coalesce(branch.unit_cost, inventory.unit_cost))), 0)::float8 AS potential_profit
+      coalesce(sum(CASE WHEN $2 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END * coalesce(branch.unit_cost, inventory.unit_cost)), 0)::float8 AS total_value,
+      coalesce(sum(CASE WHEN $2 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END * (coalesce(branch.selling_price, inventory.selling_price) - coalesce(branch.unit_cost, inventory.unit_cost))), 0)::float8 AS potential_profit
     FROM pos_tenant_inventory inventory
     LEFT JOIN pos_branch_inventory branch
       ON branch.tenant_id = inventory.tenant_id
      AND branch.inventory_item_id = inventory.id
-     AND branch.branch = $3
-    WHERE inventory.tenant_id = $2 AND inventory.product_status = 'active'
+     AND branch.branch = $2
+    WHERE ${where.join(' AND ')}
     `,
-    [expiryAlertDays, auth.tenantId, auth.user.branch?.trim() || 'Main Store']
+    values
   );
   const row = result.rows[0] ?? {};
 
