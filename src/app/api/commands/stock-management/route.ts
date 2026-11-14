@@ -52,7 +52,13 @@ async function authorize(request: NextRequest, write = false) {
     await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
   } else {
     assertAnyPermission(auth, ['stock-management', 'adjust-stock']);
-    await assertTenantPlanPermission(auth.tenantId, 'stock-management');
+    // Existing users may already have the original adjust-stock permission
+    // without the newer page-level permission. Keep their read access valid;
+    // only mutations require adjust-stock below.
+    await assertTenantPlanPermission(
+      auth.tenantId,
+      auth.user.permissions.includes('stock-management') ? 'stock-management' : 'adjust-stock'
+    );
   }
   return auth;
 }
@@ -72,8 +78,23 @@ export async function GET(request: NextRequest) {
     const productId = text(request.nextUrl.searchParams.get('productId'));
     if (!productId) throw new HttpError(400, 'Product is required', 'VALIDATION_ERROR');
     const batches = await loadBatches(auth.tenantId, productId);
-    const movementResult = await getPosPool().query(`SELECT data FROM pos_tenant_records WHERE tenant_id = $1 AND store_name = 'stockMovements' AND data->>'inventoryItemId' = $2 ORDER BY data->>'createdAt' DESC`, [auth.tenantId, productId]);
-    const auditResult = await getPosPool().query(`SELECT id, action, entity_id AS \"entityId\", metadata, created_at AS \"createdAt\", user_id AS \"userId\" FROM pos_audit_log WHERE tenant_id = $1 AND entity_type = 'inventory' AND entity_id = $2 ORDER BY created_at DESC, id DESC`, [auth.tenantId, productId]);
+    const movementResult = await getPosPool().query(
+      `SELECT data FROM pos_tenant_records
+       WHERE tenant_id = $1 AND store_name = 'stockMovements'
+         AND data->>'inventoryItemId' = $2
+       ORDER BY data->>'createdAt' DESC`,
+      [auth.tenantId, productId]
+    );
+    const auditResult = await getPosPool().query(
+      `SELECT id, action, entity_id AS \"entityId\", metadata,
+              created_at AS \"createdAt\", user_id AS \"userId\"
+       FROM pos_audit_log
+       WHERE tenant_id = $1
+         AND entity_type = 'inventory'
+         AND entity_id = $2
+       ORDER BY created_at DESC, id DESC`,
+      [auth.tenantId, productId]
+    );
     const salesResult = await getPosPool().query(
       `SELECT record_id AS id, data FROM pos_tenant_records
        WHERE tenant_id = $1 AND store_name = 'sales'
@@ -108,7 +129,12 @@ export async function GET(request: NextRequest) {
         };
       }).filter((item) => item.returnableQuantity > 0);
     });
-    return NextResponse.json({ batches, movements: movementResult.rows.map((row) => row.data), audits: auditResult.rows, returnableSales });
+    return NextResponse.json({
+      batches,
+      movements: movementResult.rows.map((row) => row.data),
+      audits: auditResult.rows,
+      returnableSales,
+    });
   } catch (error) { return errorResponse(error); }
 }
 

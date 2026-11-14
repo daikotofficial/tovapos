@@ -158,6 +158,22 @@ export default function MySalesHistoryPage() {
     setFromTime(draftFromTime);
     setToTime(draftToTime);
   };
+  const printHistory = () => {
+    const popup = window.open('', '_blank', 'width=1100,height=800');
+    if (!popup) {
+      toast.error('Please allow pop-ups to print your sales history.');
+      return;
+    }
+    const rows = visibleSales
+      .map(
+        (sale) => `<tr><td>${sale.transactionId}</td><td>${dateText(sale.timestamp)} ${timeText(sale.timestamp)}</td><td>${sale.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)}</td><td>${sale.paymentMethod.replace('-', ' ')}</td><td>${formatMoney(sale.grandTotal, settings.currency)}</td><td>${formatMoney(Number(sale.amountPaid ?? (sale.paymentMethod === 'credit' ? 0 : sale.grandTotal)), settings.currency)}</td><td>${sale.status}</td></tr>`
+      )
+      .join('');
+    popup.document.write(`<html><head><title>My Sales History</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{margin-bottom:4px}p{color:#555;font-size:12px}table{width:100%;border-collapse:collapse;font-size:11px;margin-top:18px}th,td{border:1px solid #d5d9dd;padding:7px;text-align:left}th{background:#eef2f1}td:nth-child(5),td:nth-child(6){text-align:right}</style></head><body><h1>My Sales History</h1><p>${from || 'All dates'} to ${to || 'Present'} · ${visibleSales.length} transactions · Billed total ${formatMoney(summary.total, settings.currency)} · Collected ${formatMoney(summary.collected, settings.currency)}</p><table><thead><tr><th>Transaction</th><th>Date / time</th><th>Items</th><th>Payment</th><th>Billed total</th><th>Amount paid</th><th>Status</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No sales found for this period.</td></tr>'}</tbody></table></body></html>`);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  };
   const cards = [
     { label: 'Billed total', value: summary.total, className: 'text-foreground' },
     { label: 'Collected', value: summary.collected, className: 'text-emerald-700' },
@@ -192,6 +208,14 @@ export default function MySalesHistoryPage() {
                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-secondary px-4 py-2 text-sm font-semibold hover:bg-muted disabled:opacity-60"
               >
                 <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Refresh
+              </button>
+              <button
+                type="button"
+                onClick={printHistory}
+                disabled={loading}
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-60"
+              >
+                <Printer size={15} /> Export / Print PDF
               </button>
             </div>
             <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_9rem_15rem_auto_auto] lg:items-end">
