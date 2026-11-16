@@ -43,6 +43,20 @@ function aliasList(value: unknown, kind: 'sku' | 'barcode'): InventoryCodeAlias[
     : [];
 }
 
+function deriveLedgerQuantity(rows: Array<{ data: Record<string, unknown> }>): number | null {
+  if (rows.length === 0) return null;
+  const firstBefore = Number(rows[0].data.quantityBefore);
+  let quantity = Number.isFinite(firstBefore) && firstBefore >= 0 ? firstBefore : 0;
+  let sawDelta = false;
+  for (const row of rows) {
+    const delta = Number(row.data.quantityDelta);
+    if (!Number.isFinite(delta)) continue;
+    quantity += delta;
+    sawDelta = true;
+  }
+  return sawDelta && Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
+}
+
 async function authorize(request: NextRequest, write = false) {
   assertSameOrigin(request);
   const auth = await requireAuth(request);
@@ -210,19 +224,16 @@ export async function POST(request: NextRequest) {
          WHERE tenant_id = $1
            AND store_name = 'stockMovements'
            AND data->>'inventoryItemId' = $2
-           AND data ? 'quantityAfter'
            AND (
              ($3 = 'Main Store' AND (NOT data ? 'branch' OR data->>'branch' = 'Main Store'))
              OR ($3 <> 'Main Store' AND data->>'branch' = $3)
            )
-         ORDER BY data->>'createdAt' DESC, record_id DESC
-         LIMIT 1`,
+         ORDER BY data->>'createdAt' ASC, record_id ASC`,
         [auth.tenantId, productId, branch]
       );
-      const latestMovement = latestMovementResult.rows[0]?.data as Record<string, unknown> | undefined;
-      const ledgerQuantity = Number(latestMovement?.quantityAfter);
+      const ledgerQuantity = deriveLedgerQuantity(latestMovementResult.rows as Array<{ data: Record<string, unknown> }>);
       const storedQuantity = Number(branchRow?.current_qty ?? row.current_qty);
-      const beforeQty = Number.isFinite(ledgerQuantity) && ledgerQuantity >= 0 ? ledgerQuantity : storedQuantity;
+      const beforeQty = ledgerQuantity ?? storedQuantity;
       const current: InventoryItem = beforeQty === storedQuantity
         ? storedCurrent
         : {
@@ -255,7 +266,7 @@ export async function POST(request: NextRequest) {
           `INSERT INTO pos_audit_log
              (tenant_id, user_id, action, entity_type, entity_id, metadata)
            VALUES ($1, $2, 'inventory.quantity_reconciled', 'inventory', $3, $4::jsonb)`,
-          [auth.tenantId, auth.user.id, productId, JSON.stringify({ from: storedQuantity, to: beforeQty, source: 'latest-stock-movement-before-stock-operation' })]
+          [auth.tenantId, auth.user.id, productId, JSON.stringify({ from: storedQuantity, to: beforeQty, branch, source: 'ordered-movement-deltas-before-stock-operation' })]
         );
       }
       const beforeCost = Number(branchRow?.unit_cost ?? row.unit_cost);

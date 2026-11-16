@@ -12,6 +12,20 @@ import {
   requireAuth,
 } from '@/lib/server/security';
 
+function deriveLedgerQuantity(rows: Array<{ data: Record<string, unknown> }>): number | null {
+  if (rows.length === 0) return null;
+  const firstBefore = Number(rows[0].data.quantityBefore);
+  let quantity = Number.isFinite(firstBefore) && firstBefore >= 0 ? firstBefore : 0;
+  let sawDelta = false;
+  for (const row of rows) {
+    const delta = Number(row.data.quantityDelta);
+    if (!Number.isFinite(delta)) continue;
+    quantity += delta;
+    sawDelta = true;
+  }
+  return sawDelta && Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
+}
+
 export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
@@ -60,19 +74,16 @@ export async function POST(request: NextRequest) {
            WHERE tenant_id = $1
              AND store_name = 'stockMovements'
              AND data->>'inventoryItemId' = $2
-             AND data ? 'quantityAfter'
              AND (
                ($3 = 'Main Store' AND (NOT data ? 'branch' OR data->>'branch' = 'Main Store'))
                OR ($3 <> 'Main Store' AND data->>'branch' = $3)
              )
-           ORDER BY data->>'createdAt' DESC, record_id DESC
-           LIMIT 1`,
+           ORDER BY data->>'createdAt' ASC, record_id ASC`,
           [auth.tenantId, row.id, branch]
         );
-        const movement = movementResult.rows[0]?.data as Record<string, unknown> | undefined;
-        const ledgerQuantity = Number(movement?.quantityAfter);
+        const ledgerQuantity = deriveLedgerQuantity(movementResult.rows as Array<{ data: Record<string, unknown> }>);
         const storedQuantity = Number(row.current_qty);
-        if (!Number.isFinite(ledgerQuantity) || ledgerQuantity < 0 || ledgerQuantity === storedQuantity) continue;
+        if (ledgerQuantity === null || ledgerQuantity === storedQuantity) continue;
         const current = {
           ...((row.base_data ?? {}) as InventoryItem),
           ...(row.data as InventoryItem),
@@ -99,7 +110,7 @@ export async function POST(request: NextRequest) {
           `INSERT INTO pos_audit_log
              (tenant_id, user_id, action, entity_type, entity_id, metadata)
            VALUES ($1, $2, 'inventory.quantity_reconciled', 'inventory', $3, $4::jsonb)`,
-          [auth.tenantId, auth.user.id, row.id, JSON.stringify({ from: storedQuantity, to: ledgerQuantity, branch, source: 'latest-stock-movement' })]
+          [auth.tenantId, auth.user.id, row.id, JSON.stringify({ from: storedQuantity, to: ledgerQuantity, branch, source: 'ordered-movement-deltas' })]
         );
         changed.push(updated);
       }
