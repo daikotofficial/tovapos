@@ -268,6 +268,18 @@ export async function POST(request: NextRequest) {
         quantityDelta = -quantity; reason = text(body.reason) || 'Stock returned';
       }
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockBatches', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, batch.id, JSON.stringify(batch)]);
+      // Keep the canonical inventory record and the query index in the same
+      // transaction. Without this write, a later product edit or hydration
+      // could restore an older quantity while the receipt movement remained.
+      await client.query(
+        `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+         VALUES ($1, 'inventory', $2, $3::jsonb)
+         ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET
+           data = EXCLUDED.data,
+           version = pos_tenant_records.version + 1,
+           updated_at = now()`,
+        [auth.tenantId, productId, JSON.stringify(updated)]
+      );
       await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
       const movement: StockMovement = { id: `move-${randomUUID()}`, operationId, inventoryItemId: productId, productName: current.name, sku: batch.sku, barcode: batch.barcode, batchLot: current.batchLot, type: action === 'receive' ? 'receive' : 'return', quantityDelta, quantityBefore: beforeQty, quantityAfter: updated.currentQty, unitCost: batch.unitCost, unitPrice: batch.sellingPrice, referenceId: batch.id, referenceLabel: action === 'receive' ? 'Stock receipt' : 'Supplier return', reason: notes ? `${reason} — ${notes}` : reason, batchId: batch.id, supplier: batch.supplier, supplierPhone: batch.supplierPhone, invoiceNumber: batch.invoiceNumber, valueBefore: beforeValue, valueAfter: updated.currentQty * updated.unitCost, createdAt: now, createdBy: auth.user.name, syncStatus: 'synced' };
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockMovements', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, movement.id, JSON.stringify(movement)]);
