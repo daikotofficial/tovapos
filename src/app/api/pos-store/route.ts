@@ -317,9 +317,43 @@ async function getInventoryMetrics(request: NextRequest, auth: AuthContext) {
   }
   const result = await getPosPool().query(
     `
+    WITH movement_ledger AS (
+      SELECT
+        data->>'inventoryItemId' AS inventory_item_id,
+        (array_agg(NULLIF(data->>'quantityBefore', '')::float8
+          ORDER BY data->>'createdAt' ASC, record_id ASC))[1]
+          + coalesce(sum(NULLIF(data->>'quantityDelta', '')::float8), 0) AS ledger_qty
+      FROM pos_tenant_records
+      WHERE tenant_id = $1
+        AND store_name = 'stockMovements'
+        AND (
+          ($2 = 'Main Store' AND (NOT data ? 'branch' OR data->>'branch' = 'Main Store'))
+          OR ($2 <> 'Main Store' AND data->>'branch' = $2)
+        )
+      GROUP BY data->>'inventoryItemId'
+    ), inventory_scope AS (
+      SELECT
+        inventory.*,
+        coalesce(
+          movement_ledger.ledger_qty,
+          CASE
+            WHEN $2 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty)
+            ELSE coalesce(branch.current_qty, 0)
+          END
+        ) AS effective_qty,
+        coalesce(branch.unit_cost, inventory.unit_cost) AS effective_unit_cost,
+        coalesce(branch.selling_price, inventory.selling_price) AS effective_selling_price
+      FROM pos_tenant_inventory inventory
+      LEFT JOIN pos_branch_inventory branch
+        ON branch.tenant_id = inventory.tenant_id
+       AND branch.inventory_item_id = inventory.id
+       AND branch.branch = $2
+      LEFT JOIN movement_ledger
+        ON movement_ledger.inventory_item_id = inventory.id
+    )
     SELECT
       count(*)::bigint AS total_products,
-      coalesce(sum(CASE WHEN $2 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END), 0)::float8 AS total_units,
+      coalesce(sum(inventory.effective_qty), 0)::float8 AS total_units,
       count(*) FILTER (WHERE inventory.stock_status IN ('low', 'critical'))::bigint AS low_stock,
       count(*) FILTER (WHERE inventory.stock_status = 'critical')::bigint AS critical_stock,
       count(*) FILTER (WHERE inventory.stock_status = 'out')::bigint AS out_of_stock,
@@ -328,13 +362,9 @@ async function getInventoryMetrics(request: NextRequest, auth: AuthContext) {
         WHERE inventory.expiry_date >= current_date
           AND inventory.expiry_date <= current_date + ($3::int * interval '1 day')
       )::bigint AS expiring_soon,
-      coalesce(sum(CASE WHEN $2 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END * coalesce(branch.unit_cost, inventory.unit_cost)), 0)::float8 AS total_value,
-      coalesce(sum(CASE WHEN $2 = 'Main Store' THEN coalesce(branch.current_qty, inventory.current_qty) ELSE coalesce(branch.current_qty, 0) END * (coalesce(branch.selling_price, inventory.selling_price) - coalesce(branch.unit_cost, inventory.unit_cost))), 0)::float8 AS potential_profit
-    FROM pos_tenant_inventory inventory
-    LEFT JOIN pos_branch_inventory branch
-      ON branch.tenant_id = inventory.tenant_id
-     AND branch.inventory_item_id = inventory.id
-     AND branch.branch = $2
+      coalesce(sum(inventory.effective_qty * inventory.effective_unit_cost), 0)::float8 AS total_value,
+      coalesce(sum(inventory.effective_qty * (inventory.effective_selling_price - inventory.effective_unit_cost)), 0)::float8 AS potential_profit
+    FROM inventory_scope inventory
     WHERE ${where.join(' AND ')}
     `,
     values
