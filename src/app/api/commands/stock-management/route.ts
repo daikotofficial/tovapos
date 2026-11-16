@@ -188,8 +188,48 @@ export async function POST(request: NextRequest) {
       );
       const row = result.rows[0];
       if (!row) throw new HttpError(404, 'Product was not found', 'NOT_FOUND');
-      const current = row.data as InventoryItem;
-      const beforeQty = Number(row.current_qty);
+      const storedCurrent = row.data as InventoryItem;
+      const latestMovementResult = await client.query(
+        `SELECT data
+         FROM pos_tenant_records
+         WHERE tenant_id = $1
+           AND store_name = 'stockMovements'
+           AND data->>'inventoryItemId' = $2
+           AND data ? 'quantityAfter'
+         ORDER BY data->>'createdAt' DESC, record_id DESC
+         LIMIT 1`,
+        [auth.tenantId, productId]
+      );
+      const latestMovement = latestMovementResult.rows[0]?.data as Record<string, unknown> | undefined;
+      const ledgerQuantity = Number(latestMovement?.quantityAfter);
+      const storedQuantity = Number(row.current_qty);
+      const beforeQty = Number.isFinite(ledgerQuantity) && ledgerQuantity >= 0 ? ledgerQuantity : storedQuantity;
+      const current: InventoryItem = beforeQty === storedQuantity
+        ? storedCurrent
+        : {
+            ...storedCurrent,
+            currentQty: beforeQty,
+            stockStatus: computeStockStatus(beforeQty, storedCurrent.reorderLevel, storedCurrent.expiryDate),
+            updatedAt: new Date().toISOString(),
+          };
+      if (beforeQty !== storedQuantity) {
+        await client.query(
+          `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+           VALUES ($1, 'inventory', $2, $3::jsonb)
+           ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET
+             data = EXCLUDED.data,
+             version = pos_tenant_records.version + 1,
+             updated_at = now()`,
+          [auth.tenantId, productId, JSON.stringify(current)]
+        );
+        await upsertTenantInventoryIndex(client, auth.tenantId, current as unknown as Record<string, unknown> & { id: string });
+        await client.query(
+          `INSERT INTO pos_audit_log
+             (tenant_id, user_id, action, entity_type, entity_id, metadata)
+           VALUES ($1, $2, 'inventory.quantity_reconciled', 'inventory', $3, $4::jsonb)`,
+          [auth.tenantId, auth.user.id, productId, JSON.stringify({ from: storedQuantity, to: beforeQty, source: 'latest-stock-movement-before-stock-operation' })]
+        );
+      }
       const beforeCost = Number(row.unit_cost);
       const beforeValue = beforeQty * beforeCost;
       const now = new Date().toISOString();

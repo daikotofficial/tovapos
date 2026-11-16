@@ -33,9 +33,9 @@ export default function BatchDetailDrawer({ item, movements, onClose }: BatchDet
   const margin = item.sellingPrice - item.unitCost;
   const marginPct = (item.profitMargin ?? (margin / item.sellingPrice) * 100).toFixed(1);
 
-  const movementHistory = movements
-    .filter((movement) => movement.inventoryItemId === item.id)
-    .slice(0, 8);
+  // The movement ledger is the quantity source of truth. Do not truncate it:
+  // a product's full history must remain inspectable when reconciling stock.
+  const movementHistory = movements.filter((movement) => movement.inventoryItemId === item.id);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -225,7 +225,7 @@ export default function BatchDetailDrawer({ item, movements, onClose }: BatchDet
 
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-              Recent Movement
+              Full Movement History
             </p>
             <div className="space-y-1.5">
               {movementHistory.length === 0 && (
