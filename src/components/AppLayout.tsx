@@ -57,7 +57,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
 
   return (
     <div
-      className="pos-app-shell flex h-screen w-full max-w-full overflow-hidden bg-background text-foreground"
+      className="pos-app-shell flex h-screen w-full max-w-full overflow-hidden bg-background text-foreground selection:bg-primary/15"
       style={
         {
           '--primary': brandColor,
@@ -74,7 +74,7 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
       </div>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar title={title} subtitle={subtitle} onOpenMenu={() => setMobileMenuOpen(true)} />
-        <main className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-background pb-[calc(5.25rem+env(safe-area-inset-bottom))] scrollbar-thin lg:pb-0">
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-background pb-[calc(5.25rem+env(safe-area-inset-bottom))] scrollbar-thin lg:pb-0">
           <div className="pos-page min-w-0 w-full flex-none lg:min-h-0 lg:flex-1">{children}</div>
         </main>
 

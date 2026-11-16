@@ -380,6 +380,65 @@
 }
 
 @layer components {
+  /* Shared workspace surface: calm contrast, restrained depth, and consistent
+     hierarchy across every authenticated screen. */
+  .pos-app-shell {
+    --pos-card-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px rgb(15 23 42 / 0.025);
+    background:
+      radial-gradient(circle at 12% -10%, color-mix(in srgb, var(--primary) 7%, transparent), transparent 32rem),
+      var(--background);
+  }
+
+  .pos-app-shell main {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--card) 35%, transparent), transparent 18rem),
+      var(--background);
+  }
+
+  .pos-app-shell .shadow-card {
+    box-shadow: var(--pos-card-shadow);
+  }
+
+  .pos-app-shell .shadow-sidebar {
+    box-shadow: 4px 0 22px rgb(15 23 42 / 0.035);
+  }
+
+  .pos-app-shell .shadow-modal {
+    box-shadow: 0 24px 70px rgb(15 23 42 / 0.16), 0 8px 24px rgb(15 23 42 / 0.08);
+  }
+
+  .pos-app-shell .rounded-xl.border.bg-card,
+  .pos-app-shell .rounded-lg.border.bg-card,
+  .pos-app-shell .rounded-xl.border.bg-white,
+  .pos-app-shell .rounded-lg.border.bg-white {
+    border-color: color-mix(in srgb, var(--border) 78%, transparent);
+    box-shadow: var(--pos-card-shadow);
+  }
+
+  .pos-app-shell table thead {
+    background-color: color-mix(in srgb, var(--muted) 48%, transparent);
+  }
+
+  .pos-app-shell table th {
+    color: color-mix(in srgb, var(--muted-foreground) 88%, var(--foreground));
+    font-size: 0.68rem;
+    letter-spacing: 0.045em;
+    text-transform: uppercase;
+  }
+
+  .pos-app-shell input:not([type='checkbox']):not([type='radio']),
+  .pos-app-shell select,
+  .pos-app-shell textarea {
+    border-color: color-mix(in srgb, var(--border) 88%, transparent);
+    box-shadow: 0 1px 1px rgb(15 23 42 / 0.02);
+  }
+
+  .pos-app-shell input:not([type='checkbox']):not([type='radio']):focus,
+  .pos-app-shell select:focus,
+  .pos-app-shell textarea:focus {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent);
+  }
+
   .pos-page {
     min-width: 0;
     overflow-wrap: anywhere;

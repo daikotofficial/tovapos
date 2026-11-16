@@ -179,7 +179,7 @@ export default function Topbar({ title, subtitle, onOpenMenu }: TopbarProps) {
   }, []);
 
   return (
-    <header className="shrink-0 border-b border-border bg-card z-30">
+    <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-card/85 backdrop-blur-xl">
       {tenant?.status === 'suspended' && (
         <div className="flex items-center gap-3 bg-danger px-4 py-2 text-xs font-bold text-white sm:px-6">
           <div className="relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/15">
