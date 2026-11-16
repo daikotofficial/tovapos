@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import type { InventoryItem, StockMovement } from '@/lib/pos/types';
+import { computeStockStatus } from '@/lib/pos/stock';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
   assertPermission,
@@ -12,6 +13,20 @@ import {
   requireAuth,
 } from '@/lib/server/security';
 import { upsertTenantInventoryIndex } from '@/lib/server/tenant-indexes';
+
+function deriveLedgerQuantity(rows: Array<{ data: Record<string, unknown> }>): number | null {
+  if (rows.length === 0) return null;
+  const firstBefore = Number(rows[0].data.quantityBefore);
+  let quantity = Number.isFinite(firstBefore) && firstBefore >= 0 ? firstBefore : 0;
+  let sawDelta = false;
+  for (const row of rows) {
+    const delta = Number(row.data.quantityDelta);
+    if (!Number.isFinite(delta)) continue;
+    quantity += delta;
+    sawDelta = true;
+  }
+  return sawDelta && Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -91,8 +106,34 @@ export async function POST(request: NextRequest) {
       const productPermission = existing ? 'edit-product' : 'add-product';
       assertWritePermission(auth, productPermission);
       await assertTenantPlanPermission(auth.tenantId, productPermission);
-      const before = existing ? Number(existing.current_qty) : 0;
-      const effectiveDelta = requestedQuantity - before;
+      const movementResult = existing
+        ? await client.query(
+            `SELECT data
+             FROM pos_tenant_records
+             WHERE tenant_id = $1
+               AND store_name = 'stockMovements'
+               AND data->>'inventoryItemId' = $2
+               AND (NOT data ? 'branch' OR data->>'branch' = 'Main Store')
+             ORDER BY data->>'createdAt' ASC, record_id ASC`,
+            [auth.tenantId, product.id]
+          )
+        : { rows: [] };
+      const ledgerQuantity = deriveLedgerQuantity(
+        movementResult.rows as Array<{ data: Record<string, unknown> }>
+      );
+      const storedQuantity = existing ? Number(existing.current_qty) : 0;
+      const before = ledgerQuantity ?? storedQuantity;
+      // Editing product information must not restore an old quantity from a
+      // stale form. A quantity change is explicit only when it differs from
+      // the canonical product snapshot; use stock adjustment/restock for an
+      // intentional quantity correction.
+      const after =
+        existing &&
+        ledgerQuantity !== null &&
+        requestedQuantity === Number((existing.data as InventoryItem).currentQty)
+          ? ledgerQuantity
+          : requestedQuantity;
+      const effectiveDelta = after - before;
       if (existing && effectiveDelta !== 0) {
         assertWritePermission(auth, 'adjust-stock');
         await assertTenantPlanPermission(auth.tenantId, 'adjust-stock');
@@ -108,7 +149,6 @@ export async function POST(request: NextRequest) {
           'STALE_INVENTORY_UPDATE'
         );
       }
-      const after = requestedQuantity;
       if (after < 0) {
         throw new HttpError(
           409,
@@ -121,7 +161,7 @@ export async function POST(request: NextRequest) {
         ...(existing ? (existing.data as InventoryItem) : product),
         ...product,
         currentQty: after,
-        stockStatus: after === 0 ? 'out' : product.stockStatus,
+        stockStatus: computeStockStatus(after, product.reorderLevel, product.expiryDate),
         updatedAt: now,
       };
       const movement: StockMovement | null =
