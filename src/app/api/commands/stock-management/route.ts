@@ -188,7 +188,22 @@ export async function POST(request: NextRequest) {
       );
       const row = result.rows[0];
       if (!row) throw new HttpError(404, 'Product was not found', 'NOT_FOUND');
-      const storedCurrent = row.data as InventoryItem;
+      const branch = auth.user.branch?.trim() || 'Main Store';
+      const branchRow = branch === 'Main Store'
+        ? null
+        : (await client.query(
+            `SELECT * FROM pos_branch_inventory
+             WHERE tenant_id = $1 AND branch = $2 AND inventory_item_id = $3
+             FOR UPDATE`,
+            [auth.tenantId, branch, productId]
+          )).rows[0] ?? null;
+      if (branch !== 'Main Store' && !branchRow) {
+        throw new HttpError(409, 'This product has no stock balance for your branch', 'BRANCH_STOCK_NOT_FOUND');
+      }
+      const storedCurrent = {
+        ...(row.data as InventoryItem),
+        ...((branchRow?.data ?? {}) as InventoryItem),
+      } as InventoryItem;
       const latestMovementResult = await client.query(
         `SELECT data
          FROM pos_tenant_records
@@ -196,13 +211,17 @@ export async function POST(request: NextRequest) {
            AND store_name = 'stockMovements'
            AND data->>'inventoryItemId' = $2
            AND data ? 'quantityAfter'
+           AND (
+             ($3 = 'Main Store' AND (NOT data ? 'branch' OR data->>'branch' = 'Main Store'))
+             OR ($3 <> 'Main Store' AND data->>'branch' = $3)
+           )
          ORDER BY data->>'createdAt' DESC, record_id DESC
          LIMIT 1`,
-        [auth.tenantId, productId]
+        [auth.tenantId, productId, branch]
       );
       const latestMovement = latestMovementResult.rows[0]?.data as Record<string, unknown> | undefined;
       const ledgerQuantity = Number(latestMovement?.quantityAfter);
-      const storedQuantity = Number(row.current_qty);
+      const storedQuantity = Number(branchRow?.current_qty ?? row.current_qty);
       const beforeQty = Number.isFinite(ledgerQuantity) && ledgerQuantity >= 0 ? ledgerQuantity : storedQuantity;
       const current: InventoryItem = beforeQty === storedQuantity
         ? storedCurrent
@@ -213,16 +232,25 @@ export async function POST(request: NextRequest) {
             updatedAt: new Date().toISOString(),
           };
       if (beforeQty !== storedQuantity) {
-        await client.query(
-          `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
-           VALUES ($1, 'inventory', $2, $3::jsonb)
-           ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET
-             data = EXCLUDED.data,
-             version = pos_tenant_records.version + 1,
-             updated_at = now()`,
-          [auth.tenantId, productId, JSON.stringify(current)]
-        );
-        await upsertTenantInventoryIndex(client, auth.tenantId, current as unknown as Record<string, unknown> & { id: string });
+        if (branch === 'Main Store') {
+          await client.query(
+            `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+             VALUES ($1, 'inventory', $2, $3::jsonb)
+             ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET
+               data = EXCLUDED.data,
+               version = pos_tenant_records.version + 1,
+               updated_at = now()`,
+            [auth.tenantId, productId, JSON.stringify(current)]
+          );
+          await upsertTenantInventoryIndex(client, auth.tenantId, current as unknown as Record<string, unknown> & { id: string });
+        } else {
+          await client.query(
+            `UPDATE pos_branch_inventory
+             SET current_qty = $1, data = $2::jsonb, version = version + 1, updated_at = now()
+             WHERE tenant_id = $3 AND branch = $4 AND inventory_item_id = $5`,
+            [beforeQty, JSON.stringify(current), auth.tenantId, branch, productId]
+          );
+        }
         await client.query(
           `INSERT INTO pos_audit_log
              (tenant_id, user_id, action, entity_type, entity_id, metadata)
@@ -230,7 +258,7 @@ export async function POST(request: NextRequest) {
           [auth.tenantId, auth.user.id, productId, JSON.stringify({ from: storedQuantity, to: beforeQty, source: 'latest-stock-movement-before-stock-operation' })]
         );
       }
-      const beforeCost = Number(row.unit_cost);
+      const beforeCost = Number(branchRow?.unit_cost ?? row.unit_cost);
       const beforeValue = beforeQty * beforeCost;
       const now = new Date().toISOString();
       const batches = await loadBatches(auth.tenantId, productId);
@@ -308,20 +336,30 @@ export async function POST(request: NextRequest) {
         quantityDelta = -quantity; reason = text(body.reason) || 'Stock returned';
       }
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockBatches', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, batch.id, JSON.stringify(batch)]);
-      // Keep the canonical inventory record and the query index in the same
-      // transaction. Without this write, a later product edit or hydration
-      // could restore an older quantity while the receipt movement remained.
-      await client.query(
-        `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
-         VALUES ($1, 'inventory', $2, $3::jsonb)
-         ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET
-           data = EXCLUDED.data,
-           version = pos_tenant_records.version + 1,
-           updated_at = now()`,
-        [auth.tenantId, productId, JSON.stringify(updated)]
-      );
-      await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
-      const movement: StockMovement = { id: `move-${randomUUID()}`, operationId, inventoryItemId: productId, productName: current.name, sku: batch.sku, barcode: batch.barcode, batchLot: current.batchLot, type: action === 'receive' ? 'receive' : 'return', quantityDelta, quantityBefore: beforeQty, quantityAfter: updated.currentQty, unitCost: batch.unitCost, unitPrice: batch.sellingPrice, referenceId: batch.id, referenceLabel: action === 'receive' ? 'Stock receipt' : 'Supplier return', reason: notes ? `${reason} — ${notes}` : reason, batchId: batch.id, supplier: batch.supplier, supplierPhone: batch.supplierPhone, invoiceNumber: batch.invoiceNumber, valueBefore: beforeValue, valueAfter: updated.currentQty * updated.unitCost, createdAt: now, createdBy: auth.user.name, syncStatus: 'synced' };
+      // Keep the canonical inventory record and its branch/index projection in
+      // the same transaction. A branch operation must never overwrite the
+      // main-store balance.
+      if (branch === 'Main Store') {
+        await client.query(
+          `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+           VALUES ($1, 'inventory', $2, $3::jsonb)
+           ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET
+             data = EXCLUDED.data,
+             version = pos_tenant_records.version + 1,
+             updated_at = now()`,
+          [auth.tenantId, productId, JSON.stringify(updated)]
+        );
+        await upsertTenantInventoryIndex(client, auth.tenantId, updated as unknown as Record<string, unknown> & { id: string });
+      } else {
+        await client.query(
+          `UPDATE pos_branch_inventory
+           SET current_qty = $1, unit_cost = $2, selling_price = $3, data = $4::jsonb,
+               version = version + 1, updated_at = now()
+           WHERE tenant_id = $5 AND branch = $6 AND inventory_item_id = $7`,
+          [updated.currentQty, updated.unitCost, updated.sellingPrice, JSON.stringify(updated), auth.tenantId, branch, productId]
+        );
+      }
+      const movement: StockMovement = { id: `move-${randomUUID()}`, operationId, inventoryItemId: productId, branch, productName: current.name, sku: batch.sku, barcode: batch.barcode, batchLot: current.batchLot, type: action === 'receive' ? 'receive' : 'return', quantityDelta, quantityBefore: beforeQty, quantityAfter: updated.currentQty, unitCost: batch.unitCost, unitPrice: batch.sellingPrice, referenceId: batch.id, referenceLabel: action === 'receive' ? 'Stock receipt' : 'Supplier return', reason: notes ? `${reason} — ${notes}` : reason, batchId: batch.id, supplier: batch.supplier, supplierPhone: batch.supplierPhone, invoiceNumber: batch.invoiceNumber, valueBefore: beforeValue, valueAfter: updated.currentQty * updated.unitCost, createdAt: now, createdBy: auth.user.name, syncStatus: 'synced' };
       await client.query(`INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data) VALUES ($1, 'stockMovements', $2, $3::jsonb) ON CONFLICT (tenant_id, store_name, record_id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`, [auth.tenantId, movement.id, JSON.stringify(movement)]);
       await client.query(`INSERT INTO pos_audit_log (tenant_id, user_id, action, entity_type, entity_id, operation_id, metadata) VALUES ($1, $2, $3, 'inventory', $4, $5, $6::jsonb)`, [auth.tenantId, auth.user.id, action === 'receive' ? 'stock.received' : 'stock.returned', productId, operationId, JSON.stringify({ beforeQty, beforeCost, afterQty: updated.currentQty, afterCost: updated.unitCost, beforeValue, afterValue: updated.currentQty * updated.unitCost, costing, batch, movement, notes: text(body.notes), sku: batch.sku, barcode: batch.barcode })]);
       const responseBody = { inventory: updated, batch, movement };

@@ -49,6 +49,7 @@ import {
   loadExpenses,
   loadInventory,
   loadInventoryByIds,
+  reconcileInventoryBalances,
   loadSales,
   loadSettings,
   loadStockMovements,
@@ -534,7 +535,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         can('delete-product') ||
         can('checkout') ||
         canView('reports')
-          ? safely('Inventory', loadInventory([]), [])
+          ? safely(
+              'Inventory',
+              reconcileInventoryBalances().then(() => loadInventory([])),
+              []
+            )
           : Promise.resolve([]),
         canView('reports') || can('credit-sales') || can('refunds')
           ? safely('Sales', loadSales(), [])

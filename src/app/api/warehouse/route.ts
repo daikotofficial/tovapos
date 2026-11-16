@@ -7,6 +7,7 @@ import type {
   WarehouseStock,
   WarehouseTransfer,
   WarehouseTransferLine,
+  StockMovement,
 } from '@/lib/pos/types';
 import { computeStockStatus, computeWeightedAverageUnitCost } from '@/lib/pos/stock';
 import {
@@ -1109,6 +1110,33 @@ export async function POST(request: NextRequest) {
                     performedByRole: auth.user.role,
                   }),
                 ]
+              );
+              const movement: StockMovement = {
+                id: `move-warehouse-${opId}-${line.productId}`,
+                operationId: opId,
+                inventoryItemId: line.productId,
+                branch,
+                productName: line.productName,
+                sku: line.sku,
+                batchLot: line.batchLot,
+                type: 'receive',
+                quantityDelta: accepted,
+                quantityBefore: beforeQty,
+                quantityAfter: updated.currentQty,
+                unitCost: updated.unitCost,
+                unitPrice: updated.sellingPrice,
+                referenceId: transfer.id,
+                referenceLabel: transfer.transferNumber,
+                reason: 'Warehouse transfer received into POS stock',
+                createdAt: now,
+                createdBy: auth.user.name,
+                syncStatus: 'synced',
+              };
+              await client.query(
+                `INSERT INTO pos_tenant_records (tenant_id, store_name, record_id, data)
+                 VALUES ($1, 'stockMovements', $2, $3::jsonb)
+                 ON CONFLICT (tenant_id, store_name, record_id) DO NOTHING`,
+                [auth.tenantId, movement.id, JSON.stringify(movement)]
               );
               balance = updated.currentQty;
             }

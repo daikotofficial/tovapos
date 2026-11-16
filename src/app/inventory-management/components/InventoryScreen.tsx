@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useSearchParams } from 'next/navigation';
 import InventoryKPICards from './InventoryKPICards';
@@ -44,7 +44,6 @@ export default function InventoryScreen() {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useRowsPerPage();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const hasReconciledRef = useRef(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editItem, setEditItem] = useState<InventoryItem | null>(null);
   const [drawerItem, setDrawerItem] = useState<InventoryItem | null>(null);
@@ -67,18 +66,6 @@ export default function InventoryScreen() {
     const timer = window.setTimeout(async () => {
       setIsLoadingPage(true);
       try {
-        if (process.env.NEXT_PUBLIC_STORAGE_DRIVER === 'postgres' && !hasReconciledRef.current) {
-          const reconcileResponse = await fetch('/api/commands/inventory-reconcile', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-          });
-          if (!reconcileResponse.ok) {
-            const reconcilePayload = (await reconcileResponse.json().catch(() => null)) as { error?: string } | null;
-            throw new Error(reconcilePayload?.error ?? 'Inventory reconciliation could not be completed');
-          }
-          hasReconciledRef.current = true;
-        }
         const [pageResult, metricResult] = await Promise.all([
           loadInventoryPage({
             q: search,

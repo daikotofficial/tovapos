@@ -151,6 +151,8 @@ export interface StockMovement {
   id: string;
   operationId: string;
   inventoryItemId: string;
+  /** The stock balance scope this movement belongs to. */
+  branch?: string;
   productName: string;
   sku: string;
   barcode?: string;

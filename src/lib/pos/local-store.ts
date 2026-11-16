@@ -148,6 +148,35 @@ function shouldUsePostgresStore(): boolean {
   );
 }
 
+let inventoryReconciliationPromise: Promise<void> | null = null;
+
+/** Repair indexed balances from the transactional stock ledger before trusting a snapshot. */
+export async function reconcileInventoryBalances(productId?: string): Promise<void> {
+  if (!shouldUsePostgresStore()) return;
+  if (!productId && inventoryReconciliationPromise) {
+    await inventoryReconciliationPromise;
+    return;
+  }
+  const task = (async () => {
+    const response = await fetch('/api/commands/inventory-reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(productId ? { productId } : {}),
+      cache: 'no-store',
+    });
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload?.error ?? 'Inventory reconciliation could not be completed');
+    }
+  })();
+  if (!productId) inventoryReconciliationPromise = task;
+  try {
+    await task;
+  } finally {
+    if (!productId) inventoryReconciliationPromise = null;
+  }
+}
+
 function isNetworkFailure(error: unknown): boolean {
   return (
     (typeof navigator !== 'undefined' && !navigator.onLine) ||
@@ -542,6 +571,7 @@ export async function loadInventoryPage(
 ): Promise<InventoryPageResult> {
   if (shouldUsePostgresStore()) {
     try {
+      await reconcileInventoryBalances();
       const { signal, ...params } = input;
       const result = await apiRequest<InventoryPageResult>(
         'inventory',
@@ -609,6 +639,7 @@ export async function loadInventoryMetrics(
   } = {}
 ): Promise<InventoryMetrics> {
   if (shouldUsePostgresStore() || options.requireServer) {
+    await reconcileInventoryBalances();
     return apiRequest<InventoryMetrics>('inventory', undefined, {
       metrics: true,
       expiryAlertDays,

@@ -356,6 +356,7 @@ export async function POST(request: NextRequest) {
         id: `move-${operationId}`,
         operationId,
         inventoryItemId: productId,
+        branch: branchName,
         productName: current.name,
         sku: current.sku,
         barcode: current.barcode,
