@@ -419,11 +419,61 @@
     background-color: color-mix(in srgb, var(--muted) 48%, transparent);
   }
 
+  .pos-app-shell table {
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+  }
+
   .pos-app-shell table th {
     color: color-mix(in srgb, var(--muted-foreground) 88%, var(--foreground));
     font-size: 0.68rem;
     letter-spacing: 0.045em;
+    line-height: 1.25;
+    min-width: 5.5rem;
+    overflow-wrap: normal;
+    padding-bottom: 0.75rem;
+    padding-top: 0.75rem;
+    white-space: normal;
     text-transform: uppercase;
+    vertical-align: middle;
+  }
+
+  .pos-app-shell table td {
+    line-height: 1.35;
+    vertical-align: middle;
+  }
+
+  .pos-app-shell table tbody tr {
+    transition: background-color 150ms ease;
+  }
+
+  .pos-app-shell table tbody tr:nth-child(even) {
+    background-color: color-mix(in srgb, var(--muted) 22%, transparent);
+  }
+
+  .pos-app-shell table tbody tr:hover {
+    background-color: color-mix(in srgb, var(--primary) 7%, var(--card));
+  }
+
+  .pos-app-shell table tbody tr[data-selected='true'] {
+    background-color: color-mix(in srgb, var(--primary) 10%, var(--card));
+  }
+
+  .pos-app-shell table tbody td {
+    border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  }
+
+  .pos-app-shell table tbody tr:first-child td {
+    border-top: 0;
+  }
+
+  .pos-app-shell .inventory-data-table th:first-child {
+    min-width: 3rem;
+  }
+
+  .pos-app-shell .inventory-data-table td {
+    vertical-align: top;
   }
 
   .pos-app-shell input:not([type='checkbox']):not([type='radio']),

@@ -68,14 +68,14 @@ function expiryClass(expiryDate: string, expiryAlertDays: number): string {
 }
 
 const columns: { key: keyof InventoryItem; label: string; sortable: boolean; width?: string }[] = [
-  { key: 'name', label: 'Product / Brand', sortable: true },
-  { key: 'sku', label: 'SKU', sortable: true, width: 'w-28' },
+  { key: 'name', label: 'Product / Brand', sortable: true, width: 'w-44' },
+  { key: 'sku', label: 'SKU', sortable: true, width: 'w-32' },
   { key: 'category', label: 'Category', sortable: true, width: 'w-32' },
-  { key: 'batchLot', label: 'Batch / Lot', sortable: false, width: 'w-32' },
+  { key: 'batchLot', label: 'Batch / Lot', sortable: false, width: 'w-28' },
   { key: 'currentQty', label: 'Qty', sortable: true, width: 'w-20' },
-  { key: 'reorderLevel', label: 'Reorder', sortable: true, width: 'w-20' },
-  { key: 'unitCost', label: 'Cost', sortable: true, width: 'w-20' },
-  { key: 'sellingPrice', label: 'Price', sortable: true, width: 'w-20' },
+  { key: 'reorderLevel', label: 'Reorder Level', sortable: true, width: 'w-28' },
+  { key: 'unitCost', label: 'Cost', sortable: true, width: 'w-28' },
+  { key: 'sellingPrice', label: 'Price', sortable: true, width: 'w-28' },
   { key: 'expiryDate', label: 'Expiry Date', sortable: true, width: 'w-28' },
   { key: 'stockStatus', label: 'Status', sortable: true, width: 'w-28' },
 ];
@@ -110,10 +110,10 @@ export default function InventoryTable({
     <div className="bg-card border border-border rounded-xl shadow-card overflow-hidden">
       {/* Table */}
       <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
-        <table className="w-full min-w-[1100px]">
+        <table className="inventory-data-table w-full min-w-[1280px]">
           <thead>
             <tr className="bg-muted/40 border-b border-border">
-              <th className="px-4 py-3 w-10">
+              <th className="w-12 px-4 py-3">
                 <input
                   type="checkbox"
                   checked={items.length > 0 && selectedIds.size === items.length}
@@ -135,7 +135,7 @@ export default function InventoryTable({
                   </div>
                 </th>
               ))}
-              <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-24">
+              <th className="w-28 px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Actions
               </th>
             </tr>
@@ -161,9 +161,10 @@ export default function InventoryTable({
               items.map((item, idx) => (
                 <tr
                   key={item.id}
+                  data-selected={selectedIds.has(item.id) || undefined}
                   className={`group align-top hover:bg-muted/30 transition-colors duration-100 ${idx % 2 === 0 ? '' : 'bg-muted/10'} ${selectedIds.has(item.id) ? 'bg-primary/5' : ''}`}
                 >
-                  <td className="px-4 py-3 w-10">
+                  <td className="w-12 px-4 py-3">
                     <input
                       type="checkbox"
                       checked={selectedIds.has(item.id)}
@@ -172,11 +173,11 @@ export default function InventoryTable({
                     />
                   </td>
                   {/* Name + Generic */}
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 align-top">
                     <div className="flex items-start gap-2">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="max-w-[14rem] break-words text-sm font-semibold leading-tight text-foreground">
+                          <span className="max-w-[18rem] break-words text-sm font-semibold leading-tight text-foreground">
                             {item.name}
                           </span>
                           {item.isControlled && (
