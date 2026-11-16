@@ -4,7 +4,6 @@ import type { InventoryItem, StockMovement } from '@/lib/pos/types';
 import { computeStockStatus } from '@/lib/pos/stock';
 import { getPosPool } from '@/lib/server/pos-db';
 import {
-  assertPermission,
   assertWritePermission,
   assertTenantPlanPermission,
   assertSameOrigin,
@@ -35,7 +34,11 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as Record<string, unknown>;
     const product = body.product as InventoryItem | undefined;
     if (!product?.id || !product.name?.trim() || !product.sku?.trim()) {
-      throw new HttpError(400, 'Product name and SKU are required before saving', 'VALIDATION_ERROR');
+      throw new HttpError(
+        400,
+        'Product name and SKU are required before saving',
+        'VALIDATION_ERROR'
+      );
     }
     // This command is only for product corrections/initial quantities. It
     // always stores the submitted quantity as the final balance. Receiving
@@ -58,6 +61,11 @@ export async function POST(request: NextRequest) {
     const client = await getPosPool().connect();
     try {
       await client.query('BEGIN');
+      // Serialize product-code checks per tenant so two simultaneous saves
+      // cannot both pass the friendly preflight before the unique indexes run.
+      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+        `inventory-code:${auth.tenantId}`,
+      ]);
       const claimed = await client.query(
         `INSERT INTO pos_idempotency_keys
           (tenant_id, idempotency_key, operation_type, request_hash)
@@ -106,6 +114,27 @@ export async function POST(request: NextRequest) {
       const productPermission = existing ? 'edit-product' : 'add-product';
       assertWritePermission(auth, productPermission);
       await assertTenantPlanPermission(auth.tenantId, productPermission);
+      const sku = product.sku.trim();
+      const barcode = String(product.barcode ?? '').trim();
+      const duplicateCode = await client.query(
+        `SELECT name, sku, barcode
+         FROM pos_tenant_inventory
+         WHERE tenant_id = $1
+           AND id <> $2
+           AND (
+             lower(sku) = lower($3)
+             OR ($4 <> '' AND lower(coalesce(barcode, '')) = lower($4))
+           )
+         LIMIT 1`,
+        [auth.tenantId, product.id, sku, barcode]
+      );
+      if (duplicateCode.rowCount) {
+        throw new HttpError(
+          409,
+          `SKU or barcode already belongs to ${duplicateCode.rows[0].name}`,
+          'DUPLICATE_CODE'
+        );
+      }
       const movementResult = existing
         ? await client.query(
             `SELECT data
@@ -226,13 +255,33 @@ export async function POST(request: NextRequest) {
           saved.id,
           operationId,
           JSON.stringify(saved),
-          JSON.stringify({ quantityBefore: before, quantityDelta: effectiveDelta, quantityAfter: after }),
+          JSON.stringify({
+            quantityBefore: before,
+            quantityDelta: effectiveDelta,
+            quantityAfter: after,
+          }),
         ]
       );
       await client.query('COMMIT');
       return NextResponse.json(responseBody);
     } catch (error) {
       await client.query('ROLLBACK');
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        (error as { code?: string }).code === '23505' &&
+        'constraint' in error &&
+        /inventory_(sku|barcode)_unique_idx/.test(
+          String((error as { constraint?: string }).constraint)
+        )
+      ) {
+        throw new HttpError(
+          409,
+          'SKU or barcode already belongs to another product in this business',
+          'DUPLICATE_CODE'
+        );
+      }
       throw error;
     } finally {
       client.release();

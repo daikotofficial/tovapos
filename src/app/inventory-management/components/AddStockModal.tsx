@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import Modal from '@/components/ui/Modal';
 import DatePicker from '@/components/ui/DatePicker';
 import NiceSelect from '@/components/ui/NiceSelect';
-import { Loader2, Plus, Save, ScanLine } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Plus, Save, ScanLine } from 'lucide-react';
 import { toast } from 'sonner';
 import type { InventoryItem, StockStatus } from '@/lib/pos/types';
 import {
@@ -17,6 +17,7 @@ import {
 } from '@/lib/pos/stock';
 import { usePosStore } from '@/lib/pos/PosStoreProvider';
 import { hasPackPricing } from '@/lib/pos/sale-units';
+import { lookupInventoryItem } from '@/lib/pos/local-store';
 
 interface AddStockModalProps {
   open: boolean;
@@ -28,7 +29,10 @@ interface AddStockModalProps {
   ) => void | Promise<void>;
 }
 
-type FormData = Omit<InventoryItem, 'id' | 'stockStatus' | 'packPricingEnabled' | 'packPrice' | 'packQuantity' | 'packUnit'> & {
+type FormData = Omit<
+  InventoryItem,
+  'id' | 'stockStatus' | 'packPricingEnabled' | 'packPrice' | 'packQuantity' | 'packUnit'
+> & {
   id?: string;
   bulkPurchasePrice?: number | string;
   bulkQuantity?: number | string;
@@ -56,11 +60,14 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const { settings, updateSettings } = usePosStore();
   const skuInputRef = useRef<HTMLInputElement | null>(null);
   const productNameInputRef = useRef<HTMLInputElement | null>(null);
+  const skuCheckIdRef = useRef(0);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [pricingMode, setPricingMode] = useState<'manual' | 'margin'>('manual');
   const [bulkPricingActive, setBulkPricingActive] = useState(false);
   const [packPricingActive, setPackPricingActive] = useState(false);
+  const [showSupplierDetails, setShowSupplierDetails] = useState(false);
+  const [skuCheck, setSkuCheck] = useState<'idle' | 'checking' | 'available' | 'duplicate'>('idle');
   const {
     register,
     handleSubmit,
@@ -72,7 +79,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const unitCost = Number(watch('unitCost')) || 0;
   const bulkPurchasePrice = Number(watch('bulkPurchasePrice')) || 0;
   const bulkQuantity = Number(watch('bulkQuantity')) || 0;
-  const calculatedUnitCost = bulkQuantity > 0 ? roundBulkUnitCost(bulkPurchasePrice / bulkQuantity) : 0;
+  const calculatedUnitCost =
+    bulkQuantity > 0 ? roundBulkUnitCost(bulkPurchasePrice / bulkQuantity) : 0;
   const profitMargin = Number(watch('profitMargin')) || 0;
   const selectedCategory = watch('category') ?? '';
   const selectedUnit = watch('unitOfMeasurement') ?? 'unit';
@@ -91,7 +99,9 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   const productNameRegistration = register('name', { required: 'Product name is required' });
   const skuRegistration = register('sku', { required: 'SKU, barcode, or QR code is required' });
   const bulkPurchasePriceRegistration = register('bulkPurchasePrice');
-  const packPriceRegistration = register('packPrice', { validate: (value) => !packPricingActive || Number(value) > 0 || 'Pack/carton price is required' });
+  const packPriceRegistration = register('packPrice', {
+    validate: (value) => !packPricingActive || Number(value) > 0 || 'Pack/carton price is required',
+  });
   const packQuantityRegistration = register('packQuantity', {
     validate: (value) =>
       !packPricingActive ||
@@ -130,6 +140,10 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       setPricingMode('manual');
       setBulkPricingActive(false);
       setPackPricingActive(hasPackPricing(editItem));
+      setShowSupplierDetails(
+        Boolean(editItem.supplier || editItem.supplierPhone || editItem.supplierInvoiceNumber)
+      );
+      setSkuCheck('idle');
       reset({
         name: editItem.name,
         genericName: editItem.genericName,
@@ -174,6 +188,8 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       setPricingMode('manual');
       setBulkPricingActive(false);
       setPackPricingActive(false);
+      setShowSupplierDetails(false);
+      setSkuCheck('idle');
       const today = getTodayIso();
       const nextYear = new Date();
       nextYear.setFullYear(nextYear.getFullYear() + 1);
@@ -224,12 +240,6 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   }, [bulkPricingActive, calculatedUnitCost, setValue]);
 
   useEffect(() => {
-    if (!open) return;
-    const frame = window.requestAnimationFrame(() => productNameInputRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [open]);
-
-  useEffect(() => {
     if (pricingMode !== 'margin' || unitCost <= 0 || profitMargin <= 0) return;
     setValue('sellingPrice', computeSellingPriceFromMargin(unitCost, profitMargin), {
       shouldDirty: true,
@@ -238,21 +248,38 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
   }, [pricingMode, profitMargin, setValue, unitCost]);
 
   useEffect(() => {
-    if (!open) return;
-    const frame = window.requestAnimationFrame(() => productNameInputRef.current?.focus());
-    return () => window.cancelAnimationFrame(frame);
-  }, [open]);
-
-  useEffect(() => {
     if (selectedTaxRate > 0) {
       setValue('taxApplicable', true, { shouldDirty: true });
     }
   }, [selectedTaxRate, setValue]);
 
+  const checkSku = async (rawSku: string) => {
+    const sku = rawSku.trim();
+    const requestId = ++skuCheckIdRef.current;
+    if (!sku) {
+      setSkuCheck('idle');
+      return;
+    }
+    setSkuCheck('checking');
+    try {
+      const match = await lookupInventoryItem(sku);
+      if (requestId !== skuCheckIdRef.current) return;
+      setSkuCheck(match && match.id !== editItem?.id ? 'duplicate' : 'available');
+    } catch {
+      // The authoritative server/database validation still runs on submit.
+      if (requestId === skuCheckIdRef.current) setSkuCheck('idle');
+    }
+  };
+
   const onSubmit = async (data: FormData) => {
+    if (skuCheck === 'duplicate') {
+      toast.error('This SKU or barcode already belongs to another product in this business.');
+      return;
+    }
     const {
       bulkPurchasePrice: _bulkPurchasePrice,
       bulkQuantity: _bulkQuantity,
+      imageUrl: _imageUrl,
       ...inventoryData
     } = data;
     const expiryDate = data.expiryDate || '2099-12-31';
@@ -273,11 +300,15 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       manufactureDate: data.manufactureDate || '',
       variantName: editItem?.variantName,
       description: editItem?.description,
+      // Image URLs are no longer entered here, but existing product images are
+      // preserved when an older record is edited.
+      imageUrl: editItem?.imageUrl,
       expiryDate,
       currentQty: Number(data.currentQty) || 0,
       reorderLevel: Number(data.reorderLevel) || 1,
       maxStock: Number(data.maxStock) || Math.max(Number(data.currentQty) || 0, 1),
-      unitCost: bulkPricingActive && calculatedUnitCost > 0 ? calculatedUnitCost : Number(data.unitCost),
+      unitCost:
+        bulkPricingActive && calculatedUnitCost > 0 ? calculatedUnitCost : Number(data.unitCost),
       packPricingEnabled: packPricingActive,
       packPrice: packPricingActive ? Number(data.packPrice) : undefined,
       packQuantity: packPricingActive ? Math.floor(Number(data.packQuantity)) : undefined,
@@ -286,7 +317,12 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
       profitMargin:
         pricingMode === 'margin' && Number(data.profitMargin) > 0
           ? Number(data.profitMargin)
-          : computeProfitMargin(bulkPricingActive && calculatedUnitCost > 0 ? calculatedUnitCost : Number(data.unitCost), Number(data.sellingPrice)),
+          : computeProfitMargin(
+              bulkPricingActive && calculatedUnitCost > 0
+                ? calculatedUnitCost
+                : Number(data.unitCost),
+              Number(data.sellingPrice)
+            ),
       discountType: data.discountType ?? 'none',
       discountValue: Number(data.discountValue) || 0,
       taxApplicable: Boolean(data.taxApplicable || Number(data.taxRate) > 0),
@@ -432,6 +468,14 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                   className={`${inputClass} font-mono`}
                   placeholder="Focus here, then scan barcode or QR code"
                   autoComplete="off"
+                  onChange={(event) => {
+                    skuRegistration.onChange(event);
+                    setSkuCheck('idle');
+                  }}
+                  onBlur={(event) => {
+                    skuRegistration.onBlur(event);
+                    void checkSku(event.currentTarget.value);
+                  }}
                 />
                 <button
                   type="button"
@@ -445,6 +489,19 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
               <p className="mt-1 text-[10px] text-muted-foreground">
                 Barcode scanners work like keyboards. Click Scan, then scan the product code.
               </p>
+              {skuCheck === 'checking' && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Checking this code in your business…
+                </p>
+              )}
+              {skuCheck === 'available' && (
+                <p className="mt-1 text-[11px] text-success">This SKU/barcode is available.</p>
+              )}
+              {skuCheck === 'duplicate' && (
+                <p className="mt-1 text-[11px] text-danger">
+                  This SKU/barcode already belongs to another product in this business.
+                </p>
+              )}
               {errors.sku && <p className={errorClass}>{errors.sku.message}</p>}
             </div>
             <div>
@@ -518,10 +575,6 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 ]}
               />
             </div>
-            <div className="md:col-span-2">
-              <label className={labelClass}>Product Image URL</label>
-              <input {...register('imageUrl')} className={inputClass} placeholder="https://..." />
-            </div>
           </div>
 
           <div className="flex flex-col gap-3 mt-3 sm:flex-row sm:items-center sm:gap-6">
@@ -562,22 +615,55 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 placeholder="Batch or lot number"
               />
             </div>
-            <div>
-              <label className={labelClass}>Supplier</label>
-              <input
-                {...register('supplier')}
-                className={inputClass}
-                placeholder="Vendor or supplier name"
-              />
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => setShowSupplierDetails((value) => !value)}
+                aria-expanded={showSupplierDetails}
+                className="flex w-full items-center justify-between rounded-lg border border-border bg-secondary px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-muted"
+              >
+                <span>
+                  Supplier details{' '}
+                  <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                </span>
+                {showSupplierDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
             </div>
-            <div>
-              <label className={labelClass}>Vendor Phone <span className="font-normal text-muted-foreground">(Optional)</span></label>
-              <input {...register('supplierPhone')} className={inputClass} placeholder="Phone number" inputMode="tel" />
-            </div>
-            <div>
-              <label className={labelClass}>Invoice Number <span className="font-normal text-muted-foreground">(Optional)</span></label>
-              <input {...register('supplierInvoiceNumber')} className={`${inputClass} font-mono`} placeholder="Supplier invoice/reference" />
-            </div>
+            {showSupplierDetails && (
+              <div className="md:col-span-2 grid grid-cols-1 gap-4 rounded-lg border border-border bg-muted/20 p-3 md:grid-cols-2">
+                <div>
+                  <label className={labelClass}>Supplier</label>
+                  <input
+                    {...register('supplier')}
+                    className={inputClass}
+                    placeholder="Vendor or supplier name"
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>
+                    Vendor Phone{' '}
+                    <span className="font-normal text-muted-foreground">(Optional)</span>
+                  </label>
+                  <input
+                    {...register('supplierPhone')}
+                    className={inputClass}
+                    placeholder="Phone number"
+                    inputMode="tel"
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>
+                    Invoice Number{' '}
+                    <span className="font-normal text-muted-foreground">(Optional)</span>
+                  </label>
+                  <input
+                    {...register('supplierInvoiceNumber')}
+                    className={`${inputClass} font-mono`}
+                    placeholder="Supplier invoice/reference"
+                  />
+                </div>
+              </div>
+            )}
             <div>
               <label className={labelClass}>Manufacture Date</label>
               <input type="hidden" {...register('manufactureDate')} />
@@ -721,14 +807,40 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
             </div>
             <div className="md:col-span-2 rounded-lg border border-border bg-muted/10 p-3">
               <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-foreground">
-                <input type="checkbox" checked={packPricingActive} onChange={(event) => setPackPricingActive(event.target.checked)} className="accent-primary" />
+                <input
+                  type="checkbox"
+                  checked={packPricingActive}
+                  onChange={(event) => setPackPricingActive(event.target.checked)}
+                  className="accent-primary"
+                />
                 Set Pack/Carton Price
               </label>
               {packPricingActive && (
                 <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <NiceSelect value={watch("packUnit") ?? "pack"} onChange={(value) => setValue("packUnit", value as "pack" | "carton", { shouldDirty: true })} options={[{ value: "pack", label: "Pack" }, { value: "carton", label: "Carton" }]} />
-                  <input type="text" inputMode="decimal" {...packPriceRegistration} className={`${inputClass} font-tabular`} placeholder="Pack/carton price" />
-                  <input type="text" inputMode="numeric" {...packQuantityRegistration} className={`${inputClass} font-tabular`} placeholder="Pieces per pack/carton" />
+                  <NiceSelect
+                    value={watch('packUnit') ?? 'pack'}
+                    onChange={(value) =>
+                      setValue('packUnit', value as 'pack' | 'carton', { shouldDirty: true })
+                    }
+                    options={[
+                      { value: 'pack', label: 'Pack' },
+                      { value: 'carton', label: 'Carton' },
+                    ]}
+                  />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    {...packPriceRegistration}
+                    className={`${inputClass} font-tabular`}
+                    placeholder="Pack/carton price"
+                  />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    {...packQuantityRegistration}
+                    className={`${inputClass} font-tabular`}
+                    placeholder="Pieces per pack/carton"
+                  />
                 </div>
               )}
             </div>
@@ -860,16 +972,17 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 onChange={(taxId) => {
                   const tax = taxOptions.find((candidate) => candidate.id === taxId);
                   setValue('taxId', taxId, { shouldDirty: true });
-                  setValue('taxApplicable', Boolean(tax && Number(tax.rate) > 0), {
+                  const nextRate = tax?.rate ?? settings.taxRate;
+                  setValue('taxApplicable', Number(nextRate) > 0, {
                     shouldDirty: true,
                   });
-                  setValue('taxRate', tax?.rate ?? 0, { shouldDirty: true });
+                  setValue('taxRate', nextRate, { shouldDirty: true });
                   setValue('taxMode', tax?.mode ?? settings.taxMode ?? 'exclusive', {
                     shouldDirty: true,
                   });
                 }}
                 options={[
-                  { value: '', label: 'No VAT / tax' },
+                  { value: '', label: `Use business default (${settings.taxRate}%)` },
                   ...taxOptions.map((tax) => ({
                     value: tax.id,
                     label: `${tax.name} (${tax.rate}%)`,
@@ -881,12 +994,6 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                   Add tax types in Settings to use them here.
                 </p>
               )}
-            </div>
-            <div>
-              <label className={labelClass}>Applied rate</label>
-              <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm font-tabular">
-                {selectedTaxRate}%
-              </p>
             </div>
             <div>
               <label className={labelClass}>VAT / Tax rate (%)</label>
@@ -908,6 +1015,9 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
                 className={`${inputClass} font-tabular`}
                 placeholder="e.g. 7.5"
               />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Defaults from Settings. Set to 0 to disable tax for this product.
+              </p>
               {errors.taxRate && <p className={errorClass}>{errors.taxRate.message}</p>}
             </div>
             <div>
