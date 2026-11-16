@@ -392,6 +392,62 @@ async function overlayBranchInventory(
   });
 }
 
+function movementLedgerQuantity(rows: Array<{ data: Record<string, unknown> }>): number | null {
+  if (rows.length === 0) return null;
+  const firstBefore = Number(rows[0].data.quantityBefore);
+  let quantity = Number.isFinite(firstBefore) && firstBefore >= 0 ? firstBefore : 0;
+  let sawDelta = false;
+  for (const row of rows) {
+    const delta = Number(row.data.quantityDelta);
+    if (!Number.isFinite(delta)) continue;
+    quantity += delta;
+    sawDelta = true;
+  }
+  return sawDelta && Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
+}
+
+async function overlayMovementLedger(
+  auth: AuthContext,
+  rows: Record<string, unknown>[]
+): Promise<Record<string, unknown>[]> {
+  if (!rows.length) return rows;
+  const branch = auth.user.branch?.trim() || 'Main Store';
+  const ids = rows.map((row) => String(row.id ?? '')).filter(Boolean);
+  const result = await getPosPool().query(
+    `SELECT data
+     FROM pos_tenant_records
+     WHERE tenant_id = $1
+       AND store_name = 'stockMovements'
+       AND data->>'inventoryItemId' = ANY($2::text[])
+       AND (
+         ($3 = 'Main Store' AND (NOT data ? 'branch' OR data->>'branch' = 'Main Store'))
+         OR ($3 <> 'Main Store' AND data->>'branch' = $3)
+       )
+     ORDER BY data->>'createdAt' ASC, record_id ASC`,
+    [auth.tenantId, ids, branch]
+  );
+  const byProduct = new Map<string, Array<{ data: Record<string, unknown> }>>();
+  for (const row of result.rows) {
+    const data = row.data as Record<string, unknown>;
+    const productId = String(data.inventoryItemId ?? '');
+    if (!productId) continue;
+    const movements = byProduct.get(productId) ?? [];
+    movements.push({ data });
+    byProduct.set(productId, movements);
+  }
+  return rows.map((row) => {
+    const quantity = movementLedgerQuantity(byProduct.get(String(row.id ?? '')) ?? []);
+    return quantity === null ? row : { ...row, currentQty: quantity };
+  });
+}
+
+async function overlayInventoryBalances(
+  auth: AuthContext,
+  rows: Record<string, unknown>[]
+): Promise<Record<string, unknown>[]> {
+  return overlayBranchInventory(auth, await overlayMovementLedger(auth, rows));
+}
+
 function appendDateRange(
   params: URLSearchParams,
   column: string,
@@ -510,7 +566,7 @@ async function getReportRows(request: NextRequest, auth: AuthContext) {
        LIMIT $2 OFFSET $3`,
       values
     );
-    const rows = await overlayBranchInventory(
+    const rows = await overlayInventoryBalances(
       auth,
       result.rows.map((row) => row.data as Record<string, unknown>)
     );
@@ -1379,7 +1435,7 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
       [auth.tenantId, scan]
     );
 
-    const rows = await overlayBranchInventory(
+    const rows = await overlayInventoryBalances(
       auth,
       result.rows[0]?.data ? [result.rows[0].data as Record<string, unknown>] : []
     );
@@ -1405,7 +1461,7 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
       [auth.tenantId, inventoryIds]
     );
 
-    const rows = await overlayBranchInventory(
+    const rows = await overlayInventoryBalances(
       auth,
       result.rows.map((row) => row.data as Record<string, unknown>)
     );
@@ -1524,7 +1580,7 @@ async function getInventoryPage(request: NextRequest, auth: AuthContext) {
         )
       : undefined;
 
-  const overlaidRows = await overlayBranchInventory(
+  const overlaidRows = await overlayInventoryBalances(
     auth,
     rows.map((row) => row.data as Record<string, unknown>)
   );
