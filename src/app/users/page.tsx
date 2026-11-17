@@ -1,7 +1,17 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Eye, EyeOff, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import {
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Mail,
+  Search,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  Users,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import AppLayout from '@/components/AppLayout';
 import PermissionGate from '@/components/PermissionGate';
@@ -323,6 +333,7 @@ export default function UsersPage() {
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [rowsPerPage] = useRowsPerPage();
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
   const canDeleteUsers = currentUser?.role === 'owner' || currentUser?.role === 'super-admin';
   const isHospitality = settings.businessMode === 'hospitality';
   const activePermissions = isHospitality ? hospitalityPermissions : permissions;
@@ -341,12 +352,25 @@ export default function UsersPage() {
     () => users.filter((user) => user.status === 'active').length,
     [users]
   );
-  const totalPages = Math.max(1, Math.ceil(users.length / rowsPerPage));
-  const visibleUsers = users.slice((page - 1) * rowsPerPage, page * rowsPerPage);
+  const filteredUsers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return users;
+    return users.filter((user) =>
+      [user.name, user.email, user.phone ?? '', user.role, user.status].some((value) =>
+        value.toLowerCase().includes(query)
+      )
+    );
+  }, [search, users]);
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / rowsPerPage));
+  const visibleUsers = filteredUsers.slice((page - 1) * rowsPerPage, page * rowsPerPage);
   React.useEffect(() => {
     const timer = window.setTimeout(() => setPage(1), 0);
     return () => window.clearTimeout(timer);
   }, [rowsPerPage]);
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setPage(1), 0);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const openCreate = () => {
     const user = emptyUser();
@@ -423,80 +447,189 @@ export default function UsersPage() {
       }
     >
       <PermissionGate permission="users">
-        <div className="mx-auto max-w-screen-2xl space-y-4 px-3 py-4 sm:space-y-5 sm:p-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-card border border-border rounded-xl p-4 shadow-card">
-              <p className="text-xs text-muted-foreground uppercase font-semibold">Total Users</p>
-              <p className="text-3xl font-bold mt-1">{users.length}</p>
+        <div className="mx-auto max-w-[1480px] space-y-6 px-3 py-4 sm:px-6 sm:py-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="group rounded-2xl border border-border/80 bg-card p-5 shadow-card transition-shadow hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                    Total users
+                  </p>
+                  <p className="mt-2 text-3xl font-bold tracking-tight text-foreground">
+                    {users.length}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Staff accounts in this workspace
+                  </p>
+                </div>
+                <span className="rounded-xl bg-primary/10 p-2.5 text-primary">
+                  <Users size={18} />
+                </span>
+              </div>
             </div>
-            <div className="bg-card border border-border rounded-xl p-4 shadow-card">
-              <p className="text-xs text-muted-foreground uppercase font-semibold">Active Users</p>
-              <p className="text-3xl font-bold mt-1 text-success">{activeUsers}</p>
+            <div className="group rounded-2xl border border-border/80 bg-card p-5 shadow-card transition-shadow hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                    Active users
+                  </p>
+                  <p className="mt-2 text-3xl font-bold tracking-tight text-success">
+                    {activeUsers}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">Currently able to sign in</p>
+                </div>
+                <span className="rounded-xl bg-success/10 p-2.5 text-success">
+                  <CheckCircle2 size={18} />
+                </span>
+              </div>
             </div>
-            <div className="bg-card border border-border rounded-xl p-4 shadow-card">
-              <p className="text-xs text-muted-foreground uppercase font-semibold">
-                Updates Waiting
-              </p>
-              <p className="text-3xl font-bold mt-1 text-warning">{pendingSyncCount}</p>
+            <div className="group rounded-2xl border border-border/80 bg-card p-5 shadow-card transition-shadow hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                    Updates waiting
+                  </p>
+                  <p className="mt-2 text-3xl font-bold tracking-tight text-warning">
+                    {pendingSyncCount}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">Changes queued for sync</p>
+                </div>
+                <span className="rounded-xl bg-warning/10 p-2.5 text-warning">
+                  <ShieldCheck size={18} />
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card sm:rounded-xl">
-            <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={16} className="text-primary" />
-                <span className="text-sm font-semibold">User Accounts</span>
+          <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-card">
+            <div className="flex flex-col gap-4 border-b border-border/80 px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="rounded-xl bg-primary/10 p-2.5 text-primary">
+                  <ShieldCheck size={18} />
+                </span>
+                <div>
+                  <h2 className="text-base font-bold tracking-tight text-foreground">
+                    User accounts
+                  </h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Manage people, roles, and workspace access
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={openCreate}
-                className="flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white"
-              >
-                <UserPlus size={14} />
-                Add User
-              </button>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label className="relative block sm:w-64">
+                  <Search
+                    size={16}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <span className="sr-only">Search users</span>
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search users..."
+                    className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+                  />
+                </label>
+                <button
+                  onClick={openCreate}
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  <UserPlus size={16} />
+                  Add user
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto overscroll-x-contain scrollbar-thin">
-              <table className="w-full min-w-[860px]">
-                <thead className="bg-muted/40 text-left text-[11px] uppercase text-muted-foreground">
+              <table className="w-full min-w-[1060px] table-fixed">
+                <colgroup>
+                  <col className="w-[21%]" />
+                  <col className="w-[24%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[22%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                </colgroup>
+                <thead className="border-b border-border/80 bg-muted/30 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-3">Name</th>
-                    <th className="px-4 py-3">Email</th>
-                    <th className="px-4 py-3">Role</th>
-                    <th className="px-4 py-3">Permissions</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3 text-right">Action</th>
+                    <th className="px-5 py-3.5">User</th>
+                    <th className="px-5 py-3.5">Contact</th>
+                    <th className="px-5 py-3.5">Role</th>
+                    <th className="px-5 py-3.5">Access</th>
+                    <th className="px-5 py-3.5">Status</th>
+                    <th className="px-5 py-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-y divide-border/70">
                   {visibleUsers.map((user) => (
-                    <tr key={user.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">{user.name}</td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{user.email}</td>
-                      <td className="px-4 py-3">{roleLabels[user.role] ?? user.role}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {user.permissions
-                          .slice(0, 5)
-                          .map((permission) => permissionLabels[permission])
-                          .join(', ')}
-                        {user.permissions.length > 5 ? ` +${user.permissions.length - 5} more` : ''}
+                    <tr key={user.id} className="group transition-colors hover:bg-primary/[0.025]">
+                      <td className="px-5 py-4 align-middle">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                            {user.name
+                              .split(/\s+/)
+                              .map((part) => part[0])
+                              .join('')
+                              .slice(0, 2)
+                              .toUpperCase() || '?'}
+                          </span>
+                          <span className="min-w-0 truncate font-semibold text-foreground">
+                            {user.name}
+                          </span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-5 py-4 align-middle">
+                        <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+                          <Mail size={14} className="shrink-0 text-muted-foreground/70" />
+                          <span className="truncate">
+                            {user.email || user.phone || 'No contact added'}
+                          </span>
+                        </div>
+                        {user.email && user.phone && (
+                          <p className="mt-1 truncate pl-6 text-xs text-muted-foreground/70">
+                            {user.phone}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 align-middle">
+                        <span className="inline-flex max-w-full items-center truncate rounded-lg bg-muted px-2.5 py-1 text-xs font-bold capitalize text-foreground">
+                          {roleLabels[user.role] ?? user.role}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 align-middle">
+                        <div className="flex flex-wrap gap-1.5">
+                          {user.permissions.slice(0, 2).map((permission) => (
+                            <span
+                              key={permission}
+                              className="max-w-[145px] truncate rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground"
+                            >
+                              {permissionLabels[permission]}
+                            </span>
+                          ))}
+                          {user.permissions.length > 2 && (
+                            <span className="rounded-md bg-primary/10 px-2 py-1 text-[11px] font-bold text-primary">
+                              +{user.permissions.length - 2} more
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 align-middle">
                         <span
-                          className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold capitalize ${
                             user.status === 'active'
                               ? 'bg-success/10 text-success'
                               : 'bg-danger/10 text-danger'
                           }`}
                         >
+                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
                           {user.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="px-5 py-4 align-middle">
+                        <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                           <button
                             onClick={() => openEdit(user)}
-                            className="text-sm font-semibold text-primary"
+                            className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-bold text-primary transition hover:border-primary/30 hover:bg-primary/5"
                           >
                             Edit
                           </button>
@@ -504,7 +637,7 @@ export default function UsersPage() {
                             <button
                               type="button"
                               onClick={() => removeUser(user)}
-                              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-danger hover:bg-danger/10"
+                              className="inline-flex items-center gap-1 rounded-lg border border-transparent px-2 py-1.5 text-xs font-bold text-danger transition hover:border-danger/20 hover:bg-danger/10"
                               title="Delete user"
                             >
                               <Trash2 size={13} />
@@ -518,9 +651,20 @@ export default function UsersPage() {
                 </tbody>
               </table>
             </div>
+            {filteredUsers.length === 0 && (
+              <div className="px-6 py-14 text-center">
+                <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <Search size={18} />
+                </div>
+                <p className="mt-3 text-sm font-semibold">No users found</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Try a different name, email, role, or status.
+                </p>
+              </div>
+            )}
             <ListPagination
               page={Math.min(page, totalPages)}
-              totalItems={users.length}
+              totalItems={filteredUsers.length}
               rowsPerPage={rowsPerPage}
               onPageChange={setPage}
             />
@@ -531,53 +675,69 @@ export default function UsersPage() {
           open={!!editing}
           onClose={() => setEditing(null)}
           title={form.id && users.some((user) => user.id === form.id) ? 'Edit User' : 'Add User'}
-          subtitle="Manage staff accounts, roles, and access permissions."
+          subtitle="Create a secure staff account and choose exactly what they can access."
+          size="xl"
           footer={
             <>
               <button
                 onClick={() => setEditing(null)}
-                className="px-4 py-2 rounded-lg bg-secondary text-sm"
+                className="rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-bold text-muted-foreground transition hover:bg-muted"
               >
                 Cancel
               </button>
               <button
                 onClick={save}
-                className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold"
+                className="rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-primary/90"
               >
                 Save User
               </button>
             </>
           }
         >
-          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="mb-5 flex items-center gap-3 rounded-2xl border border-primary/15 bg-primary/[0.035] p-4">
+            <span className="rounded-xl bg-primary/10 p-2.5 text-primary">
+              <UserPlus size={18} />
+            </span>
+            <div>
+              <p className="text-sm font-bold">Account details</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Use a work email or phone number for sign-in.
+              </p>
+            </div>
+          </div>
+          <div className="grid min-w-0 grid-cols-1 gap-x-5 gap-y-4 md:grid-cols-2">
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Full Name</span>
+              <span className="text-xs font-bold text-foreground">
+                Full name <span className="text-danger">*</span>
+              </span>
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
               />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs font-bold text-foreground">
                 Email (optional if phone is provided)
               </span>
               <input
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
               />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Phone (alternative login)</span>
+              <span className="text-xs font-bold text-foreground">
+                Phone <span className="font-normal text-muted-foreground">(alternative login)</span>
+              </span>
               <input
                 value={form.phone ?? ''}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-border bg-background"
+                className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
               />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Role</span>
+              <span className="text-xs font-bold text-foreground">Role</span>
               <NiceSelect
                 value={form.role}
                 onChange={(value) => {
@@ -591,7 +751,7 @@ export default function UsersPage() {
               />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Assigned Branch</span>
+              <span className="text-xs font-bold text-foreground">Assigned branch</span>
               <NiceSelect
                 value={form.branch ?? settings.branches?.[0] ?? 'Main Store'}
                 onChange={(branch) => setForm({ ...form, branch })}
@@ -602,7 +762,7 @@ export default function UsersPage() {
               />
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs font-bold text-foreground">
                 {users.some((user) => user.id === form.id)
                   ? 'New Password (optional)'
                   : 'Login Password'}
@@ -612,7 +772,7 @@ export default function UsersPage() {
                   type={showLoginPassword ? 'text' : 'password'}
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  className="w-full px-3 py-2 pr-10 rounded-lg border border-border bg-background"
+                  className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 pr-10 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
                   placeholder="Minimum 10 characters"
                 />
                 <button
@@ -626,7 +786,7 @@ export default function UsersPage() {
               </div>
             </label>
             <label className="space-y-1">
-              <span className="text-xs text-muted-foreground">Status</span>
+              <span className="text-xs font-bold text-foreground">Status</span>
               <NiceSelect
                 value={form.status}
                 onChange={(status) => setForm({ ...form, status: status as TovaUser['status'] })}
@@ -638,9 +798,14 @@ export default function UsersPage() {
             </label>
           </div>
 
-          <div className="mt-5">
+          <div className="mt-7 border-t border-border/80 pt-6">
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs font-semibold uppercase text-muted-foreground">Permissions</p>
+              <div>
+                <p className="text-sm font-bold text-foreground">Permissions</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Choose the tools and data this person can use.
+                </p>
+              </div>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -660,15 +825,18 @@ export default function UsersPage() {
             </div>
             <div className="space-y-4">
               {activePermissionGroups.map((group) => (
-                <div key={group.title} className="rounded-xl border border-border bg-muted/20 p-3">
-                  <p className="mb-2 text-xs font-bold uppercase text-muted-foreground">
+                <div
+                  key={group.title}
+                  className="rounded-2xl border border-border/80 bg-muted/15 p-4"
+                >
+                  <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.1em] text-muted-foreground">
                     {group.title}
                   </p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                     {group.items.map((permission) => (
                       <label
                         key={permission}
-                        className="flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm"
+                        className="flex items-center gap-3 rounded-xl border border-transparent bg-card px-3 py-2.5 text-sm transition hover:border-primary/20 hover:bg-primary/[0.03]"
                       >
                         <input
                           type="checkbox"
@@ -680,7 +848,7 @@ export default function UsersPage() {
                             setForm({ ...form, permissions: next });
                           }}
                         />
-                        <span>{permissionLabels[permission]}</span>
+                        <span className="leading-snug">{permissionLabels[permission]}</span>
                       </label>
                     ))}
                   </div>
