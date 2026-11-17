@@ -535,11 +535,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         can('delete-product') ||
         can('checkout') ||
         canView('reports')
-          ? safely(
-              'Inventory',
-              reconcileInventoryBalances().then(() => loadInventory([])),
-              []
-            )
+          ? safely('Inventory', loadInventory([]), [])
           : Promise.resolve([]),
         canView('reports') || can('credit-sales') || can('refunds')
           ? safely('Sales', loadSales(), [])
@@ -622,6 +618,13 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       setVendors(storedVendors);
       setSettings(storedSettings);
       setSyncQueue(storedQueue);
+      // Repair legacy/drifted snapshots without delaying POS startup. Current
+      // reads and sale commands use the indexed quantity transactionally.
+      if (navigator.onLine) {
+        void reconcileInventoryBalances().catch((error) =>
+          console.warn('Background inventory reconciliation failed', error)
+        );
+      }
     }
 
     hydrate().catch((error) => {

@@ -482,6 +482,10 @@ export async function ensureSecuritySchema(): Promise<void> {
               coalesce(sku, '') || ' ' || coalesce(barcode, '') || ' ' || coalesce(batch_lot, ''))
           );
 
+        CREATE INDEX IF NOT EXISTS pos_tenant_stock_movements_product_idx
+          ON pos_tenant_records (tenant_id, (data->>'inventoryItemId'))
+          WHERE store_name = 'stockMovements';
+
         DO $branch_inventory_fk$
         BEGIN
           IF NOT EXISTS (

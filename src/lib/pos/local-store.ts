@@ -571,7 +571,6 @@ export async function loadInventoryPage(
 ): Promise<InventoryPageResult> {
   if (shouldUsePostgresStore()) {
     try {
-      await reconcileInventoryBalances();
       const { signal, ...params } = input;
       const result = await apiRequest<InventoryPageResult>(
         'inventory',
@@ -639,7 +638,6 @@ export async function loadInventoryMetrics(
   } = {}
 ): Promise<InventoryMetrics> {
   if (shouldUsePostgresStore() || options.requireServer) {
-    await reconcileInventoryBalances();
     return apiRequest<InventoryMetrics>('inventory', undefined, {
       metrics: true,
       expiryAlertDays,
@@ -659,8 +657,10 @@ export async function loadInventoryMetrics(
         [item.name, item.genericName, item.sku, item.barcode ?? '', item.batchLot].some((field) =>
           field.toLowerCase().includes(query)
         );
-      const matchesCategory = !options.category || options.category === 'all' || item.category === options.category;
-      const matchesSupplier = !options.supplier || options.supplier === 'all' || item.supplier === options.supplier;
+      const matchesCategory =
+        !options.category || options.category === 'all' || item.category === options.category;
+      const matchesSupplier =
+        !options.supplier || options.supplier === 'all' || item.supplier === options.supplier;
       const matchesStatus =
         !options.status ||
         options.status === 'all' ||
@@ -868,6 +868,15 @@ export async function lookupInventoryItem(rawCode: string): Promise<InventoryIte
   const scan = rawCode.trim();
   if (!scan) return null;
 
+  // Resolve repeat scans from the tenant-scoped browser cache immediately.
+  // Sale completion still performs the authoritative server-side stock check.
+  const { findInventoryItemByScan } = await import('./stock');
+  const cachedItems = (await getAllFromBrowser<InventoryItem>('inventory')).map(
+    normalizeInventoryItem
+  );
+  const cachedMatch = findInventoryItemByScan(cachedItems, scan);
+  if (cachedMatch) return cachedMatch;
+
   if (shouldUsePostgresStore()) {
     try {
       const result = await apiRequest<{ item: InventoryItem | null }>('inventory', undefined, {
@@ -884,11 +893,7 @@ export async function lookupInventoryItem(rawCode: string): Promise<InventoryIte
     }
   }
 
-  const { findInventoryItemByScan } = await import('./stock');
-  const allItems = (await getAllFromBrowser<InventoryItem>('inventory')).map(
-    normalizeInventoryItem
-  );
-  return findInventoryItemByScan(allItems, scan) ?? null;
+  return null;
 }
 
 export async function loadUsers(
