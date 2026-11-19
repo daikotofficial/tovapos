@@ -494,7 +494,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
         );
       }
       if (cancelled) return;
-      setLocalTenant(session.tenant.id);
+      setLocalTenant(session.tenant.id, session.user.branch);
       setTenant(session.tenant);
       setUsers([session.user]);
       setActiveUserIdState(session.user.id);
@@ -1067,7 +1067,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
     setSettings(defaultSettings);
     setUsers([payload.user]);
     if (payload.tenant) {
-      setLocalTenant(payload.tenant.id);
+      setLocalTenant(payload.tenant.id, payload.user.branch);
       window.sessionStorage.setItem(TAB_TENANT_KEY, payload.tenant.id);
     }
     setActiveUserIdState(payload.user.id);
@@ -1083,7 +1083,7 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       // Clear the local session even if a transient network/database failure prevents
       // the best-effort server logout request from returning.
     }
-    setLocalTenant('anonymous');
+    setLocalTenant('anonymous', 'Main Store');
     window.localStorage.removeItem(OFFLINE_SINCE_KEY);
     window.sessionStorage.removeItem(TAB_TENANT_KEY);
     setInventory([]);

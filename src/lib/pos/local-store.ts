@@ -21,6 +21,7 @@ const DB_NAME = 'tovapos-local-first';
 // Increment whenever a new object store is added so existing browsers create it.
 const DB_VERSION = 7;
 let activeTenantId = 'anonymous';
+let activeBranch = 'Main Store';
 
 type StoreName =
   | 'inventory'
@@ -125,7 +126,7 @@ function canUseIndexedDb(): boolean {
 }
 
 function storageKey(storeName: StoreName): string {
-  return `tovapos.${activeTenantId}.${storeName}`;
+  return `tovapos.${activeTenantId}.${activeBranch}.${storeName}`;
 }
 
 function cleanForBrowserStorage<T extends { id: string }>(item: T, storeName?: StoreName): T {
@@ -334,12 +335,14 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-export function setLocalTenant(tenantId: string): void {
+export function setLocalTenant(tenantId: string, branch = 'Main Store'): void {
   const normalized = tenantId.trim() || 'anonymous';
-  if (normalized === activeTenantId) return;
+  const normalizedBranch = branch.trim() || 'Main Store';
+  if (normalized === activeTenantId && normalizedBranch === activeBranch) return;
   if (dbPromise) void dbPromise.then((database) => database.close()).catch(() => undefined);
   dbPromise = null;
   activeTenantId = normalized;
+  activeBranch = normalizedBranch;
 }
 
 export async function ensureCleanLocalDatabase(): Promise<void> {
@@ -353,7 +356,10 @@ function openDb(): Promise<IDBDatabase> {
 
   if (!dbPromise) {
     const pending = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = window.indexedDB.open(`${DB_NAME}-${activeTenantId}`, DB_VERSION);
+      const request = window.indexedDB.open(
+        `${DB_NAME}-${activeTenantId}-${activeBranch}`,
+        DB_VERSION
+      );
       let settled = false;
       const timeout = window.setTimeout(() => {
         settled = true;
@@ -868,15 +874,9 @@ export async function lookupInventoryItem(rawCode: string): Promise<InventoryIte
   const scan = rawCode.trim();
   if (!scan) return null;
 
-  // Resolve repeat scans from the tenant-scoped browser cache immediately.
-  // Sale completion still performs the authoritative server-side stock check.
   const { findInventoryItemByScan } = await import('./stock');
-  const cachedItems = (await getAllFromBrowser<InventoryItem>('inventory')).map(
-    normalizeInventoryItem
-  );
-  const cachedMatch = findInventoryItemByScan(cachedItems, scan);
-  if (cachedMatch) return cachedMatch;
-
+  // When online, the server is authoritative for branch quantity and price.
+  // The cache is only a network-loss fallback.
   if (shouldUsePostgresStore()) {
     try {
       const result = await apiRequest<{ item: InventoryItem | null }>('inventory', undefined, {
@@ -892,6 +892,12 @@ export async function lookupInventoryItem(rawCode: string): Promise<InventoryIte
       if (!isNetworkFailure(error)) throw error;
     }
   }
+
+  const cachedItems = (await getAllFromBrowser<InventoryItem>('inventory')).map(
+    normalizeInventoryItem
+  );
+  const cachedMatch = findInventoryItemByScan(cachedItems, scan);
+  if (cachedMatch) return cachedMatch;
 
   return null;
 }

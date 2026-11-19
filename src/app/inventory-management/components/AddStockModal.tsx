@@ -290,7 +290,9 @@ export default function AddStockModal({ open, onClose, editItem, onSave }: AddSt
     );
     const saved: InventoryItem = {
       ...inventoryData,
-      id: editItem?.id ?? `inv-${Date.now()}`,
+      id:
+        editItem?.id ??
+        `inv-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
       sku: data.sku.trim(),
       barcode: editItem?.barcode || data.sku.trim(),
       batchLot: data.batchLot?.trim() || 'N/A',

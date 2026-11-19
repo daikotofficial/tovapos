@@ -220,7 +220,7 @@ export default function CheckoutScreen() {
   }, [isScanning, scanInput]);
 
   const handleScan = useCallback(
-    async (rawCode: string, selectedSaleUnit?: SaleUnit) => {
+    async (rawCode: string, selectedSaleUnit?: SaleUnit, selectedProductId?: string) => {
       globalScanBufferRef.current = '';
       if (!isHydrated) {
         toast.error('Inventory is still loading. Try again in a moment.');
@@ -229,7 +229,9 @@ export default function CheckoutScreen() {
 
       setIsScanning(true);
       try {
-        const product = await lookupInventoryItem(rawCode);
+        const product = selectedProductId
+          ? (await loadInventoryByIds([selectedProductId]))[0] ?? null
+          : await lookupInventoryItem(rawCode);
         if (!product) {
           toast.error(`Product "${rawCode}" was not found by barcode, SKU, or name`);
           setScanInput('');
@@ -349,8 +351,10 @@ export default function CheckoutScreen() {
   };
 
   const queueScan = useCallback(
-    (rawCode: string) => {
-      const queued = scanQueueRef.current.catch(() => undefined).then(() => handleScan(rawCode));
+    (rawCode: string, selectedProductId?: string) => {
+      const queued = scanQueueRef.current
+        .catch(() => undefined)
+        .then(() => handleScan(rawCode, undefined, selectedProductId));
       scanQueueRef.current = queued;
       return queued;
     },

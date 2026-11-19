@@ -325,8 +325,9 @@ export async function POST(request: NextRequest) {
           requested.saleUnit === 'piece'
             ? Number(row.selling_price)
             : Number(productData.packPrice);
-        const canOverridePrice = ['owner', 'super-admin', 'manager'].includes(auth.user.role);
-        if (!canOverridePrice && requested.unitPrice !== canonicalPrice) {
+        // Checkout must use the canonical price for the selected product.
+        // Price changes belong to inventory management, not the sale command.
+        if (requested.unitPrice !== canonicalPrice) {
           throw new HttpError(403, 'The selected unit price is no longer valid', 'PRICE_MISMATCH');
         }
         const stockQuantity = requested.quantity * unitsPerSale;

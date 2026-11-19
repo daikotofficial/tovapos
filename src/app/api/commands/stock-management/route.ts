@@ -283,7 +283,10 @@ export async function POST(request: NextRequest) {
       if (action === 'receive') {
         const quantity = positive(body.quantity, 'Quantity received');
         const unitCost = positive(body.unitCost, 'Purchase/cost price');
-        const sellingPrice = body.sellingPrice === undefined || body.sellingPrice === '' ? Number(row.selling_price) : nonNegative(body.sellingPrice, 'Selling price');
+        const sellingPrice =
+          body.sellingPrice === undefined || body.sellingPrice === ''
+            ? Number(branchRow?.selling_price ?? row.selling_price)
+            : nonNegative(body.sellingPrice, 'Selling price');
         const expiryDate = date(body.expiryDate, 'Expiry date');
         const sku = text(body.sku) || current.sku;
         const barcode = text(body.barcode) || current.barcode || undefined;

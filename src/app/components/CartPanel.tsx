@@ -26,7 +26,7 @@ interface CartPanelProps {
   scanInput: string;
   setScanInput: (v: string) => void;
   onScanKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-  onScan: (barcode: string) => Promise<void>;
+  onScan: (barcode: string, inventoryItemId?: string) => Promise<void>;
   isScanning: boolean;
   scanRef: React.RefObject<HTMLInputElement | null>;
   searchSuggestions: InventoryItem[];
@@ -89,7 +89,7 @@ export default function CartPanel({
                       type="button"
                       onMouseDown={(event) => {
                         event.preventDefault();
-                        void onScan(product.barcode || product.sku || product.name);
+                        void onScan(product.barcode || product.sku || product.name, product.id);
                       }}
                       className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted"
                     >

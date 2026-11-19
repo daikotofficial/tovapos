@@ -31,6 +31,14 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     const auth = await requireAuth(request);
+    const branch = auth.user.branch?.trim() || 'Main Store';
+    if (branch !== 'Main Store') {
+      throw new HttpError(
+        403,
+        'Branch users must use the branch stock operation workflow; a branch cannot edit the main-store balance.',
+        'BRANCH_SCOPE_REQUIRED'
+      );
+    }
     const body = (await request.json()) as Record<string, unknown>;
     const product = body.product as InventoryItem | undefined;
     if (!product?.id || !product.name?.trim() || !product.sku?.trim()) {

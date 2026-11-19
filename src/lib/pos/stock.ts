@@ -155,19 +155,22 @@ export function findInventoryItemByScan(
 ): InventoryItem | undefined {
   const code = rawCode.trim().toLowerCase();
   if (!code) return undefined;
-
-  return items.find((item) => {
-    if (item.productStatus === 'inactive') return false;
+  const active = items.filter((item) => item.productStatus !== 'inactive');
+  const exact = (item: InventoryItem) => {
     const barcode = item.barcode?.toLowerCase();
     return (
+      item.id.toLowerCase() === code ||
       item.sku.toLowerCase() === code ||
       barcode === code ||
       item.skuAliases?.some((alias) => alias.active && alias.code.toLowerCase() === code) ||
       item.barcodeAliases?.some((alias) => alias.active && alias.code.toLowerCase() === code) ||
-      item.name.toLowerCase() === code ||
-      item.name.toLowerCase().includes(code)
+      item.name.toLowerCase() === code
     );
-  });
+  };
+  // Exact identifiers/names always win over partial-name matches. The old
+  // first-match implementation could select "Jenny Plantain Chips 500g"
+  // when the exact product "plantain chips" was clicked.
+  return active.find(exact) ?? active.find((item) => item.name.toLowerCase().includes(code));
 }
 
 export function assertSellable(item: InventoryItem, requestedQty: number): void {
