@@ -14,7 +14,7 @@ interface RefundModalProps {
 }
 
 export default function RefundModal({ open, onClose }: RefundModalProps) {
-  const { sales, refundSale } = usePosStore();
+  const { sales, refundSale, currentUser } = usePosStore();
   const [search, setSearch] = useState('');
   const [selectedTxn, setSelectedTxn] = useState<string | null>(null);
   const [reason, setReason] = useState('');
@@ -81,8 +81,37 @@ export default function RefundModal({ open, onClose }: RefundModalProps) {
         <div className="flex items-start gap-2 bg-warning/10 border border-warning/20 rounded-lg px-3 py-2.5">
           <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
           <p className="text-xs text-warning">
-            Refunds require manager approval for large amounts or high-control items.
+            {currentUser?.role === 'super-admin' || currentUser?.role === 'owner'
+              ? 'As an administrator, you can process refunds. Select a transaction and a reason to continue.'
+              : 'Refunds require refund access and a valid reason. Select a transaction and a reason to continue.'}
           </p>
+        </div>
+
+        {/* Keep the required audit reason above the transaction list so it is
+            visible and selectable without scrolling behind the fixed footer. */}
+        <div>
+          <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+            Refund Reason <span className="text-danger">*</span>
+          </label>
+          <NiceSelect
+            value={reason}
+            onChange={setReason}
+            placeholder="Select a reason..."
+            options={[
+              { value: 'wrong-item', label: 'Wrong item sold' },
+              { value: 'customer-returned', label: 'Customer returned item' },
+              { value: 'duplicate-sale', label: 'Duplicate sale / billing error' },
+              { value: 'damaged-item', label: 'Damaged item' },
+              { value: 'price-correction', label: 'Price correction' },
+              { value: 'quality-issue', label: 'Quality issue reported' },
+              { value: 'other', label: 'Other (requires manager note)' },
+            ]}
+          />
+          {!reason && selectedTxn && (
+            <p className="mt-1.5 text-[11px] text-warning">
+              Select a refund reason before processing.
+            </p>
+          )}
         </div>
 
         {/* Search */}
@@ -148,26 +177,6 @@ export default function RefundModal({ open, onClose }: RefundModalProps) {
           )}
         </div>
 
-        {/* Reason */}
-        <div>
-          <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-            Refund Reason <span className="text-danger">*</span>
-          </label>
-          <NiceSelect
-            value={reason}
-            onChange={setReason}
-            placeholder="Select a reason..."
-            options={[
-              { value: 'wrong-item', label: 'Wrong item sold' },
-              { value: 'customer-returned', label: 'Customer returned item' },
-              { value: 'duplicate-sale', label: 'Duplicate sale / billing error' },
-              { value: 'damaged-item', label: 'Damaged item' },
-              { value: 'price-correction', label: 'Price correction' },
-              { value: 'quality-issue', label: 'Quality issue reported' },
-              { value: 'other', label: 'Other (requires manager note)' },
-            ]}
-          />
-        </div>
       </div>
     </Modal>
   );
