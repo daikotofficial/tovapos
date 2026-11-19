@@ -499,7 +499,6 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       setUsers([session.user]);
       setActiveUserIdState(session.user.id);
       setIsAuthenticated(true);
-      setIsHydrated(true);
       const can = (permission: Permission) =>
         session.user.role === 'owner' ||
         session.user.role === 'super-admin' ||
@@ -618,6 +617,11 @@ export function PosStoreProvider({ children }: { children: React.ReactNode }) {
       setVendors(storedVendors);
       setSettings(storedSettings);
       setSyncQueue(storedQueue);
+      // Do not expose the application as ready until the authoritative user,
+      // subscription settings, and initial records are loaded. Otherwise
+      // permission gates briefly evaluate against default Starter settings and
+      // show false "permission required" warnings after refresh.
+      setIsHydrated(true);
       // Repair legacy/drifted snapshots without delaying POS startup. Current
       // reads and sale commands use the indexed quantity transactionally.
       if (navigator.onLine) {
